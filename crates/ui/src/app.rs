@@ -1364,6 +1364,8 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) {
                     cx,
                 ))),
                 window_min_size: Some(size(px(780.), px(520.))),
+                #[cfg(target_os = "linux")]
+                app_id: Some("io.github.zzwong.Diffz".to_string()),
                 ..gpui_kit::component::TitleBar::window_options()
             };
             cx.spawn(async move |cx| {

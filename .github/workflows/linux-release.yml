@@ -1,0 +1,62 @@
+name: Linux release artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build and packaging dependencies
+        run: |
+          dnf install -y \
+            gcc gcc-c++ make pkg-config \
+            openssl-devel fontconfig-devel \
+            libX11-devel libXcursor-devel libXi-devel libxcb-devel \
+            libxkbcommon-devel libxkbcommon-x11-devel wayland-devel \
+            vulkan-loader-devel zstd-devel \
+            desktop-file-utils appstream rpm-build tar gzip curl
+
+      - name: Install pinned Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal
+          . "$HOME/.cargo/env"
+          rustup show
+
+      - name: Build release binary
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --locked --release -p diffz
+
+      - name: Stage and validate Linux metadata
+        run: |
+          . "$HOME/.cargo/env"
+          bash scripts/stage-linux.sh
+          desktop-file-validate \
+            dist/linux-root/usr/share/applications/io.github.zzwong.Diffz.desktop
+          appstreamcli validate --no-net \
+            dist/linux-root/usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
+
+      - name: Build RPM and portable archive
+        run: |
+          bash scripts/package-linux-rpm.sh
+          bash scripts/package-linux-tarball.sh
+
+      - name: Generate checksums
+        run: |
+          sha256sum dist/*.rpm dist/*.tar.gz > dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diffz-linux-release
+          path: dist/*.{rpm,tar.gz,SHA256SUMS}

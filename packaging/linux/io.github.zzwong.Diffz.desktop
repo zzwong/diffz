@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Diffz
+GenericName=Diff Viewer
+Comment=Review patch and diff files
+Exec=diffz --patch %f
+TryExec=diffz
+Icon=io.github.zzwong.Diffz
+Terminal=false
+Categories=Development;
+Keywords=diff;patch;review;changes;
+MimeType=text/x-patch;
+StartupNotify=true
