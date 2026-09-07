@@ -11,6 +11,7 @@ const HELP: &str = r#"diffz: review diffs and pull requests on your desktop
 Usage:
   diffz --pr owner/repo#123
   diffz --mr group/project!123
+  diffz /path/to/change.patch
   diffz --patch /path/to/change.patch
   diffz --git /repo --base main --head HEAD
   diffz --staged /repo
@@ -104,6 +105,9 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
             "--theme" => theme = Some(next()?),
             "--probe" => probe = Some(PathBuf::from(next()?)),
             "--probe-output" => probe_output = Some(PathBuf::from(next()?)),
+            _ if !arg.starts_with('-') => {
+                set_source(&mut source, OpenRequest::Patch(PathBuf::from(arg)))?
+            }
             _ => bail!("unknown argument {arg:?}; use --help"),
         }
     }
@@ -238,6 +242,57 @@ mod tests {
             parse(Vec::<String>::new()).unwrap().request,
             OpenRequest::Fixture(_)
         ));
+    }
+    #[test]
+    fn positional_patch_preserves_the_file_path() {
+        let path = "/tmp/review files/change.patch";
+        assert!(matches!(
+            parse([path.to_string(), "--inspect".into()]).unwrap().request,
+            OpenRequest::Patch(p) if p == std::path::Path::new(path)
+        ));
+    }
+    #[test]
+    fn positional_patch_conflicts_with_other_sources() {
+        for args in [
+            vec!["one.patch", "two.patch"],
+            vec!["one.patch", "--fixture", "F01"],
+            vec!["--fixture", "F01", "one.patch"],
+        ] {
+            let error = parse(args.into_iter().map(str::to_string)).unwrap_err();
+            assert_eq!(error.to_string(), "pass a single source per launch");
+        }
+    }
+    #[test]
+    fn desktop_entry_launches_with_and_without_a_file() {
+        let desktop = include_str!("../../../packaging/linux/io.github.zzwong.Diffz.desktop");
+        let exec = desktop
+            .lines()
+            .find_map(|line| line.strip_prefix("Exec="))
+            .unwrap();
+        // This entry uses unquoted tokens; the file field expands to one argument,
+        // even when its path contains spaces, and disappears for a menu launch.
+        for file in [None, Some("/tmp/review files/change.patch")] {
+            let args = exec.split_whitespace().skip(1).filter_map(|arg| {
+                if arg == "%f" {
+                    file.map(str::to_string)
+                } else {
+                    Some(arg.to_string())
+                }
+            });
+            let request = parse(args).unwrap().request;
+            match file {
+                Some(path) => {
+                    assert!(
+                        matches!(request, OpenRequest::Patch(p) if p == std::path::Path::new(path))
+                    )
+                }
+                None => assert!(matches!(request, OpenRequest::Fixture(id) if id == "F01")),
+            }
+        }
+    }
+    #[test]
+    fn explicit_patch_requires_a_value() {
+        assert!(parse(["--patch".into()]).is_err());
     }
     #[test]
     fn no_implicit_write_permission() {

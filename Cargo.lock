@@ -1481,6 +1481,7 @@ dependencies = [
  "gpui-kit",
  "serde_json",
  "smol",
+ "unicode-bidi",
  "unicode-linebreak",
  "unicode-segmentation",
 ]

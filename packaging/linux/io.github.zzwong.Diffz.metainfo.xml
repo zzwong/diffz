@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.zzwong.Diffz</id>
+  <name>Diffz</name>
+  <summary>Review patch and diff files</summary>
+  <description>
+    <p>Diffz is a desktop application for reviewing patches, pull requests, and local changes.</p>
+  </description>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <url type="homepage">https://github.com/zzwong/diffz</url>
+  <launchable type="desktop-id">io.github.zzwong.Diffz.desktop</launchable>
+  <provides>
+    <mediatype>text/x-patch</mediatype>
+  </provides>
+</component>
