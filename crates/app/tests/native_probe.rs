@@ -6,7 +6,7 @@ use std::{
 
 #[test]
 #[ignore = "requires a real native desktop and fonts"]
-fn failed_native_geometry_returns_nonzero() {
+fn unicode_native_geometry_succeeds() {
     let output = std::env::temp_dir().join(format!(
         "review-probe-{}-{}.json",
         std::process::id(),
@@ -30,9 +30,13 @@ fn failed_native_geometry_returns_nonzero() {
     let report: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
     std::fs::remove_file(output).unwrap();
-    assert_eq!(
-        report["status"], "failed",
-        "update this regression when bidi shaping is supported"
+    assert_eq!(report["status"], "native_geometry_passed");
+    assert!(
+        report["bidi_checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|case| case["passed"] == true)
     );
-    assert_eq!(status.code(), Some(2));
+    assert!(status.success());
 }
