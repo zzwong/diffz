@@ -1,0 +1,57 @@
+# Build from the authenticated checkout with scripts/package-arch.sh.
+pkgname=diffz
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Desktop diff and patch viewer'
+arch=('x86_64')
+url='https://github.com/zzwong/diffz'
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'fontconfig' 'libxcb' 'libxkbcommon'
+         'libxkbcommon-x11' 'libx11' 'libxcursor' 'libxi' 'wayland'
+         'vulkan-icd-loader' 'openssl' 'zstd' 'hicolor-icon-theme' 'ttf-dejavu')
+makedepends=('rust>=1.98' 'desktop-file-utils' 'appstream')
+checkdepends=('git')
+optdepends=('xdg-utils: open review links in a browser'
+            'git: compare local repositories'
+            'github-cli: load GitHub pull requests'
+            'glab: load GitLab merge requests'
+            'vulkan-driver: GPU rendering (choose the driver for your hardware)')
+# A fixed git snapshot is exported locally because the upstream is private.
+_commit=5db699927a39e2c2a8fa135eb79fd557783d5050
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('4cd74399d0ef9fdd3606c392da03cce1ae1c4b8408c9d8ee6f6068fb46c66ae7')
+# Cargo.toml owns LTO; retain makepkg's other build policies.
+options=('!lto')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  # Use Arch's packaged compiler, without downloading a rustup toolchain.
+  export PATH="/usr/bin:$PATH"
+  cargo fetch --locked
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export PATH="/usr/bin:$PATH"
+  cargo build --frozen --release -p diffz
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export PATH="/usr/bin:$PATH"
+  cargo test --frozen --workspace --all-features
+  desktop-file-validate packaging/linux/io.github.zzwong.Diffz.desktop
+  appstreamcli validate --no-net packaging/linux/io.github.zzwong.Diffz.metainfo.xml
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/diffz "$pkgdir/usr/bin/diffz"
+  install -Dm644 packaging/linux/io.github.zzwong.Diffz.desktop \
+    "$pkgdir/usr/share/applications/io.github.zzwong.Diffz.desktop"
+  install -Dm644 packaging/linux/io.github.zzwong.Diffz.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml"
+  install -Dm644 packaging/linux/icons/io.github.zzwong.Diffz.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.zzwong.Diffz.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
