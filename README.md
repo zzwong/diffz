@@ -60,9 +60,8 @@ Patch files and local Git comparisons do not require either provider CLI.
 
 ### Build from source
 
-macOS and Linux desktop builds are available. Fedora 44 has passed native
-build, packaging, and geometry checks; see [Fedora validation](docs/fedora.md).
-For Arch Linux and Omarchy, see [building and installing the Arch package](docs/arch-omarchy.md).
+macOS and Linux desktop builds are available. See [Linux installation](docs/linux.md)
+for distribution dependencies and Fedora, Arch Linux, and Omarchy packages.
 Windows is not supported.
 
 You need a Rust toolchain installed through [rustup](https://rustup.rs); it
@@ -85,29 +84,6 @@ open target/release/diffz.app
 
 Neither signing nor notarization is applied to the bundle.
 
-For Linux (Debian or Ubuntu), put the dependencies GPUI needs for building in
-place before anything else:
-
-```sh
-sudo apt-get install gcc g++ clang pkg-config libfontconfig-dev libwayland-dev \
-  libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev \
-  vulkan-validationlayers libvulkan1
-```
-
-For Fedora, install the native build libraries and a Vulkan runtime:
-
-```sh
-sudo dnf install gcc gcc-c++ pkgconf-pkg-config fontconfig-devel wayland-devel \
-  libxkbcommon-devel libxkbcommon-x11-devel libX11-devel libXcursor-devel \
-  libXi-devel libxcb-devel openssl-devel zstd-devel vulkan-loader-devel \
-  mesa-vulkan-drivers
-cargo build --locked --release -p diffz
-./target/release/diffz fixtures/markdown-prose/change.patch
-```
-
-Run from a terminal inside your graphical session. The backend supports
-Wayland and X11; validation so far covers Wayland. Pass `--font "Noto Sans Mono"`
-to choose the diff font explicitly.
 
 ## Usage
 
