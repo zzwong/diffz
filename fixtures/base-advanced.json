@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "Target-branch-only change must not appear as a PR deletion",
+  "merge_base": {
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "text": "title\nshared\n"
+  },
+  "target_tip": {
+    "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "text": "title\nshared\nbase-only addition\n"
+  },
+  "head": {
+    "oid": "cccccccccccccccccccccccccccccccccccccccc",
+    "text": "title\nfeature change\n"
+  },
+  "expected_comparison_base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "forbidden_deleted_text": "base-only addition",
+  "instructions": "Construct a disposable Git repo with these branch histories in T05; compare merge-base->head, not target-tip->head."
+}

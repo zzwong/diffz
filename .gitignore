@@ -1,0 +1,8 @@
+target/
+.worktrees/
+.DS_Store
+*.db
+*.db-*
+*.sqlite3
+*.sqlite3-*
+writer.lock

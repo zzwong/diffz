@@ -1,0 +1,43 @@
+name: Bug report
+description: Tell us what went wrong in diffz
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Fill in the fields below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What went wrong, in plain terms.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: What you tried, what you wanted, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: diffz version
+      description: Paste the output of `diffz --version` (or `diffz --help`).
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Name the OS and its version, such as macOS 15.5 or Ubuntu 24.04.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or both
+      description: Paste whatever output or pictures make the problem clearer.
+    validations:
+      required: false

@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest a change that would improve diffz
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Describe the problem first, then the change you want.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you working on, and where does diffz fall short today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested change
+      description: The behavior you want, plus any alternatives you weighed.
+    validations:
+      required: true

@@ -1,0 +1,6 @@
+diff --cc file.rs
+index 1111111,2222222..3333333
+--- a/file.rs
++++ b/file.rs
+@@@ -1,1 -1,1 +1,1 @@@
+++combined

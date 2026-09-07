@@ -1,0 +1,7 @@
+diff --git "a/docs/quote \"name\" \303\274.md" "b/docs/quote \"name\" \303\274.md"
+index 3367afd..3e75765 100644
+--- "a/docs/quote \"name\" \303\274.md"	
++++ "b/docs/quote \"name\" \303\274.md"	
+@@ -1 +1 @@
+-old
++new

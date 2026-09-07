@@ -1,0 +1,9 @@
+diff --git a/docs/guide.md b/docs/guide.md
+index 122004c..4ca455a 100644
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -1,2 +1,2 @@
+-# Line endings
+-Same text.
++# Line endings
++Same text.

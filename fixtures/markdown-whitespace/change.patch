@@ -1,0 +1,11 @@
+diff --git a/docs/guide.md b/docs/guide.md
+index 812783c..3d5c4d8 100644
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -1,5 +1,5 @@
+ # Whitespace
+ 
+ First line  
+-second line
++second line changed
+ 	indented
