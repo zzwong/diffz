@@ -53,10 +53,15 @@ jobs:
           bash scripts/package-linux-tarball.sh
 
       - name: Generate checksums
+        working-directory: dist
         run: |
-          sha256sum dist/*.rpm dist/*.tar.gz > dist/SHA256SUMS
+          sha256sum *.rpm *.tar.gz > SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
           name: diffz-linux-release
-          path: dist/*.{rpm,tar.gz,SHA256SUMS}
+          path: |
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error

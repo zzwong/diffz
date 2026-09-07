@@ -1,5 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#24283b"/>
-  <path d="M30 34h68M30 64h68M30 94h38" fill="none" stroke="#7dcfff" stroke-linecap="round" stroke-width="10"/>
-  <path d="m82 84 9 10 17-20" fill="none" stroke="#9ece6a" stroke-linecap="round" stroke-linejoin="round" stroke-width="10"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="tile" x1="16" y1="8" x2="112" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#293449"/>
+      <stop offset="1" stop-color="#141c2c"/>
+    </linearGradient>
+    <linearGradient id="removed" x1="24" y1="28" x2="60" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffab9c"/>
+      <stop offset="1" stop-color="#f27787"/>
+    </linearGradient>
+    <linearGradient id="added" x1="68" y1="28" x2="104" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b1f0cd"/>
+      <stop offset="1" stop-color="#62d7b0"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#tile)"/>
+  <rect x="4.5" y="4.5" width="119" height="119" rx="27.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <path d="M32 31h20a8 8 0 0 1 8 8v58a6 6 0 0 1-6 6H32a8 8 0 0 1-8-8V39a8 8 0 0 1 8-8Zm44 0h20a8 8 0 0 1 8 8v56a8 8 0 0 1-8 8H74a6 6 0 0 1-6-6V39a8 8 0 0 1 8-8Z" fill="#070d19" fill-opacity=".3"/>
+  <path d="M32 25h20a8 8 0 0 1 8 8v58a6 6 0 0 1-6 6H32a8 8 0 0 1-8-8V33a8 8 0 0 1 8-8Z" fill="url(#removed)"/>
+  <path d="M76 25h20a8 8 0 0 1 8 8v56a8 8 0 0 1-8 8H74a6 6 0 0 1-6-6V33a8 8 0 0 1 8-8Z" fill="url(#added)"/>
+  <g fill="#273349" fill-opacity=".38">
+    <rect x="32" y="37" width="20" height="4" rx="2"/>
+    <rect x="32" y="45" width="12" height="4" rx="2"/>
+    <rect x="76" y="37" width="20" height="4" rx="2"/>
+    <rect x="76" y="45" width="12" height="4" rx="2"/>
+    <rect x="32" y="81" width="20" height="4" rx="2"/>
+    <rect x="76" y="81" width="20" height="4" rx="2"/>
+  </g>
+  <g fill="none" stroke="#253247" stroke-width="5" stroke-linecap="round">
+    <path d="M34 65h16"/>
+    <path d="M78 65h16m-8-8v16"/>
+  </g>
 </svg>
