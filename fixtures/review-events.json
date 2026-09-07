@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "all_values": "synthetic; no live target authorized",
+  "cases": [
+    {
+      "name": "wrapped_continuation",
+      "selected_visual_fragment": 3,
+      "source_line": 42,
+      "source_side": "RIGHT",
+      "head_oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected_comment": {
+        "path": "docs/guide.md",
+        "line": 42,
+        "side": "RIGHT",
+        "body": "Please clarify this paragraph."
+      }
+    },
+    {
+      "name": "removed_line",
+      "source_line": 12,
+      "source_side": "LEFT",
+      "expected_comment": {
+        "path": "docs/guide.md",
+        "line": 12,
+        "side": "LEFT",
+        "body": "Why remove this guidance?"
+      }
+    },
+    {
+      "name": "range_same_side",
+      "start_source_line": 40,
+      "end_source_line": 42,
+      "expected_comment": {
+        "path": "docs/guide.md",
+        "start_line": 40,
+        "start_side": "RIGHT",
+        "line": 42,
+        "side": "RIGHT",
+        "body": "Please clarify these lines."
+      }
+    },
+    {
+      "name": "head_advanced",
+      "draft_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "current_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expected": "BlockUntilReconciled"
+    },
+    {
+      "name": "unknown_outcome",
+      "request_sent": true,
+      "response_received": false,
+      "expected_state": "UnknownOutcome",
+      "automatic_retry": false
+    },
+    {
+      "name": "ambiguous_reconciliation",
+      "matching_remote_reviews": 2,
+      "expected_state": "UnknownOutcome",
+      "automatic_retry": false
+    },
+    {
+      "name": "auth_error_is_not_absence",
+      "http_status": 403,
+      "expected": "AuthOrPermissionError",
+      "persist_negative_blob_cache": false
+    },
+    {
+      "name": "stale_save_ack",
+      "current_draft_revision": 7,
+      "acknowledged_revision": 6,
+      "expected_saved": false
+    },
+    {
+      "name": "server_pending_review",
+      "pending_review_id": 123,
+      "expected": "BlockNewSubmissionAndOfferReconciliation"
+    },
+    {
+      "name": "missing_patch",
+      "file_status": "modified",
+      "patch": null,
+      "expected": "UnavailableOrUnsupportedNotClean"
+    },
+    {
+      "name": "cross_side_range",
+      "start_side": "LEFT",
+      "end_side": "RIGHT",
+      "expected": "InvalidRange"
+    },
+    {
+      "name": "preflight_race",
+      "preflight_head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "head_after_send": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expected_payload_commit_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "must_not_claim_latest_head_certified": true
+    }
+  ]
+}

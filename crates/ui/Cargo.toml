@@ -1,0 +1,28 @@
+[package]
+name = "diffz-ui"
+description = "The GPUI front end"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+diffz-core = { workspace = true }
+serde_json = { workspace = true }
+gpui-kit = { workspace = true }
+unicode-segmentation = { workspace = true }
+anyhow = { workspace = true }
+
+smol = { workspace = true }
+unicode-linebreak = { workspace = true }
+
+[features]
+default = []
+syntax = ["diffz-core/syntax"]

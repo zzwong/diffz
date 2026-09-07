@@ -1,0 +1,8 @@
+diff --git a/docs/guide.md b/docs/guide.md
+index a315fe6..776d2d0 100644
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -1 +1 @@
+-last line
+\ No newline at end of file
++last line

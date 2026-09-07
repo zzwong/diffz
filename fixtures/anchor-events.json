@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "description": "State/geometry oracle only, not a font-layout benchmark",
+  "cases": [
+    {
+      "name": "insert_before_viewport",
+      "old_scroll_top": 100.0,
+      "insert_height_above_anchor": 40.0,
+      "expected_new_scroll_top": 140.0,
+      "expected_anchor_y_delta": 0.0,
+      "navigation_reason": null
+    },
+    {
+      "name": "highlight_only",
+      "old_scroll_top": 100.0,
+      "expected_new_scroll_top": 100.0,
+      "expected_anchor_y_delta": 0.0,
+      "navigation_reason": null
+    },
+    {
+      "name": "resize_inside_paragraph",
+      "source_line": 3,
+      "source_byte_column": 180,
+      "old_fragment_index": 2,
+      "new_fragment_index": 4,
+      "expected_source_line": 3,
+      "expected_source_byte_column": 180,
+      "navigation_reason": null
+    },
+    {
+      "name": "late_comment_in_inspector",
+      "expected_active_file_unchanged": true,
+      "expected_anchor_y_delta": 0.0,
+      "navigation_reason": null
+    },
+    {
+      "name": "stale_generation",
+      "active_generation": 8,
+      "result_generation": 7,
+      "expected": "IgnoreResult"
+    },
+    {
+      "name": "remote_revision_offer",
+      "active_snapshot": "snap-a",
+      "arriving_snapshot": "snap-b",
+      "expected_active_snapshot": "snap-a",
+      "expected_offer": "snap-b"
+    },
+    {
+      "name": "filler_hit",
+      "side": "LEFT",
+      "left_fragment_count": 1,
+      "right_fragment_count": 4,
+      "hit_visual_fragment": 3,
+      "expected_comment_target": null
+    }
+  ]
+}

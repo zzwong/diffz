@@ -1,0 +1,30 @@
+[package]
+name = "diffz"
+description.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+diffz-core = { workspace = true }
+diffz-adapters = { workspace = true }
+diffz-ui = { workspace = true, optional = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = ["desktop", "syntax"]
+desktop = ["dep:diffz-ui"]
+syntax = ["diffz-core/syntax", "diffz-ui?/syntax"]
+
+[[bin]]
+name = "diffz"
+path = "src/main.rs"

@@ -1,0 +1,50 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/adapters", "crates/ui", "crates/app"]
+default-members = ["crates/core", "crates/adapters"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Review diffs and pull requests on the desktop"
+repository = "https://github.com/zzwong/diffz"
+homepage = "https://github.com/zzwong/diffz"
+readme = "README.md"
+keywords = ["diff", "code-review", "github", "gitlab", "gpui"]
+categories = ["development-tools", "gui"]
+rust-version = "1.98"
+authors = ["Aaron Wong"]
+
+[workspace.dependencies]
+diffz-core = { path = "crates/core" }
+diffz-adapters = { path = "crates/adapters" }
+diffz-ui = { path = "crates/ui" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+sha2 = "0.11"
+thiserror = "2"
+anyhow = "1"
+unicode-segmentation = "=1.13.3"
+url = "2.5"
+rusqlite = { version = "=0.32.1", features = ["bundled"] }
+fs2 = "=0.4.3"
+libc = "0.2"
+tempfile = "3"
+gpui-kit = "=0.6.0"
+
+smol = "2"
+unicode-linebreak = "0.1.5"
+
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

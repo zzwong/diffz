@@ -1,0 +1,108 @@
+[package]
+name = "diffz-core"
+description = "Patch parsing, snapshot state, and the review model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+unicode-segmentation = { workspace = true }
+
+[features]
+default = []
+syntax = [
+    "dep:tree-sitter",
+    "dep:tree-sitter-highlight",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-typescript",
+    "dep:tree-sitter-javascript",
+    "dep:tree-sitter-json",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-go",
+    "dep:tree-sitter-c",
+    "dep:tree-sitter-cpp",
+    "dep:tree-sitter-java",
+    "dep:tree-sitter-ruby",
+    "dep:tree-sitter-bash",
+    "dep:tree-sitter-toml-ng",
+    "dep:tree-sitter-yaml",
+    "dep:tree-sitter-html",
+    "dep:tree-sitter-css",
+    "dep:tree-sitter-elixir",
+    "dep:tree-sitter-heex",
+    "dep:tree-sitter-gleam",
+]
+
+[dependencies.tree-sitter]
+version = "0.25"
+optional = true
+[dependencies.tree-sitter-highlight]
+version = "0.25"
+optional = true
+[dependencies.tree-sitter-rust]
+version = "0.24"
+optional = true
+[dependencies.tree-sitter-typescript]
+version = "0.23"
+optional = true
+[dependencies.tree-sitter-javascript]
+version = "0.25"
+optional = true
+[dependencies.tree-sitter-json]
+version = "0.24"
+optional = true
+[dependencies.tree-sitter-python]
+version = "0.25"
+optional = true
+[dependencies.tree-sitter-go]
+version = "0.25"
+optional = true
+[dependencies.tree-sitter-c]
+version = "0.24"
+optional = true
+[dependencies.tree-sitter-cpp]
+version = "0.23"
+optional = true
+[dependencies.tree-sitter-java]
+version = "0.23"
+optional = true
+[dependencies.tree-sitter-ruby]
+version = "0.23"
+optional = true
+[dependencies.tree-sitter-bash]
+version = "0.25"
+optional = true
+[dependencies.tree-sitter-toml-ng]
+version = "0.7"
+optional = true
+[dependencies.tree-sitter-yaml]
+version = "0.7"
+optional = true
+[dependencies.tree-sitter-html]
+version = "0.23"
+optional = true
+[dependencies.tree-sitter-css]
+version = "0.25"
+optional = true
+[dependencies.tree-sitter-elixir]
+version = "0.3"
+optional = true
+[dependencies.tree-sitter-heex]
+version = "0.8"
+optional = true
+[dependencies.tree-sitter-gleam]
+git = "https://github.com/gleam-lang/tree-sitter-gleam"
+rev = "c610c282ef73f830d80c1f0999dce8e83f024ef5"
+optional = true
