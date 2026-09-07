@@ -248,7 +248,7 @@ mod tests {
         let path = "/tmp/review files/change.patch";
         assert!(matches!(
             parse([path.to_string(), "--inspect".into()]).unwrap().request,
-            OpenRequest::Patch(p) if p == PathBuf::from(path)
+            OpenRequest::Patch(p) if p == std::path::Path::new(path)
         ));
     }
     #[test]
@@ -282,7 +282,9 @@ mod tests {
             let request = parse(args).unwrap().request;
             match file {
                 Some(path) => {
-                    assert!(matches!(request, OpenRequest::Patch(p) if p == PathBuf::from(path)))
+                    assert!(
+                        matches!(request, OpenRequest::Patch(p) if p == std::path::Path::new(path))
+                    )
                 }
                 None => assert!(matches!(request, OpenRequest::Fixture(id) if id == "F01")),
             }

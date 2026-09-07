@@ -1,5 +1,4 @@
 //! A real native text-backend probe, not a substitute for manual/automated reader interaction tests.
-//! This source has not been compiled or executed in the bundle author's environment.
 use crate::{native_text::NativeLine, theme::Skin};
 use diffz_core::{
     domain::{SourceDocument, digest},
@@ -81,7 +80,60 @@ fn measure(source: &str, family: &str, window: &mut Window) -> Value {
             }
         }
     }
-    json!({"schema_version":1,"status":if passed{"native_geometry_passed"}else{"failed"},"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"font_family":family,"input_digest":digest(&[source.as_bytes()]),"longest_source_line_bytes":line.len(),"cases":cases,"native_interaction_verified":false,"accessibility_verified":false,"note":"Actual GPUI/native-font measurement. This does NOT prove reader scrolling, pointer dispatch, clipboard, GPU frame latency or cross-platform correctness. Run docs/NATIVE_VALIDATION.md."})
+    let bidi_checks = bidi_checks(family, window);
+    passed &= bidi_checks.iter().all(|case| case["passed"] == true);
+    json!({"bidi_checks":bidi_checks,"schema_version":1,"status":if passed{"native_geometry_passed"}else{"failed"},"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"font_family":family,"input_digest":digest(&[source.as_bytes()]),"longest_source_line_bytes":line.len(),"cases":cases,"native_interaction_verified":false,"accessibility_verified":false,"note":"Actual GPUI/native-font measurement. This does NOT prove reader scrolling, pointer dispatch, clipboard, GPU frame latency or cross-platform correctness. Run docs/NATIVE_VALIDATION.md."})
+}
+// Small native-backend cases supplement the large fixtures with direction,
+// caret, selection, mirroring and synthetic-control width assertions.
+fn bidi_checks(family: &str, window: &mut Window) -> Vec<Value> {
+    let mut checks = vec![];
+    for (source, expected) in [("אבג", vec![4, 2, 0]), ("aאבz", vec![0, 3, 1, 5])] {
+        let n = NativeLine::shape(source, 900.0, 18.0, 30.0, false, family, window).unwrap();
+        let mut glyphs: Vec<_> = n.fragments[0]
+            .layout
+            .runs
+            .iter()
+            .flat_map(|r| &r.glyphs)
+            .collect();
+        glyphs.sort_by(|a, b| f32::from(a.position.x).total_cmp(&f32::from(b.position.x)));
+        let indices: Vec<_> = glyphs.iter().map(|g| g.index).collect();
+        let native = window.text_system().layout_line(
+            source,
+            px(18.0),
+            &[crate::native_text::run(
+                source.len(),
+                family,
+                rgb(0xffffff).into(),
+            )],
+            None,
+        );
+        let width_matches = (f32::from(native.width) - n.width).abs() < 0.1;
+        let caret = if source == "אבג" {
+            n.hit(0.1, 1.0) == Some(source.len())
+        } else {
+            n.rectangles(0..3).len() == 2
+        };
+        checks.push(json!({"source":source,"visual_indices":indices,"width_matches_native":width_matches,"passed":indices == expected && width_matches && caret}));
+    }
+    let n = NativeLine::shape("(אב)", 900.0, 18.0, 30.0, false, family, window).unwrap();
+    let native = window.text_system().layout_line(
+        "(",
+        px(18.0),
+        &[crate::native_text::run(1, family, rgb(0xffffff).into())],
+        None,
+    );
+    let left = n.fragments[0]
+        .layout
+        .runs
+        .iter()
+        .flat_map(|r| &r.glyphs)
+        .min_by(|a, b| f32::from(a.position.x).total_cmp(&f32::from(b.position.x)))
+        .unwrap();
+    checks.push(
+        json!({"source":"(אב)","passed":left.index == 5 && left.id == native.runs[0].glyphs[0].id}),
+    );
+    checks
 }
 impl Render for Probe {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

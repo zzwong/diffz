@@ -9,11 +9,14 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+mod bidi;
+
 #[derive(Clone)]
 pub struct Fragment {
     pub display: Range<usize>,
     pub layout: Arc<LineLayout>,
     pub y: f32,
+    visual: Option<Vec<bidi::VisualCluster>>,
 }
 #[derive(Clone)]
 pub struct NativeLine {
@@ -26,7 +29,7 @@ pub struct NativeLine {
 }
 #[derive(Debug, Clone)]
 pub struct ShapeError(pub String);
-fn run(len: usize, family: &str, color: Hsla) -> TextRun {
+pub(crate) fn run(len: usize, family: &str, color: Hsla) -> TextRun {
     TextRun {
         len,
         font: font(family.to_owned()),
@@ -87,7 +90,9 @@ impl NativeLine {
                 .fragments
                 .iter()
                 .map(|f| {
-                    std::mem::size_of::<LineLayout>()
+                    f.visual.as_ref().map_or(0, |v| {
+                        v.capacity() * std::mem::size_of::<bidi::VisualCluster>()
+                    }) + std::mem::size_of::<LineLayout>()
                         + f.layout
                             .runs
                             .iter()
@@ -115,6 +120,28 @@ impl NativeLine {
             ));
         }
         let display = DisplayText::new(source, 4);
+        if let Some(parts) = bidi::shape_if_needed(
+            &display.text,
+            width,
+            size,
+            line_height,
+            wrap,
+            family,
+            window,
+        ) {
+            let max_width = parts
+                .iter()
+                .map(|p| f32::from(p.layout.width))
+                .fold(0.0_f32, f32::max);
+            return Ok(Self {
+                source: source.into(),
+                display,
+                height: parts.len() as f32 * line_height,
+                line_height,
+                fragments: parts,
+                width: max_width,
+            });
+        }
         let layout = window.text_system().layout_line(
             &display.text,
             px(size),
@@ -193,6 +220,7 @@ impl NativeLine {
                 display,
                 layout: Arc::new(layout),
                 y: i as f32 * line_height,
+                visual: None,
             })
             .collect();
         let max_width = parts
@@ -226,6 +254,18 @@ impl NativeLine {
         let part = self
             .fragments
             .get((y / self.line_height).floor() as usize)?;
+        if let Some(cells) = &part.visual {
+            let cell = cells
+                .iter()
+                .filter(|c| c.right > c.left)
+                .find(|c| x < c.right)
+                .or_else(|| cells.last());
+            let display = part.display.start + cell.map_or(0, |c| c.caret(x));
+            return Some(snap_grapheme(
+                &self.source,
+                self.display.source_byte(display),
+            ));
+        }
         let display = part.display.start
             + part
                 .layout
@@ -244,6 +284,27 @@ impl NativeLine {
             let lo = start.max(p.display.start);
             let hi = end.min(p.display.end);
             if lo >= hi {
+                continue;
+            }
+            if let Some(cells) = &p.visual {
+                let mut intervals: Vec<(f32, f32)> = vec![];
+                for cell in cells {
+                    if cell.bytes.start < hi - p.display.start
+                        && cell.bytes.end > lo - p.display.start
+                    {
+                        if let Some(last) = intervals
+                            .last_mut()
+                            .filter(|last| cell.left <= last.1 + 0.01)
+                        {
+                            last.1 = last.1.max(cell.right);
+                        } else {
+                            intervals.push((cell.left, cell.right));
+                        }
+                    }
+                }
+                rects.extend(intervals.into_iter().filter(|(l, r)| r > l).map(|(l, r)| {
+                    Bounds::new(point(px(l), px(p.y)), size(px(r - l), px(self.line_height)))
+                }));
                 continue;
             }
             let x1 = p.layout.x_for_index(lo - p.display.start);
@@ -357,4 +418,84 @@ pub fn label_width(text: &str, font_size: f32, family: &str, window: &mut Window
             )
             .width,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+
+    // Native shapers return visual positions with logical UTF-8 byte indices.
+    fn line(source: &str, glyphs: &[(usize, f32)], width: f32) -> NativeLine {
+        let layout = LineLayout {
+            font_size: px(14.0),
+            width: px(width),
+            ascent: px(10.0),
+            descent: px(4.0),
+            len: source.len(),
+            runs: vec![ShapedRun {
+                font_id: FontId(0),
+                glyphs: glyphs
+                    .iter()
+                    .map(|&(index, x)| ShapedGlyph {
+                        id: GlyphId(0),
+                        position: point(px(x), px(0.0)),
+                        index,
+                        is_emoji: false,
+                    })
+                    .collect(),
+            }],
+        };
+        NativeLine {
+            source: source.into(),
+            display: DisplayText::new(source, 4),
+            fragments: vec![Fragment {
+                display: 0..source.len(),
+                visual: Some(bidi::clusters(
+                    source,
+                    &layout,
+                    &unicode_bidi::BidiInfo::new(source, None).levels,
+                )),
+                layout: Arc::new(layout),
+                y: 0.0,
+            }],
+            line_height: 20.0,
+            height: 20.0,
+            width,
+        }
+    }
+
+    #[test]
+    fn rtl_hit_testing_uses_visual_edges_with_logical_offsets() {
+        let line = line("aאבz", &[(0, 0.0), (3, 10.0), (1, 20.0), (5, 30.0)], 40.0);
+        assert_eq!(line.hit(11.0, 5.0), Some(5));
+        assert_eq!(line.hit(19.0, 5.0), Some(3));
+        assert_eq!(line.hit(21.0, 5.0), Some(3));
+        assert_eq!(line.hit(29.0, 5.0), Some(1));
+    }
+
+    #[test]
+    fn mixed_direction_selection_can_have_disjoint_visual_rectangles() {
+        let line = line("aאבz", &[(0, 0.0), (3, 10.0), (1, 20.0), (5, 30.0)], 40.0);
+        let rects = line.rectangles(0..3); // Select 'a' and alef, but not bet.
+        let intervals: Vec<_> = rects
+            .iter()
+            .map(|r| (f32::from(r.origin.x), f32::from(r.size.width)))
+            .collect();
+        assert_eq!(intervals, vec![(0.0, 10.0), (20.0, 10.0)]);
+    }
+
+    #[test]
+    fn singleton_rtl_cluster_has_reversed_caret_edges() {
+        let line = line("א", &[(0, 0.0)], 10.0);
+        assert_eq!(line.hit(1.0, 5.0), Some(2));
+        assert_eq!(line.hit(9.0, 5.0), Some(0));
+    }
+    #[test]
+    fn invisible_direction_controls_do_not_select_adjacent_ink() {
+        let line = line("a\u{202e}b\u{202c}", &[(0, 0.0), (4, 10.0)], 20.0);
+        assert!(line.rectangles(1..4).is_empty());
+        assert!(line.rectangles(5..8).is_empty());
+        assert_eq!(line.rectangles(4..5).len(), 1);
+    }
 }
