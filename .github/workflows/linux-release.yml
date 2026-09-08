@@ -14,7 +14,9 @@ jobs:
     runs-on: ubuntu-24.04
     container: fedora:44
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install build and packaging dependencies
         run: |
@@ -57,11 +59,61 @@ jobs:
         run: |
           sha256sum *.rpm *.tar.gz > SHA256SUMS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: diffz-linux-release
           path: |
             dist/*.rpm
             dist/*.tar.gz
             dist/SHA256SUMS
+          if-no-files-found: error
+
+  arch:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install Git for checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Only the initial fetch needs credentials; later Git runs as builder.
+          persist-credentials: false
+          # The package recipe pins a source commit, which may precede this ref.
+          fetch-depth: 0
+
+      - name: Install dependencies declared by the Arch recipe
+        shell: bash
+        run: |
+          source packaging/arch/PKGBUILD
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$pkgver" ]]; then
+            echo 'Update the Arch package version for this release.' >&2
+            exit 1
+          fi
+          if ! git diff --quiet "$_commit" HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml crates fixtures packaging/linux LICENSE; then
+            echo 'Update the Arch source commit and checksum to include the application changes.' >&2
+            exit 1
+          fi
+          pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}"
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Build and test Arch package as an unprivileged user
+        shell: bash
+        run: |
+          runuser -u builder -- bash scripts/package-arch.sh --noconfirm
+          cd target/arch-package
+          sha256sum diffz-[0-9]*.pkg.tar.zst > SHA256SUMS
+
+      - name: Verify Arch package installation
+        run: |
+          pacman -U --noconfirm target/arch-package/diffz-[0-9]*.pkg.tar.zst
+          diffz --version
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diffz-arch-release
+          path: |
+            target/arch-package/diffz-[0-9]*.pkg.tar.zst
+            target/arch-package/SHA256SUMS
           if-no-files-found: error

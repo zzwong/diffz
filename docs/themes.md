@@ -5,6 +5,15 @@ semantic skin tokens of the diff view; they also feed the gpui-component
 widget palette. The picker panel shows every available theme, and the theme
 file in use reloads as you edit it.
 
+## Selecting a palette
+
+Choose **Omarchy current theme** in the theme picker or launch with
+`diffz --theme current change.patch`. This reads
+`~/.local/state/omarchy/current/theme/colors.toml`. The choice is saved;
+Omarchy colors are opt-in, not automatically selected on first launch.
+The app checks the active file's modification time every two seconds.
+A named theme or `--theme /path/to/colors.toml` works on other desktops too.
+
 ## `colors.toml` format
 
 A theme is either a directory containing `colors.toml` or the `colors.toml`

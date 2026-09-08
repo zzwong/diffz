@@ -28,8 +28,8 @@ validation before being offered.
 
 ## Publish after the repository becomes public
 
-1. Confirm the repository is public. Keep Actions disabled until then; this
-   repository currently has no build or release workflow.
+1. Confirm the repository is ready for public distribution and review the
+   supported platforms and installation instructions.
 2. Move the first release's Unreleased entries under `0.1.0` with the actual
    publication date. Leave an empty Unreleased section for subsequent work.
 3. Amend the initial commit if retaining single-commit history, and finish the
@@ -42,7 +42,12 @@ validation before being offered.
 6. Publish the release after reviewing the assets. Update the README's pending
    download notice to point to the published release and list its actual assets.
 
-Do not rewrite a published release tag. Any future automated release workflow
-must be manually triggered and skip its jobs when `github.event.repository.private`
-is true. Adding that guard is not a substitute for keeping Actions disabled
-while this repository is private.
+Do not rewrite a published release tag.
+
+## Linux artifacts
+
+The Linux artifact workflow builds Fedora and Arch packages on `v*` tags or
+manual dispatch. It uploads packages and checksum manifests as workflow
+artifacts; attaching them to a GitHub release is a separate publication step.
+See [Linux](linux.md) for local packaging commands. Update the Arch recipe's
+source pin, checksum and package version before creating a release tag.

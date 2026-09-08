@@ -60,8 +60,9 @@ Patch files and local Git comparisons do not require either provider CLI.
 
 ### Build from source
 
-macOS is the supported desktop platform. Linux desktop behavior has not yet
-been verified, so Linux binary releases are deferred. Windows is not supported.
+macOS and Linux desktop builds are available. See [Linux installation](docs/linux.md)
+for distribution dependencies and Fedora, Arch Linux, and Omarchy packages.
+Windows is not supported.
 
 You need a Rust toolchain installed through [rustup](https://rustup.rs); it
 reads the pinned version from `rust-toolchain.toml` on its own. Install `gh` or
@@ -83,14 +84,6 @@ open target/release/diffz.app
 
 Neither signing nor notarization is applied to the bundle.
 
-For Linux (Debian or Ubuntu), put the dependencies GPUI needs for building in
-place before anything else:
-
-```sh
-sudo apt-get install gcc g++ clang pkg-config libfontconfig-dev libwayland-dev \
-  libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev \
-  vulkan-validationlayers libvulkan1
-```
 
 ## Usage
 
