@@ -204,6 +204,11 @@ pub(super) fn shape_if_needed(
     family: &str,
     window: &mut Window,
 ) -> Option<Vec<Fragment>> {
+    // ASCII cannot contain RTL characters or directional controls. Avoid the
+    // paragraph-sized bidi allocations for ordinary source lines.
+    if text.is_ascii() {
+        return None;
+    }
     let bidi = BidiInfo::new(text, None);
     if !bidi.has_rtl() && !text.chars().any(control) {
         return None;

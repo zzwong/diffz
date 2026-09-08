@@ -131,6 +131,7 @@ pub struct Viewport {
     width: f32,
     height: f32,
     dirty: bool,
+    pending_anchor: bool,
     pending_scroll: f32,
     cache: HashMap<usize, Arc<MeasuredRow>>,
     cache_bytes: usize,
@@ -138,8 +139,16 @@ pub struct Viewport {
     pub hover_cursor: CursorStyle,
     height_index: HeightIndex,
     digits: usize,
+    /// Display-row positions of hunk headers, kept in sync when rows change.
+    hunk_rows: Vec<usize>,
     /// Byte range on the anchored line to reveal horizontally; `restore_anchor` clears it.
     focus: Option<Range<usize>>,
+}
+fn hunk_rows(rows: &[DisplayRow]) -> Vec<usize> {
+    rows.iter()
+        .enumerate()
+        .filter_map(|(i, row)| matches!(row, DisplayRow::Hunk { .. }).then_some(i))
+        .collect()
 }
 impl Viewport {
     pub fn new(
@@ -182,6 +191,7 @@ impl Viewport {
             comment_lines,
             draft_lines: Default::default(),
             digits,
+            hunk_rows: hunk_rows(&rows),
             height_index: HeightIndex::new(rows.len(), 28.0),
             snapshot,
             file,
@@ -203,6 +213,7 @@ impl Viewport {
             width: 0.0,
             height: 0.0,
             dirty: true,
+            pending_anchor: false,
             focus: None,
             pending_scroll: 0.0,
             cache: HashMap::new(),
@@ -236,6 +247,7 @@ impl Viewport {
                     .file(&self.file)
                     .map_or_else(Vec::new, |f| presentation::rows(f, split)),
             );
+            self.hunk_rows = hunk_rows(&self.rows);
         }
         if wrap && !self.wrap {
             self.horizontal = 0.0;
@@ -277,7 +289,7 @@ impl Viewport {
             viewport_y: self.font_size * 3.0,
             horizontal: self.horizontal,
         });
-        self.dirty = true;
+        self.pending_anchor = true;
         self.pending_scroll = 0.0;
     }
     /// Reveal `start` and scroll horizontally until its byte range fits.
@@ -289,18 +301,15 @@ impl Viewport {
         }
     }
     pub fn next_hunk(&mut self, forward: bool) -> Option<(usize, usize)> {
-        let hunks: Vec<_> = self
-            .rows
-            .iter()
-            .enumerate()
-            .filter_map(|(i, r)| matches!(r, DisplayRow::Hunk { .. }).then_some(i))
-            .collect();
         let current = self.hunk_target.unwrap_or(self.cursor.row);
-        let target = if forward {
-            hunks.iter().copied().find(|&i| i > current)
+        let index = if forward {
+            self.hunk_rows.partition_point(|&row| row <= current)
         } else {
-            hunks.iter().copied().rev().find(|&i| i < current)
-        }?;
+            self.hunk_rows
+                .partition_point(|&row| row < current)
+                .checked_sub(1)?
+        };
+        let target = *self.hunk_rows.get(index)?;
         self.hunk_target = Some(target);
         self.cursor = Cursor {
             row: target,
@@ -308,10 +317,7 @@ impl Viewport {
         };
         self.anchor = None;
         self.pending_scroll = 0.;
-        Some((
-            hunks.iter().position(|&i| i == target).unwrap() + 1,
-            hunks.len(),
-        ))
+        Some((index + 1, self.hunk_rows.len()))
     }
     fn measure(&mut self, index: usize, window: &mut Window) -> Arc<MeasuredRow> {
         if let Some(row) = self.cache.get(&index) {
@@ -514,17 +520,25 @@ impl Viewport {
             }
         }
     }
-    pub fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window) -> Frame {
-        let full_bounds = bounds;
-        let width = f32::from(bounds.size.width).max(1.0);
-        self.height = f32::from(bounds.size.height);
+    fn prepare_geometry(&mut self, width: f32) -> bool {
         if self.dirty || (width - self.width).abs() > 0.1 {
             self.width = width;
             self.cache.clear();
             self.cache_bytes = 0;
             self.height_index = HeightIndex::new(self.rows.len(), self.font_size * 1.4 + PAD * 2.0);
             self.max_horizontal = 0.0;
+            return true;
+        }
+        false
+    }
+    pub fn frame(&mut self, bounds: Bounds<Pixels>, window: &mut Window) -> Frame {
+        let full_bounds = bounds;
+        let width = f32::from(bounds.size.width).max(1.0);
+        self.height = f32::from(bounds.size.height);
+        let geometry_changed = self.prepare_geometry(width);
+        if geometry_changed || self.pending_anchor {
             self.restore_anchor(window);
+            self.pending_anchor = false;
             self.dirty = false;
         }
         self.cursor.offset += std::mem::take(&mut self.pending_scroll);
@@ -1352,11 +1366,8 @@ impl Viewport {
             return None;
         }
         let h = self
-            .rows
-            .iter()
-            .take(row + 1)
-            .filter(|r| matches!(r, DisplayRow::Hunk { .. }))
-            .count()
+            .hunk_rows
+            .partition_point(|&header| header <= row)
             .saturating_sub(1);
         let file = self.snapshot.file(&self.file)?;
         let current = file.hunks.get(h)?;
@@ -1405,19 +1416,16 @@ impl Viewport {
         new: u32,
         lines: Vec<String>,
     ) {
-        let headers: Vec<_> = self
-            .rows
-            .iter()
-            .enumerate()
-            .filter_map(|(i, r)| matches!(r, DisplayRow::Hunk { .. }).then_some(i))
-            .collect();
-        let Some(&header) = headers.get(hunk) else {
+        let Some(&header) = self.hunk_rows.get(hunk) else {
             return;
         };
         let index = if above {
             header + 1
         } else {
-            headers.get(hunk + 1).copied().unwrap_or(self.rows.len())
+            self.hunk_rows
+                .get(hunk + 1)
+                .copied()
+                .unwrap_or(self.rows.len())
         };
         let count = lines.len() as u32;
         let rows = lines.into_iter().enumerate().map(|(i, text)| {
@@ -1436,6 +1444,9 @@ impl Viewport {
             }
         });
         Arc::make_mut(&mut self.rows).splice(index..index, rows);
+        for header in &mut self.hunk_rows[hunk + 1..] {
+            *header += count as usize;
+        }
         let entry = self.expanded.entry(hunk).or_default();
         if above {
             entry.0 += count;
@@ -1500,6 +1511,7 @@ mod hunk_navigation_tests {
             DisplayRow::Notice("context".into()),
             hunk(),
         ]);
+        v.hunk_rows = super::hunk_rows(&v.rows);
         assert_eq!(v.next_hunk(true), Some((2, 3)));
         v.cursor = Cursor::default(); // A short file remains scrolled to the top.
         assert_eq!(v.next_hunk(true), Some((3, 3)));
@@ -1543,6 +1555,102 @@ mod context_tests {
         let file = snapshot.patch.files[0].id.clone();
         Viewport::new(snapshot, file, false, false, 14., "Menlo".into(), None)
     }
+    // Isolated context-control CPU cost, excluding native layout and rendering.
+    // Run with: cargo test -p diffz-ui --release --lib benchmark_context_controls -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn benchmark_context_controls() {
+        use std::{hint::black_box, time::Instant};
+        let mut patch = String::from(
+            "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1,100000 +1,100000 @@\n",
+        );
+        patch.push_str(&" context\n".repeat(100000));
+        patch.push_str("@@ -110000,1 +110000,1 @@\n-old\n+new\n");
+        let v = viewport(patch.as_bytes());
+        let started = Instant::now();
+        let iterations = 1000;
+        for _ in 0..iterations {
+            black_box(v.context_labels(black_box(100001)));
+        }
+        println!(
+            "context_controls_benchmark rows={} iterations={iterations} ns_per_lookup={:.0}",
+            v.rows.len(),
+            started.elapsed().as_nanos() as f64 / iterations as f64
+        );
+    }
+
+    #[test]
+    fn context_controls_follow_hunk_rows_after_split_and_expansion() {
+        let mut v = viewport(b"diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -20,1 +20,1 @@\n-old\n+new\n@@ -35,1 +35,1 @@\n-old2\n+new2\n");
+        for split in [false, true, false] {
+            v.configure(split, false, 14.0);
+            v.insert_context(0, true, 17, 17, vec!["context".into(); 3]);
+            let second = v
+                .rows
+                .iter()
+                .position(|r| {
+                    matches!(
+                        r,
+                        diffz_core::presentation::DisplayRow::Hunk {
+                            source_line: 35,
+                            ..
+                        }
+                    )
+                })
+                .unwrap();
+            assert_eq!(
+                v.plan_for_row(second, ContextRequest::Above),
+                Some((1, 25, 25, 10))
+            );
+            assert_eq!(
+                v.plan_for_row(second + 1, ContextRequest::All),
+                Some((1, 21, 21, 14))
+            );
+            v.hunk_target = Some(second);
+            assert_eq!(v.next_hunk(false), Some((1, 2)));
+            assert_eq!(v.next_hunk(true), Some((2, 2)));
+        }
+    }
+
+    #[test]
+    fn revealing_a_source_keeps_geometry_cached_until_resize() {
+        use super::MeasuredRow;
+        use diffz_core::domain::{Side, SourcePoint};
+        let mut v = viewport(
+            b"diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+        );
+        v.width = 800.0;
+        v.dirty = false;
+        let measured = Arc::new(MeasuredRow {
+            cells: vec![],
+            label: Some("measured".into()),
+            height: 60.0,
+            unified: true,
+            old_number: None,
+            band: 0.0,
+        });
+        v.cache.insert(0, measured.clone());
+        v.cache_bytes = measured.estimated_bytes();
+        v.height_index.update(0, 60.0).unwrap();
+        v.max_horizontal = 123.0;
+        v.reveal(SourcePoint {
+            snapshot: v.snapshot.id.clone(),
+            file: v.file.clone(),
+            side: Side::Right,
+            line: 1,
+            byte_column: 0,
+        });
+        assert!(!v.prepare_geometry(800.0));
+        assert!(Arc::ptr_eq(v.cache.get(&0).unwrap(), &measured));
+        assert_eq!(v.cache_bytes, measured.estimated_bytes());
+        assert_eq!(v.height_index.prefix(1), 60.0);
+        assert_eq!(v.max_horizontal, 123.0);
+        assert!(v.prepare_geometry(801.0));
+        assert!(v.cache.is_empty());
+        assert_eq!(v.cache_bytes, 0);
+        assert_eq!(v.max_horizontal, 0.0);
+    }
+
     #[test]
     fn controls_are_line_aware() {
         // An additions-only file hides no context above or below.

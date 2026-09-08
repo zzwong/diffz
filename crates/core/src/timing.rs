@@ -3,7 +3,8 @@
 //! startup cost and observe the whole path, including dynamic loading.
 use std::sync::atomic::{AtomicBool, Ordering};
 
-fn enabled() -> bool {
+/// Whether optional startup instrumentation is enabled for this process.
+pub fn enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("DIFFZ_TIMING").is_some())
 }

@@ -109,7 +109,7 @@ fn is_heading(line: &str) -> bool {
 
 /// One hunk side: kept rows plus their line numbers, grouped as blocks.
 struct Side {
-    lines: Vec<String>,
+    lines: Vec<std::sync::Arc<str>>,
     nums: Vec<u32>,
     blocks: Vec<Range<usize>>,
 }
@@ -143,7 +143,7 @@ fn build_side(
             nums.push(num(row).unwrap_or(0));
         }
     }
-    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let refs: Vec<&str> = lines.iter().map(|line| line.as_ref()).collect();
     let blocks = blocks(&refs);
     Side {
         lines,
