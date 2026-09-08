@@ -83,6 +83,11 @@ dpkg-gencontrol -pdiffz -v"$version" -P"$root" -DArchitecture="$arch"
   find usr -type f -print0 | sort -z | xargs -0 md5sum > DEBIAN/md5sums
 )
 
+# Shared workspaces can propagate setgid to metadata and payload directories.
+# Five octal digits explicitly clear it; GNU chmod 0755 preserves directory SGID.
+# Normalize only our private copy, never the caller's shared staging tree.
+find "$root" -type d -exec chmod 00755 {} +
+
 package="$dist/diffz_${version}_${arch}.deb"
 dpkg-deb --root-owner-group -Zxz --build "$root" "$package"
 echo "Created Debian package: $package"

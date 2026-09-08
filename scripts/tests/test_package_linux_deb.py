@@ -94,6 +94,21 @@ class DebianPackageTests(unittest.TestCase):
         self.assertFalse((self.repo / "debian").exists())
         self.assertFalse(list(self.dist.glob(".deb-build.*")))
 
+    def test_builds_under_setgid_output_without_special_directory_bits(self):
+        # Shared workspaces commonly inherit SGID. umask alone cannot clear it.
+        self.dist.mkdir()
+        self.dist.chmod(0o2775)
+        package = self.built_package()
+        for option in ("--ctrl-tarfile", "--fsys-tarfile"):
+            archive = subprocess.check_output(["dpkg-deb", option, str(package)])
+            with tarfile.open(fileobj=io.BytesIO(archive)) as payload:
+                for entry in payload:
+                    if entry.isdir():
+                        self.assertEqual(entry.mode & 0o7000, 0, entry.name)
+        # Only the private package tree may be normalized, not the output dir.
+        self.assertEqual(self.dist.stat().st_mode & 0o2777, 0o2775)
+        self.assertFalse(list(self.dist.glob(".deb-build.*")))
+
     def test_distro_revision_and_prerelease_version(self):
         (self.repo / "Cargo.toml").write_text('[workspace.package]\nversion = "1.2.3-rc.1"\n')
         package = self.built_package(DIFFZ_DEB_REVISION="2~ubuntu24.04")
