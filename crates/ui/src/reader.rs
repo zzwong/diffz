@@ -779,6 +779,19 @@ impl Render for Workbench {
                     .child(self.panel_divider(false, cx)),
             );
         }
+        if diffz_core::timing::enabled() && self.active.is_some() {
+            body = body.child(
+                canvas(
+                    |_, _, _| (),
+                    |_, _, _, _| {
+                        static FIRST_PAINT: std::sync::Once = std::sync::Once::new();
+                        FIRST_PAINT.call_once(|| diffz_core::timing::mark("first content paint"));
+                    },
+                )
+                .absolute()
+                .size(px(1.)),
+            );
+        }
         let footer = self.footer(window, cx);
         let mut root = div()
             .id("workbench")

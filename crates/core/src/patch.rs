@@ -53,7 +53,7 @@ pub enum RowKind {
 pub struct PatchRow {
     pub old_line: Option<u32>,
     pub new_line: Option<u32>,
-    pub text: String,
+    pub text: std::sync::Arc<str>,
     pub ending: LineEnding,
     pub kind: RowKind,
 }

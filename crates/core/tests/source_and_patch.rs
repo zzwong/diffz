@@ -121,8 +121,8 @@ fn counted_hunk_ignores_header_looking_source() {
         ParseLimits::default(),
     )
     .unwrap();
-    assert_eq!(p.files[0].hunks[0].rows[0].text, "-- source");
-    assert_eq!(p.files[0].hunks[0].rows[1].text, "++ source");
+    assert_eq!(p.files[0].hunks[0].rows[0].text.as_ref(), "-- source");
+    assert_eq!(p.files[0].hunks[0].rows[1].text.as_ref(), "++ source");
 }
 #[test]
 fn duplicate_paths_are_rejected() {

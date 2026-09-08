@@ -81,6 +81,113 @@ pub fn measured_breaks(
     }
     parts
 }
+/// Split an already shaped LTR line without changing native glyphs or clusters.
+fn ltr_fragments(
+    text: &str,
+    layout: Arc<LineLayout>,
+    width: Option<f32>,
+    line_height: f32,
+) -> std::result::Result<Vec<Fragment>, ShapeError> {
+    // A single ordered fragment already has the native byte indices and origins
+    // we need. Keep its shared glyph storage instead of building break maps and
+    // cloning every glyph. Unusual native order still takes the checked path.
+    if width.is_none_or(|w| f32::from(layout.width) <= w.max(1.0)) && layout.len == text.len() {
+        let mut previous = (0, 0.0);
+        let ordered = layout.runs.iter().flat_map(|run| &run.glyphs).all(|g| {
+            let current = (g.index, f32::from(g.position.x));
+            let ordered =
+                current.0 < text.len() && current.0 >= previous.0 && current.1 >= previous.1;
+            previous = current;
+            ordered
+        });
+        if ordered
+            && previous.1 <= f32::from(layout.width)
+            && (!text.is_empty() || layout.width == px(0.0))
+        {
+            return Ok(vec![Fragment {
+                display: 0..text.len(),
+                layout,
+                y: 0.0,
+                visual: None,
+            }]);
+        }
+    }
+    let mut positions: BTreeMap<usize, f32> = BTreeMap::new();
+    positions.insert(0, 0.0);
+    for r in &layout.runs {
+        for g in &r.glyphs {
+            positions.entry(g.index).or_insert(f32::from(g.position.x));
+        }
+    }
+    positions.insert(text.len(), f32::from(layout.width));
+    let mut valid: HashSet<usize> = text.grapheme_indices(true).map(|(i, _)| i).collect();
+    valid.insert(text.len());
+    let clusters: Vec<_> = positions
+        .into_iter()
+        .filter(|(i, _)| valid.contains(i))
+        .collect();
+    if clusters.windows(2).any(|w| w[1].1 + 0.01 < w[0].1) {
+        return Err(ShapeError(
+            "native glyph order needs bidi support; this line was neither reordered nor clipped"
+                .into(),
+        ));
+    }
+    let preferred: HashSet<_> = unicode_linebreak::linebreaks(text)
+        .map(|(i, _)| i)
+        .collect();
+    let ranges = measured_breaks(&clusters, &preferred, width);
+    let x_at = |i: usize| {
+        clusters
+            .binary_search_by_key(&i, |p| p.0)
+            .ok()
+            .map_or(f32::from(layout.width), |n| clusters[n].1)
+    };
+    let mut layouts: Vec<LineLayout> = ranges
+        .iter()
+        .map(|range| LineLayout {
+            font_size: layout.font_size,
+            width: px((x_at(range.end) - x_at(range.start)).max(0.0)),
+            ascent: layout.ascent,
+            descent: layout.descent,
+            runs: vec![],
+            len: range.len(),
+        })
+        .collect();
+    // Retain glyph IDs, fallback runs, and cluster locations from native shaping. Fragments are not reshaped.
+    for run in &layout.runs {
+        let mut buckets: Vec<Vec<ShapedGlyph>> = (0..ranges.len()).map(|_| vec![]).collect();
+        for glyph in &run.glyphs {
+            let ix = ranges.partition_point(|r| r.end <= glyph.index);
+            if ix >= ranges.len() {
+                continue;
+            }
+            let mut g = glyph.clone();
+            g.index -= ranges[ix].start;
+            g.position.x -= px(x_at(ranges[ix].start));
+            buckets[ix].push(g);
+        }
+        for (i, glyphs) in buckets.into_iter().enumerate() {
+            if !glyphs.is_empty() {
+                layouts[i].runs.push(ShapedRun {
+                    font_id: run.font_id,
+                    glyphs,
+                });
+            }
+        }
+    }
+    let parts = ranges
+        .into_iter()
+        .zip(layouts)
+        .enumerate()
+        .map(|(i, (display, layout))| Fragment {
+            display,
+            layout: Arc::new(layout),
+            y: i as f32 * line_height,
+            visual: None,
+        })
+        .collect();
+    Ok(parts)
+}
 impl NativeLine {
     pub fn estimated_bytes(&self) -> usize {
         self.source.capacity()
@@ -148,81 +255,7 @@ impl NativeLine {
             &[run(display.text.len(), family, rgb(0xffffff).into())],
             None,
         );
-        let mut positions: BTreeMap<usize, f32> = BTreeMap::new();
-        positions.insert(0, 0.0);
-        for r in &layout.runs {
-            for g in &r.glyphs {
-                positions.entry(g.index).or_insert(f32::from(g.position.x));
-            }
-        }
-        positions.insert(display.text.len(), f32::from(layout.width));
-        let mut valid: HashSet<usize> = display
-            .text
-            .grapheme_indices(true)
-            .map(|(i, _)| i)
-            .collect();
-        valid.insert(display.text.len());
-        let clusters: Vec<_> = positions
-            .into_iter()
-            .filter(|(i, _)| valid.contains(i))
-            .collect();
-        if clusters.windows(2).any(|w| w[1].1 + 0.01 < w[0].1) {
-            return Err(ShapeError("native glyph order needs bidi support; this line was neither reordered nor clipped".into()));
-        }
-        let preferred: HashSet<_> = unicode_linebreak::linebreaks(&display.text)
-            .map(|(i, _)| i)
-            .collect();
-        let ranges = measured_breaks(&clusters, &preferred, wrap.then_some(width));
-        let x_at = |i: usize| {
-            clusters
-                .binary_search_by_key(&i, |p| p.0)
-                .ok()
-                .map_or(f32::from(layout.width), |n| clusters[n].1)
-        };
-        let mut layouts: Vec<LineLayout> = ranges
-            .iter()
-            .map(|range| LineLayout {
-                font_size: layout.font_size,
-                width: px((x_at(range.end) - x_at(range.start)).max(0.0)),
-                ascent: layout.ascent,
-                descent: layout.descent,
-                runs: vec![],
-                len: range.len(),
-            })
-            .collect();
-        // Retain glyph IDs, fallback runs, and cluster locations from native shaping. Fragments are not reshaped.
-        for run in &layout.runs {
-            let mut buckets: Vec<Vec<ShapedGlyph>> = (0..ranges.len()).map(|_| vec![]).collect();
-            for glyph in &run.glyphs {
-                let ix = ranges.partition_point(|r| r.end <= glyph.index);
-                if ix >= ranges.len() {
-                    continue;
-                }
-                let mut g = glyph.clone();
-                g.index -= ranges[ix].start;
-                g.position.x -= px(x_at(ranges[ix].start));
-                buckets[ix].push(g);
-            }
-            for (i, glyphs) in buckets.into_iter().enumerate() {
-                if !glyphs.is_empty() {
-                    layouts[i].runs.push(ShapedRun {
-                        font_id: run.font_id,
-                        glyphs,
-                    });
-                }
-            }
-        }
-        let parts: Vec<_> = ranges
-            .into_iter()
-            .zip(layouts)
-            .enumerate()
-            .map(|(i, (display, layout))| Fragment {
-                display,
-                layout: Arc::new(layout),
-                y: i as f32 * line_height,
-                visual: None,
-            })
-            .collect();
+        let parts = ltr_fragments(&display.text, layout, wrap.then_some(width), line_height)?;
         let max_width = parts
             .iter()
             .map(|p| f32::from(p.layout.width))
@@ -462,6 +495,133 @@ mod tests {
             line_height: 20.0,
             height: 20.0,
             width,
+        }
+    }
+
+    #[test]
+    fn single_fragments_share_native_glyph_storage() {
+        for (source, glyphs, width) in [
+            ("abc", vec![(0, 0.0), (1, 10.0), (2, 20.0)], 30.0),
+            ("e\u{301}🙂", vec![(0, 0.0), (1, 5.0), (3, 10.0)], 30.0),
+            ("", vec![], 0.0),
+        ] {
+            let native = line(source, &glyphs, width).fragments.remove(0).layout;
+            for wrap_width in [None, Some(width), Some(width + 10.0)] {
+                let parts = ltr_fragments(source, native.clone(), wrap_width, 20.0).unwrap();
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].display, 0..source.len());
+                assert_eq!(parts[0].y, 0.0);
+                assert!(Arc::ptr_eq(&parts[0].layout, &native), "{source:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn wrapping_retains_native_ligatures_graphemes_and_fallback_fonts() {
+        let source = "fi e\u{301}🙂z";
+        let mut native = line(
+            source,
+            &[
+                (0, 0.0),
+                (2, 20.0),
+                (3, 30.0),
+                (4, 35.0),
+                (6, 40.0),
+                (10, 60.0),
+            ],
+            70.0,
+        )
+        .fragments
+        .remove(0)
+        .layout;
+        let layout = Arc::get_mut(&mut native).unwrap();
+        let mut glyphs = std::mem::take(&mut layout.runs[0].glyphs);
+        let last = glyphs.pop().unwrap();
+        let emoji = glyphs.pop().unwrap();
+        layout.runs = vec![
+            ShapedRun {
+                font_id: FontId(0),
+                glyphs,
+            },
+            ShapedRun {
+                font_id: FontId(1),
+                glyphs: vec![emoji],
+            },
+            ShapedRun {
+                font_id: FontId(0),
+                glyphs: vec![last],
+            },
+        ];
+        let parts = ltr_fragments(source, native, Some(30.0), 20.0).unwrap();
+        assert_eq!(
+            parts.iter().map(|p| p.display.clone()).collect::<Vec<_>>(),
+            vec![0..3, 3..10, 10..11]
+        );
+        assert_eq!(
+            parts
+                .iter()
+                .map(|p| (f32::from(p.layout.width), p.y))
+                .collect::<Vec<_>>(),
+            vec![(30.0, 0.0), (30.0, 20.0), (10.0, 40.0)]
+        );
+        assert_eq!(parts[0].layout.runs[0].glyphs.len(), 2); // The fi ligature stays intact.
+        let middle = &parts[1].layout;
+        assert_eq!(middle.runs[0].font_id, FontId(0));
+        assert_eq!(middle.runs[1].font_id, FontId(1));
+        assert_eq!(
+            middle.runs[0]
+                .glyphs
+                .iter()
+                .map(|g| (g.index, f32::from(g.position.x)))
+                .collect::<Vec<_>>(),
+            vec![(0, 0.0), (1, 5.0)]
+        );
+        assert_eq!(middle.runs[1].glyphs[0].index, 3);
+        assert_eq!(f32::from(middle.runs[1].glyphs[0].position.x), 10.0);
+    }
+
+    #[test]
+    fn unwrapped_layout_still_checks_native_order_and_end_markers() {
+        for glyphs in [
+            vec![(0, 0.0), (1, 20.0), (2, 10.0)],
+            vec![(0, 0.0), (2, 10.0), (1, 20.0)],
+        ] {
+            let native = line("abc", &glyphs, 30.0).fragments.remove(0).layout;
+            assert!(ltr_fragments("abc", native, None, 20.0).is_err());
+        }
+        let native = line("ab", &[(0, 0.0), (1, 10.0), (2, 20.0)], 20.0)
+            .fragments
+            .remove(0)
+            .layout;
+        let parts = ltr_fragments("ab", native, None, 20.0).unwrap();
+        assert_eq!(parts[0].layout.runs[0].glyphs.len(), 2);
+    }
+
+    // Isolated fragmentation CPU cost, excluding native shaping and rendering.
+    // Run with: cargo test -p diffz-ui --release --lib benchmark_ltr_fragments -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn benchmark_ltr_fragments() {
+        use std::{hint::black_box, time::Instant};
+        for (len, iterations) in [(80, 20000), (10000, 300)] {
+            let text = "a".repeat(len);
+            let glyphs = (0..len).map(|i| (i, i as f32 * 8.0)).collect::<Vec<_>>();
+            let native = line(&text, &glyphs, len as f32 * 8.0)
+                .fragments
+                .remove(0)
+                .layout;
+            for width in [None, Some(560.0)] {
+                let started = Instant::now();
+                for _ in 0..iterations {
+                    black_box(
+                        ltr_fragments(black_box(&text), native.clone(), width, 20.0).unwrap(),
+                    );
+                }
+                println!(
+                    "ltr_fragment_benchmark len={len} width={width:?} iterations={iterations} ns_per_line={:.0}",
+                    started.elapsed().as_nanos() as f64 / iterations as f64
+                );
+            }
         }
     }
 

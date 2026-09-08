@@ -75,7 +75,9 @@ impl Store {
         if !s.verify_identity() {
             return Err("snapshot identity and its source data do not agree".into());
         }
-        self.db()?.execute("INSERT INTO snapshots(id,title,data) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET title=excluded.title,data=excluded.data,updated_at=unixepoch()",params![s.id.0,s.title,serde_json::to_string(s)?])?;
+        // Encoding a large patch must not hold up settings and other readers of the store.
+        let data = serde_json::to_string(s)?;
+        self.db()?.execute("INSERT INTO snapshots(id,title,data) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET title=excluded.title,data=excluded.data,updated_at=unixepoch()",params![s.id.0,s.title,data])?;
         Ok(())
     }
     pub fn snapshot(&self, id: &SnapshotId) -> Result<Snapshot> {

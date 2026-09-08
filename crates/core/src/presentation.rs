@@ -12,7 +12,7 @@ impl Cell {
     fn from(r: &PatchRow, side: Side) -> Option<Self> {
         Some(Self {
             number: r.number(side)?,
-            text: r.text.as_str().into(),
+            text: r.text.clone(),
             ending: r.ending,
             kind: r.kind,
             intra: vec![],

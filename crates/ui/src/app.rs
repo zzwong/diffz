@@ -128,6 +128,7 @@ pub(crate) struct Workbench {
     pub discard_candidate: Option<DraftId>,
     pub open_generation: u64,
     pub open_cancel: Cancellation,
+    highlight_cancel: Arc<std::sync::atomic::AtomicUsize>,
     pub save_tasks: HashMap<DraftId, Task<()>>,
     pub view_task: Option<Task<()>>,
     pub tree_rows: Arc<Vec<diffz_core::file_tree::TreeRow>>,
@@ -314,6 +315,7 @@ impl Workbench {
             discard_candidate: None,
             open_generation: 0,
             open_cancel: Cancellation::default(),
+            highlight_cancel: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             save_tasks: HashMap::new(),
             view_task: None,
             tree_rows: Arc::new(vec![]),
@@ -352,13 +354,26 @@ impl Workbench {
             .is_some_and(|a| a.drafts.iter().any(|d| !d.is_saved()) || a.view.revision > a.view_ack)
     }
     pub fn open(&mut self, request: OpenRequest, refresh: bool, cx: &mut Context<Self>) {
+        self.open_pending(request, refresh, None, cx);
+    }
+    fn open_pending(
+        &mut self,
+        request: OpenRequest,
+        refresh: bool,
+        pending: Option<(Cancellation, Task<Result<Opened, ServiceError>>)>,
+        cx: &mut Context<Self>,
+    ) {
         if self.unsaved() || self.busy {
             self.status = "Save your outstanding changes before the source switches.".into();
             cx.notify();
             return;
         }
         self.open_cancel.cancel();
-        self.open_cancel = Cancellation::default();
+        let (cancel, pending) = match pending {
+            Some((cancel, task)) => (cancel, Some(task)),
+            None => (Cancellation::default(), None),
+        };
+        self.open_cancel = cancel;
         self.open_generation += 1;
         let generation = self.open_generation;
         let cancel = self.open_cancel.clone();
@@ -367,7 +382,10 @@ impl Workbench {
         self.loading = true;
         self.status = "Loading source; your snapshot and position carry over.".into();
         cx.spawn(async move|this,cx|{
-            let result=cx.background_spawn(async move{services.open(job,cancel)}).await;
+            let result = match pending {
+                Some(task) => task.await,
+                None => cx.background_spawn(async move { services.open(job, cancel) }).await,
+            };
             diffz_core::timing::mark("snapshot opened");
             let _=this.update(cx,|app,cx|{if app.open_generation!=generation{return}app.loading=false;match result{
                 Ok(opened)=>{if refresh&&app.active.as_ref().is_some_and(|a|a.snapshot.id!=opened.snapshot.id){app.offered=Some(opened);app.status="New revision available. The snapshot on screen has not changed.".into();}
@@ -1183,15 +1201,23 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         .detach();
     }
     pub fn highlight(&mut self, file: FileId, cx: &mut Context<Self>) {
+        self.highlight_cancel
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        self.highlight_cancel = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let cancel = self.highlight_cancel.clone();
         let Some(a) = &self.active else { return };
         let snapshot = a.snapshot.clone();
         let id = snapshot.id.clone();
         cx.spawn(async move |this, cx| {
             let job_file = file.clone();
+            let job_cancel = cancel.clone();
             let spans = cx
-                .background_spawn(async move { highlight_file(&snapshot, &job_file) })
+                .background_spawn(async move { highlight_file(&snapshot, &job_file, &job_cancel) })
                 .await;
             let _ = this.update(cx, |app, cx| {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+                    return;
+                }
                 if let Some(v) = &app.viewport {
                     let mut v = v.borrow_mut();
                     if v.snapshot.id == id && v.file == file {
@@ -1224,23 +1250,37 @@ fn theme_label(reference: &str) -> String {
     reference.to_string()
 }
 
-fn highlight_file(snapshot: &Snapshot, id: &FileId) -> Decorations {
+fn highlight_file(
+    snapshot: &Snapshot,
+    id: &FileId,
+    cancel: &std::sync::atomic::AtomicUsize,
+) -> Decorations {
     let mut out = HashMap::new();
     let Some(file) = snapshot.file(id) else {
         return out;
     };
-    let cancel = std::sync::atomic::AtomicUsize::new(0);
+    let path = file.display_path();
+    if diffz_core::syntax::language_name(&path).is_none() {
+        return out;
+    }
     for h in &file.hunks {
         for side in [Side::Left, Side::Right] {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+                return HashMap::new();
+            }
             let rows: Vec<_> = h.rows.iter().filter(|r| r.number(side).is_some()).collect();
-            let source = rows
-                .iter()
-                .map(|r| r.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            let spans = diffz_core::syntax::highlight(&file.display_path(), &source, &cancel);
+            // Apply the syntax budget before joining source lines into another buffer.
+            let bytes =
+                rows.iter().map(|r| r.text.len()).sum::<usize>() + rows.len().saturating_sub(1);
+            if bytes > 256 * 1024 {
+                continue;
+            }
+            let source = rows.iter().map(|r| &*r.text).collect::<Vec<_>>().join("\n");
+            let spans = diffz_core::syntax::highlight(&path, &source, cancel);
             for (row, line_spans) in rows.into_iter().zip(spans) {
-                if let Some(n) = row.number(side) {
+                if !line_spans.is_empty()
+                    && let Some(n) = row.number(side)
+                {
                     out.insert((side, n), line_spans);
                 }
             }
@@ -1349,6 +1389,14 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) {
         .with_assets(crate::icons::Assets)
         .run(move |cx| {
             diffz_core::timing::mark("gpui run");
+            // Read the initial source while the native window and component layer initialize.
+            let initial_cancel = Cancellation::default();
+            let cancel = initial_cancel.clone();
+            let initial_services = services.clone();
+            let request = options.initial.clone();
+            let initial_task = cx
+                .background_executor()
+                .spawn(async move { initial_services.open(request, cancel) });
             gpui_kit::init(cx);
             commands::bind(cx);
             cx.on_action(|_: &commands::Quit, cx| cx.quit());
@@ -1376,7 +1424,12 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) {
                         Workbench::new(services, options.font_family, options.theme, window, cx)
                     });
                     view.update(cx, |app, cx| {
-                        app.open(options.initial, false, cx);
+                        app.open_pending(
+                            options.initial,
+                            false,
+                            Some((initial_cancel, initial_task)),
+                            cx,
+                        );
                     });
                     view.read(cx).diff_focus.clone().focus(window, cx);
                     cx.new(|cx| Root::new(view, window, cx))
@@ -1393,4 +1446,60 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) {
             })
             .detach();
         });
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+
+    fn snapshot(path: &str, lines: &str, count: usize) -> Snapshot {
+        let patch = format!(
+            "diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -0,0 +1,{count} @@\n{lines}"
+        );
+        Snapshot::new(
+            "test".into(),
+            diffz_core::patch::parse_patch(patch.as_bytes(), Default::default()).unwrap(),
+            None,
+            vec![],
+        )
+    }
+
+    #[::core::prelude::v1::test]
+    fn plain_files_do_not_allocate_decoration_entries() {
+        let s = snapshot("a.txt", "+plain text\n+another line\n", 2);
+        assert!(
+            highlight_file(
+                &s,
+                &s.patch.files[0].id,
+                &std::sync::atomic::AtomicUsize::new(0)
+            )
+            .is_empty()
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn cancelled_highlighting_drops_pending_decorations() {
+        let s = snapshot("a.rs", "+fn main() {}\n", 1);
+        assert!(
+            highlight_file(
+                &s,
+                &s.patch.files[0].id,
+                &std::sync::atomic::AtomicUsize::new(1)
+            )
+            .is_empty()
+        );
+    }
+
+    #[cfg(feature = "syntax")]
+    #[::core::prelude::v1::test]
+    fn highlighted_files_keep_only_nonempty_spans() {
+        let s = snapshot("a.rs", "+fn main() {}\n+\n", 2);
+        let decorations = highlight_file(
+            &s,
+            &s.patch.files[0].id,
+            &std::sync::atomic::AtomicUsize::new(0),
+        );
+        assert!(!decorations[&(Side::Right, 1)].is_empty());
+        assert!(!decorations.contains_key(&(Side::Right, 2)));
+    }
 }
