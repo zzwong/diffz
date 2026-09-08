@@ -1,0 +1,17 @@
+Source: diffz
+Section: devel
+Priority: optional
+Maintainer: Aaron Wong <6979793+zzwong@users.noreply.github.com>
+Homepage: https://github.com/zzwong/diffz
+
+Package: diffz
+Architecture: any
+Depends: ${shlibs:Depends}, libfontconfig1, libvulkan1,
+ libwayland-client0, libwayland-cursor0, libwayland-egl1,
+ libx11-6, libx11-xcb1, libxcb1, libxcursor1, libxi6,
+ libxkbcommon0, libxkbcommon-x11-0
+Recommends: fonts-dejavu-core, hicolor-icon-theme, xdg-utils
+Suggests: git, gh, glab, mesa-vulkan-drivers
+Description: Desktop diff and patch viewer
+ Review GitHub pull requests, GitLab merge requests, local Git changes,
+ and patch files in a native GPUI desktop application.

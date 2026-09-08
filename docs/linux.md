@@ -40,11 +40,80 @@ or copied packages with `sha256sum -c SHA256SUMS` from that directory.
 
 ### Debian and Ubuntu
 
+Debian and Ubuntu use the same application code and `.deb` packaging helper.
+Build a package **on the distribution release where it will be installed**:
+sharing the format does not guarantee compatibility between library versions.
+In particular, do not repackage the Fedora binary or assume a Debian 13 build
+will run on Debian 12 or Ubuntu 24.04.
+
+The Debian packaging workflow targets Debian 12, Debian 13, Ubuntu 24.04 LTS,
+and Ubuntu 26.04 LTS on `amd64` (Intel/AMD 64-bit). It builds separately in each
+distribution, validates desktop metadata, and installs the result in a fresh
+container with only declared runtime dependencies. The headless smoke tests
+cover `--version`, `--help`, and patch inspection, not GPU rendering or a live
+Wayland/X11 session. Check the workflow result before relying on an artifact.
+
+Install the native build dependencies, then use the pinned rustup toolchain:
+
 ```sh
-sudo apt-get install gcc g++ clang pkg-config libfontconfig-dev libwayland-dev \
-  libwebkit2gtk-4.1-dev libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev \
-  vulkan-validationlayers libvulkan1
+sudo apt-get update
+sudo apt-get install build-essential clang cmake pkg-config python3 \
+  ca-certificates curl git libfontconfig-dev libwayland-dev \
+  libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev \
+  libxcursor-dev libxi-dev libxcb1-dev libssl-dev libzstd-dev libvulkan-dev
+cargo build --locked --release -p diffz
 ```
+
+To create and install a package from that release binary:
+
+```sh
+sudo apt-get install dpkg-dev binutils desktop-file-utils appstream
+bash scripts/stage-linux.sh
+desktop-file-validate dist/linux-root/usr/share/applications/io.github.zzwong.Diffz.desktop
+appstreamcli validate --no-net dist/linux-root/usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
+bash scripts/package-linux-deb.sh
+(cd dist && sha256sum ./*.deb > SHA256SUMS)
+sudo apt install ./dist/diffz_0.1.0-1_amd64.deb
+```
+
+Use the actual filename printed by the helper if the version or architecture
+differs. Building the package does not need root. It includes the executable,
+desktop entry, scalable icon, AppStream metadata, license, and package changelog.
+APT installs dependencies automatically; installing the binary alone does not.
+
+CI artifacts include their target in the version, for example
+`diffz_0.1.0-1~ubuntu24.04_amd64.deb`. Download the artifact for your exact
+release and CPU architecture, extract it, and verify it with
+`sha256sum -c SHA256SUMS` before using `sudo apt install ./<filename>.deb`.
+Workflow artifacts are not an APT repository or automatic release publishing.
+
+The helper derives linked-library requirements with `dpkg-shlibdeps`, including
+minimum ABI versions and distribution-specific names such as `libssl3t64`.
+The package also declares libraries loaded dynamically by the desktop backend.
+A working Vulkan GPU driver is still required: use `mesa-vulkan-drivers` for
+supported Mesa GPUs, or your GPU vendor's driver. Do not replace a working
+vendor driver just to install Diffz. Git, `gh`, and `glab` are optional and
+needed only for their corresponding review sources.
+
+`DIFFZ_DIST` selects the output directory; `DIFFZ_STAGE` selects an existing
+staged tree (default `$DIFFZ_DIST/linux-root`). `DIFFZ_VERSION` overrides the
+upstream version, and `DIFFZ_DEB_REVISION` defaults to `1`; CI uses revisions
+such as `1~debian13`. SemVer prereleases are mapped from `-rc` to Debian's
+`~rc` ordering. Set `SOURCE_DATE_EPOCH` to make package timestamps repeatable.
+
+The helper accepts native `amd64` and `arm64` ELF binaries and rejects a
+mismatched architecture rather than relabeling it. Native ARM64 builds are not
+covered by this CI matrix; ARM64 and other distribution releases need their
+own build and desktop verification before being advertised as supported.
+
+Run the packaging regression tests without compiling GPUI:
+
+```sh
+python3 scripts/tests/test_package_linux_deb.py
+```
+
+These tests compile a tiny ELF fixture and use the real Debian packaging tools;
+they do not establish that the Diffz desktop binary builds or renders correctly.
 
 ## Arch Linux and Omarchy
 

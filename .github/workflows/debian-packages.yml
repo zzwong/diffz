@@ -1,0 +1,132 @@
+name: Debian and Ubuntu packages
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/debian-packages.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'crates/**'
+      - 'packaging/debian/**'
+      - 'packaging/linux/**'
+      - 'scripts/package-linux-deb.sh'
+      - 'scripts/stage-linux.sh'
+      - 'scripts/tests/test_package_linux_deb.py'
+      - 'docs/linux.md'
+      - 'LICENSE'
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: debian-packages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: .deb (${{ matrix.target }}, amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:12-slim
+            target: debian12
+          - image: debian:13-slim
+            target: debian13
+          - image: ubuntu:24.04
+            target: ubuntu24.04
+          - image: ubuntu:26.04
+            target: ubuntu26.04
+    env:
+      IMAGE: ${{ matrix.image }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set reproducible package timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
+      # Build against each distribution's own glibc and library package names.
+      # A .deb made from the Fedora binary is not a Debian compatibility test.
+      - name: Build and validate native Debian package
+        shell: bash
+        run: |
+          docker run --rm -i \
+            -e SOURCE_DATE_EPOCH -e DIFFZ_DEB_REVISION="1~$TARGET" \
+            -e GITHUB_REF_TYPE -e GITHUB_REF_NAME \
+            -v "$GITHUB_WORKSPACE:/src" -w /src "$IMAGE" bash -s <<'BUILD'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential clang cmake pkg-config python3 \
+            libfontconfig-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
+            libssl-dev libzstd-dev libvulkan-dev \
+            dpkg-dev binutils desktop-file-utils appstream
+
+          python3 scripts/tests/test_package_linux_deb.py
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo 'Release tag must match the Cargo workspace version.' >&2
+            exit 1
+          fi
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain none
+          . "$HOME/.cargo/env"
+          rustup show
+          cargo build --locked --release -p diffz
+          bash scripts/stage-linux.sh
+          desktop-file-validate \
+            dist/linux-root/usr/share/applications/io.github.zzwong.Diffz.desktop
+          appstreamcli validate --no-net \
+            dist/linux-root/usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
+          bash scripts/package-linux-deb.sh
+          (cd dist && sha256sum ./*.deb > SHA256SUMS)
+          BUILD
+
+      # Start again from the base image: build dependencies must not mask
+      # incomplete runtime Depends. No compiler, Rust, gh, or glab is installed.
+      - name: Install and smoke-test in a clean runtime container
+        shell: bash
+        run: |
+          docker run --rm -i \
+            -v "$GITHUB_WORKSPACE/dist:/packages:ro" "$IMAGE" bash -s <<'INSTALL'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          cd /packages
+          sha256sum -c SHA256SUMS
+          apt-get update
+          apt-get install -y --no-install-recommends /packages/*.deb
+          ldd /usr/bin/diffz > /tmp/diffz-libraries.txt
+          cat /tmp/diffz-libraries.txt
+          if grep -q 'not found' /tmp/diffz-libraries.txt; then
+            exit 1
+          fi
+          diffz --version
+          diffz --help
+          printf 'diff --git a/check.txt b/check.txt\n--- a/check.txt\n+++ b/check.txt\n@@ -1 +1 @@\n-before\n+after\n' > /tmp/check.patch
+          diffz --inspect --patch /tmp/check.patch > /tmp/snapshot.json
+          test -s /tmp/snapshot.json
+          test -r /usr/share/applications/io.github.zzwong.Diffz.desktop
+          test -r /usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
+          test -r /usr/share/icons/hicolor/scalable/apps/io.github.zzwong.Diffz.svg
+          test -r /usr/share/doc/diffz/copyright
+          INSTALL
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diffz-${{ matrix.target }}-amd64
+          path: |
+            dist/*.deb
+            dist/SHA256SUMS
+          if-no-files-found: error
