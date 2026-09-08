@@ -1,0 +1,36 @@
+name: Linux code fonts
+
+on:
+  push:
+    branches: ['fix/linux-monospace-font']
+  pull_request:
+    paths:
+      - '.github/workflows/linux-fonts.yml'
+      - 'crates/app/**'
+      - 'packaging/**'
+      - 'scripts/tests/test_code_font.py'
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Export the exact source for packaging verification
+        shell: bash
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          mkdir -p target/source-snapshot
+          git rev-parse HEAD > target/source-snapshot/COMMIT
+          git archive --format=tar --prefix="diffz-$version/" HEAD | gzip -n > "target/source-snapshot/diffz-$version.tar.gz"
+          (cd target/source-snapshot && sha256sum *.tar.gz | tee SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diffz-font-source
+          path: target/source-snapshot/
+          if-no-files-found: error
