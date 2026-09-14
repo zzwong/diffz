@@ -78,6 +78,10 @@ class DebianPackageTests(unittest.TestCase):
         self.assertRegex(depends, r"libc6 \(>= [^)]+\)")
         for dependency in ("libvulkan1", "libxkbcommon-x11-0", "libwayland-client0"):
             self.assertIn(dependency, depends)
+        # Runtime utilities/fonts must not be optional recommendations: the
+        # clean-container install deliberately disables Recommends.
+        for dependency in ("fontconfig", "fonts-dejavu-core"):
+            self.assertIn(dependency, depends.split(", "))
         self.assertNotIn("-dev", depends)
         self.assertGreater(int(self.field(package, "Installed-Size")), 0)
         archive = subprocess.check_output(["dpkg-deb", "--fsys-tarfile", str(package)])

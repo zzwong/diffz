@@ -21,7 +21,7 @@ cargo build --locked --release -p diffz
 sudo dnf install gcc gcc-c++ pkgconf-pkg-config fontconfig-devel wayland-devel \
   libxkbcommon-devel libxkbcommon-x11-devel libX11-devel libXcursor-devel \
   libXi-devel libxcb-devel openssl-devel zstd-devel vulkan-loader-devel \
-  mesa-vulkan-drivers
+  mesa-vulkan-drivers fontconfig dejavu-sans-mono-fonts
 ```
 
 To create an RPM and portable tarball from the release binary:
@@ -58,7 +58,7 @@ Install the native build dependencies, then use the pinned rustup toolchain:
 ```sh
 sudo apt-get update
 sudo apt-get install build-essential clang cmake pkg-config python3 \
-  ca-certificates curl git libfontconfig-dev libwayland-dev \
+  ca-certificates curl git fontconfig fonts-dejavu-core libfontconfig-dev libwayland-dev \
   libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libx11-xcb-dev \
   libxcursor-dev libxi-dev libxcb1-dev libssl-dev libzstd-dev libvulkan-dev
 cargo build --locked --release -p diffz
@@ -150,7 +150,46 @@ pinned source.
 
 Launch Diffz from the application menu or open a patch with `diffz change.patch`.
 Git, GitHub CLI and GitLab CLI enable their corresponding review sources.
-Use `--font "Noto Sans Mono"` to choose the diff font explicitly.
+### Code fonts
+
+On Linux, Diffz resolves the system's `monospace` alias with Fontconfig at
+startup and passes the concrete family name to GPUI. It does not assume that
+`DejaVu Sans Mono` is installed, and it does not use GPUI's proportional UI-font
+fallback for code. The same resolver is used by `--probe`.
+
+Use `--font "Noto Sans Mono"` to prefer an installed code font. Missing or
+proportional choices fall back to the system monospace font; substitutions
+are reported on stderr. If no fixed-width font is available, desktop startup
+fails with an installation hint instead of silently displaying proportional
+code. macOS font selection is unchanged. Headless `--inspect`, `--help`,
+`--version`, and `--doctor` do not require Fontconfig.
+
+RPM and DEB packages require Fontconfig and a DejaVu monospace fallback. The
+Arch recipe already requires `fontconfig` and `ttf-dejavu`. Source builds and
+portable archives need these runtime dependencies installed separately.
+
+To diagnose an older build, check what is actually installed:
+
+```sh
+fc-list --format '%{family}\n' | grep -F 'DejaVu Sans Mono'
+fc-match --format '%{family[0]} | spacing=%{spacing}\n' monospace
+# Temporary override for an older binary:
+diffz --font "$(fc-match --format '%{family[0]}' monospace)" change.patch
+```
+
+To run the resolver regressions without building GPUI (requires `rustc`,
+Python, Fontconfig, DejaVu Sans and Liberation Mono):
+
+```sh
+rustc --edition=2021 --test crates/app/src/code_font.rs -o /tmp/diffz-font-tests
+/tmp/diffz-font-tests
+python3 scripts/tests/test_code_font.py -v
+```
+
+The integration tests compile the production resolver and use temporary,
+isolated font databases, including a system with no DejaVu Sans Mono. They
+never change your desktop's font configuration. GPU text rendering and
+Wayland/X11 still require desktop validation.
 
 Omarchy colors are opt-in. Choose **Omarchy current theme** in the theme
 picker or launch with `diffz --theme current change.patch`. The choice persists

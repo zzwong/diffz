@@ -1,0 +1,74 @@
+name: Linux code fonts
+
+on:
+  push:
+    branches: ['fix/linux-monospace-font']
+  pull_request:
+    paths:
+      - '.github/workflows/linux-fonts.yml'
+      - 'crates/app/**'
+      - 'packaging/**'
+      - 'scripts/tests/test_code_font.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-fonts-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Export the exact source for packaging verification
+        shell: bash
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          mkdir -p target/source-snapshot
+          git rev-parse HEAD > target/source-snapshot/COMMIT
+          git -c tar.umask=0002 archive --format=tar --prefix="diffz-$version/" HEAD | gzip -n > "target/source-snapshot/diffz-$version.tar.gz"
+          (cd target/source-snapshot && sha256sum *.tar.gz | tee SHA256SUMS)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diffz-font-source
+          path: target/source-snapshot/
+          if-no-files-found: error
+
+  fonts:
+    name: Font resolution (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['fedora:44', 'debian:13-slim', 'ubuntu:24.04']
+    env:
+      IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the production resolver without GPUI or a display
+        shell: bash
+        run: |
+          docker run --rm -i -v "$GITHUB_WORKSPACE:/src" -w /src "$IMAGE" bash -s <<'TEST'
+          set -euo pipefail
+          if command -v apt-get >/dev/null; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              rustc gcc libc6-dev python3 fontconfig fonts-dejavu-core fonts-liberation
+          else
+            dnf install -y rust gcc python3 fontconfig dejavu-sans-fonts liberation-mono-fonts
+          fi
+          # This std-only module is deliberately compatible with distro Rust;
+          # this is not a substitute for the full pinned-toolchain app build.
+          rustc --edition=2021 --test crates/app/src/code_font.rs -o /tmp/diffz-font-tests
+          /tmp/diffz-font-tests
+          python3 scripts/tests/test_code_font.py -v
+          TEST

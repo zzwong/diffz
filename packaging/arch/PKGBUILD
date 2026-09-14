@@ -1,7 +1,7 @@
 # Build from the authenticated checkout with scripts/package-arch.sh.
 pkgname=diffz
 pkgver=0.1.0
-pkgrel=2
+pkgrel=3
 pkgdesc='Desktop diff and patch viewer'
 arch=('x86_64')
 url='https://github.com/zzwong/diffz'
@@ -17,9 +17,9 @@ optdepends=('xdg-utils: open review links in a browser'
             'glab: load GitLab merge requests'
             'vulkan-driver: GPU rendering (choose the driver for your hardware)')
 # A fixed git snapshot is exported locally because the upstream is private.
-_commit=eb32c79ad0876cfd217c87425f3941d5614a23d5
+_commit=26efa21ae99f7d6a2936693a71a56de950c9ffcf
 source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('1ef2fbea739446ebc1edf75c7fc0bbe4bc45560754ee609eeec0ea94da68b41c')
+sha256sums=('2ed1799287a1d274a6c56aa7b9f0a86fa83d96d3ae03bd341483e10aa9e655c0')
 # Cargo.toml owns LTO; retain makepkg's other build policies.
 options=('!lto')
 

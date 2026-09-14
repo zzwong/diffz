@@ -6,6 +6,9 @@ use diffz_adapters::{
 };
 use diffz_core::provider::{Cancellation, OpenRequest, WorkbenchServices};
 use std::{path::PathBuf, sync::Arc};
+#[cfg(all(target_os = "linux", feature = "desktop"))]
+mod code_font;
+
 const HELP: &str = r#"diffz: review diffs and pull requests on your desktop
 
 Usage:
@@ -150,6 +153,24 @@ fn early_exit(args: &[String]) -> Option<String> {
         None
     }
 }
+#[cfg(feature = "desktop")]
+fn desktop_font(requested: Option<String>) -> Result<Option<String>> {
+    #[cfg(target_os = "linux")]
+    {
+        let family = code_font::resolve(requested.as_deref()).map_err(anyhow::Error::msg)?;
+        if let Some(requested) = requested.as_deref()
+            && !requested.eq_ignore_ascii_case(&family)
+        {
+            eprintln!("diffz: code font {requested:?} resolved to {family:?}");
+        }
+        Ok(Some(family))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(requested)
+    }
+}
+
 fn main() {
     diffz_core::timing::mark("main");
     if let Err(e) = run() {
@@ -190,7 +211,7 @@ fn run() -> Result<()> {
             .context("probe source is not UTF-8")?;
         #[cfg(feature = "desktop")]
         {
-            diffz_ui::probe::launch_probe(source, options.font, output);
+            diffz_ui::probe::launch_probe(source, desktop_font(options.font)?, output);
             return Ok(());
         }
         #[cfg(not(feature = "desktop"))]
@@ -220,7 +241,7 @@ fn run() -> Result<()> {
             services,
             diffz_ui::LaunchOptions {
                 initial: options.request,
-                font_family: options.font,
+                font_family: desktop_font(options.font)?,
                 theme: options.theme,
             },
         );
