@@ -17,9 +17,9 @@ optdepends=('xdg-utils: open review links in a browser'
             'glab: load GitLab merge requests'
             'vulkan-driver: GPU rendering (choose the driver for your hardware)')
 # A fixed git snapshot is exported locally because the upstream is private.
-_commit=f9117c0502e97ffc88c9886f9c1ab090db1f80c5
+_commit=26efa21ae99f7d6a2936693a71a56de950c9ffcf
 source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('43105265a44f2f498245f44baf5a928592b9a3eae3efadc15561f33a8408ca41')
+sha256sums=('2ed1799287a1d274a6c56aa7b9f0a86fa83d96d3ae03bd341483e10aa9e655c0')
 # Cargo.toml owns LTO; retain makepkg's other build policies.
 options=('!lto')
 
