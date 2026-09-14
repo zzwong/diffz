@@ -1,4 +1,4 @@
-# This file is selected explicitly by scripts/kache-build.sh. Keep the cache
+# This file is selected explicitly by the root Makefile. Keep the cache
 # policy here so ambient Kache configuration and KACHE_* overrides cannot change
 # the optional build's isolation guarantees.
 [cache]

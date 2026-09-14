@@ -152,6 +152,14 @@ platform. Pass `--state-dir` to run against a different directory.
 
 ## Development
 
+The optional local Kache workflow is available through the root Makefile:
+
+```sh
+make build
+make check
+make help
+```
+
 Four crates make up the workspace:
 
 | Crate | Contents |
