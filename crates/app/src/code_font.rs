@@ -42,10 +42,13 @@ fn run_fc_match(pattern: &str, accept_unset_spacing: bool) -> Result<Option<Stri
         .output()
         .map_err(|error| format!("cannot run fc-match: {error}; install fontconfig"))?;
     if !output.status.success() {
-        return Err(format!(
-            "fc-match failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = detail.trim();
+        return Err(if detail.is_empty() {
+            "fc-match failed; install fontconfig or check its configuration".to_string()
+        } else {
+            format!("fc-match failed: {detail}; install fontconfig or check its configuration")
+        });
     }
     let output = String::from_utf8(output.stdout)
         .map_err(|_| "fc-match returned a non-UTF-8 font family".to_string())?;
@@ -77,13 +80,20 @@ fn parse_match(output: &str, accept_unset_spacing: bool) -> Option<String> {
         "100" | "110" => Some(family.to_string()),
         // Unset spacing is common for genuine monospace variable fonts (e.g.
         // Google's Noto Sans Mono) whose files never set `post.isFixedPitch`.
-        // Empty here means "fontconfig could not tell", not "proportional", so
-        // we accept it only when the caller already trusts the source (the
-        // system `monospace` alias). Explicit family requests are strict.
-        "" if accept_unset_spacing => Some(family.to_string()),
+        // Empty here means "fontconfig could not tell", not "proportional".
+        // Fedora's variable Noto Sans Mono needs this exception, but its
+        // proportional DejaVu Sans can also leave spacing unset. Keep the
+        // exception narrow instead of trusting every alias fallback.
+        "" if accept_unset_spacing && mono_named(family) => Some(family.to_string()),
         // Declared proportional (0) or dual-width (90): never usable.
         _ => None,
     }
+}
+
+fn mono_named(family: &str) -> bool {
+    family
+        .split(|ch: char| !ch.is_alphanumeric())
+        .any(|word| word.eq_ignore_ascii_case("mono") || word.eq_ignore_ascii_case("monospace"))
 }
 
 #[cfg(test)]
@@ -186,6 +196,7 @@ mod tests {
             Some("Noto Sans Mono".into())
         );
         assert_eq!(parse_match("Noto Sans Mono\n\n", false), None);
+        assert_eq!(parse_match("DejaVu Sans\n\n", true), None);
     }
 
     #[test]
