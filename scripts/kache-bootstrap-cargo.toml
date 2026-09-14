@@ -1,0 +1,9 @@
+# Explicit Cargo layer for the first invocation, before the pinned Kache
+# binary exists. It must not refer to the runtime wrapper config or binary.
+[build]
+rustc-wrapper = ""
+rustc-workspace-wrapper = ""
+
+[env]
+RUSTC_WRAPPER = { value = "", force = true }
+RUSTC_WORKSPACE_WRAPPER = { value = "", force = true }
