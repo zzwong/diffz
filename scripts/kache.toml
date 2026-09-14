@@ -1,6 +1,5 @@
-# This file is selected explicitly by the root Makefile. Keep the cache
-# policy here so ambient Kache configuration and KACHE_* overrides cannot change
-# the optional build's isolation guarantees.
+# This file is selected explicitly by the root Makefile and defines the cache
+# policy used by its Kache-backed targets.
 [cache]
 ignore_env = true
 local_only = true
