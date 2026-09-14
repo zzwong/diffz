@@ -19,6 +19,11 @@ pub struct Store {
     _lock: File,
     pub directory: PathBuf,
 }
+impl Drop for Store {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._lock);
+    }
+}
 fn private_file(path: &Path) -> Result<File> {
     let mut o = OpenOptions::new();
     o.read(true).write(true).create(true);
