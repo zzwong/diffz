@@ -1,0 +1,9 @@
+# This file is selected explicitly by the root Makefile and defines the cache
+# policy used by its Kache-backed targets.
+[cache]
+ignore_env = true
+local_only = true
+local_max_size = "8GiB"
+# The wrapper always runs from the checkout root, so this stays per-checkout
+# while the default local_store remains shareable across local worktrees.
+runtime_dir = "target/kache/runtime"
