@@ -28,7 +28,8 @@ fn select(
     }
     alias_lookup("monospace")?.ok_or_else(|| {
         "no usable monospace font found; install dejavu-sans-mono-fonts (Fedora), \
-         fonts-dejavu-core (Debian/Ubuntu), or ttf-dejavu (Arch)".to_string()
+         fonts-dejavu-core (Debian/Ubuntu), or ttf-dejavu (Arch)"
+            .to_string()
     })
 }
 
@@ -91,10 +92,14 @@ mod tests {
 
     #[test]
     fn default_uses_system_monospace_instead_of_a_hardcoded_family() {
-        let result = select(None, |_| unreachable!(), |pattern| {
-            assert_eq!(pattern, "monospace");
-            Ok(Some("Liberation Mono".into()))
-        });
+        let result = select(
+            None,
+            |_| unreachable!(),
+            |pattern| {
+                assert_eq!(pattern, "monospace");
+                Ok(Some("Liberation Mono".into()))
+            },
+        );
         assert_eq!(result.unwrap(), "Liberation Mono");
     }
 
@@ -132,9 +137,11 @@ mod tests {
 
     #[test]
     fn no_monospace_font_is_an_error_not_a_proportional_fallback() {
-        assert!(select(None, |_| unreachable!(), |_| Ok(None))
-            .unwrap_err()
-            .contains("monospace"));
+        assert!(
+            select(None, |_| unreachable!(), |_| Ok(None))
+                .unwrap_err()
+                .contains("monospace")
+        );
     }
 
     #[test]
