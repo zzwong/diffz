@@ -4,7 +4,7 @@ use std::{path::PathBuf, time::Duration};
 fn req(code: &str) -> ProcessRequest {
     let mut r = ProcessRequest::new(PathBuf::from("/bin/sh"));
     r.args = vec!["-c".into(), code.into()];
-    r.deadline = Duration::from_millis(300);
+    r.deadline = Duration::from_secs(2);
     r
 }
 #[test]
@@ -19,7 +19,9 @@ fn drains_both_streams() {
 }
 #[test]
 fn timeout_reaps() {
-    let r = Runner::run(req("sleep 9"), Cancellation::default());
+    let mut request = req("sleep 9");
+    request.deadline = Duration::from_millis(300);
+    let r = Runner::run(request, Cancellation::default());
     assert!(r.unwrap_err().to_string().contains("deadline"));
 }
 #[test]

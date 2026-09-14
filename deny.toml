@@ -4,6 +4,7 @@ all-features = true
 
 [advisories]
 ignore = []
+unmaintained = "workspace"
 
 [licenses]
 allow = [
@@ -32,3 +33,5 @@ wildcards = "allow"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+required-git-spec = "rev"
+allow-git = ["https://github.com/gleam-lang/tree-sitter-gleam"]
