@@ -24,6 +24,18 @@ fn effective_resize_velocity(velocity_x: f32, sample_age: std::time::Duration) -
     }
 }
 
+fn cancel_resize_on_unpressed_mouse(
+    resizing_panel: &mut Option<PanelResizeState>,
+    pressed_button: Option<MouseButton>,
+) -> bool {
+    if resizing_panel.is_some() && pressed_button != Some(MouseButton::Left) {
+        *resizing_panel = None;
+        true
+    } else {
+        false
+    }
+}
+
 impl Workbench {
     /// Move between changed files after scrolling reaches an edge; both rich and source
     /// views use this helper. Positive `direction` advances.
@@ -824,10 +836,11 @@ impl Render for Workbench {
         let mut root = div()
             .id("workbench")
             .on_mouse_move(cx.listener(|a, e: &MouseMoveEvent, window, cx| {
+                if cancel_resize_on_unpressed_mouse(&mut a.resizing_panel, e.pressed_button) {
+                    cx.notify();
+                    return;
+                }
                 if let Some(state) = a.resizing_panel.as_mut() {
-                    if e.pressed_button != Some(MouseButton::Left) {
-                        return;
-                    }
                     let x = f32::from(e.position.x);
                     let now = std::time::Instant::now();
                     let elapsed = now.saturating_duration_since(state.last_sample);
@@ -1011,5 +1024,21 @@ mod tests {
             effective_resize_velocity(-1_000., std::time::Duration::from_millis(101)),
             0.
         );
+    }
+
+    #[::core::prelude::v1::test]
+    fn unpressed_mouse_move_cancels_active_resize() {
+        let now = std::time::Instant::now();
+        let mut resizing = Some(PanelResizeState {
+            left: true,
+            start_x: 300.,
+            start_width: 282.,
+            last_x: 300.,
+            last_sample: now,
+            velocity_x: 0.,
+        });
+
+        assert!(cancel_resize_on_unpressed_mouse(&mut resizing, None));
+        assert!(resizing.is_none());
     }
 }
