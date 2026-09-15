@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 pub struct LaunchOptions {
@@ -63,6 +63,14 @@ pub(crate) struct ThemeEntry {
     pub reference: String,
     pub palette: Option<Palette>,
 }
+pub(crate) struct PanelResizeState {
+    pub(crate) left: bool,
+    pub(crate) start_x: f32,
+    pub(crate) start_width: f32,
+    pub(crate) last_x: f32,
+    pub(crate) last_sample: Instant,
+    pub(crate) velocity_x: f32,
+}
 pub(crate) struct Workbench {
     pub services: Arc<dyn WorkbenchServices>,
     pub active: Option<Active>,
@@ -86,7 +94,7 @@ pub(crate) struct Workbench {
     pub overview_resize_focus: FocusHandle,
     pub files_width: f32,
     pub overview_width: f32,
-    pub resizing_panel: Option<(bool, f32, f32)>,
+    pub resizing_panel: Option<PanelResizeState>,
     pub find_visible: bool,
     pub find_next_focus: FocusHandle,
     pub dark: bool,
@@ -241,6 +249,7 @@ impl Workbench {
                 }
             },
         ));
+        subscriptions.push(cx.observe_window_bounds(window, |_, _, cx| cx.notify()));
         let weak = cx.entity().downgrade();
         window.on_window_should_close(cx,move |_,cx|weak.update(cx,|app,cx|{
             if app.unsaved()||app.busy{app.status="Close blocked: saves/publication still running. Failed drafts are kept in memory; export before closing.".into();cx.notify();false}else{true}

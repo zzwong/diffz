@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[2]
+NOTICE_CONTENT = b"THIRD_PARTY_NOTICES fixture\n"
 ASSETS = (
     "usr/bin/diffz",
     "usr/share/applications/io.github.zzwong.Diffz.desktop",
@@ -38,6 +39,9 @@ class DebianPackageTests(unittest.TestCase):
             path = self.stage / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(f"fixture for {name}\n")
+        notice = self.stage / "usr/share/doc/diffz/THIRD_PARTY_NOTICES.md"
+        notice.parent.mkdir(parents=True, exist_ok=True)
+        notice.write_bytes(NOTICE_CONTENT)
         # A real ELF makes dpkg-shlibdeps and architecture validation meaningful.
         subprocess.run(
             ["cc", "-x", "c", "-o", str(self.stage / ASSETS[0]), "-"],
@@ -87,13 +91,17 @@ class DebianPackageTests(unittest.TestCase):
         archive = subprocess.check_output(["dpkg-deb", "--fsys-tarfile", str(package)])
         with tarfile.open(fileobj=io.BytesIO(archive)) as payload:
             names = {entry.name.removeprefix("./"): entry for entry in payload}
-            for name in (*ASSETS, "usr/share/doc/diffz/copyright"):
+            for name in (*ASSETS, "usr/share/doc/diffz/copyright", "usr/share/doc/diffz/THIRD_PARTY_NOTICES.md"):
                 self.assertIn(name, names)
             for entry in names.values():
                 self.assertEqual((entry.uid, entry.gid), (0, 0))
             self.assertEqual(names[ASSETS[0]].mode & 0o777, 0o755)
             self.assertEqual(payload.extractfile(names["usr/share/doc/diffz/copyright"]).read(),
                              b"MIT license fixture\n")
+            self.assertEqual(
+                payload.extractfile(names["usr/share/doc/diffz/THIRD_PARTY_NOTICES.md"]).read(),
+                NOTICE_CONTENT,
+            )
         self.assertFalse((self.stage / "DEBIAN").exists())
         self.assertFalse((self.repo / "debian").exists())
         self.assertFalse(list(self.dist.glob(".deb-build.*")))

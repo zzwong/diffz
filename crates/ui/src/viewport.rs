@@ -300,6 +300,17 @@ impl Viewport {
             self.focus = Some(range);
         }
     }
+    /// Start a newly selected file at its first hunk, ignoring any saved anchor.
+    pub fn jump_first_hunk(&mut self) {
+        self.hunk_target = self.hunk_rows.first().copied();
+        self.cursor = self
+            .hunk_target
+            .map_or_else(Cursor::default, |row| Cursor { row, offset: 0. });
+        self.anchor = None;
+        self.pending_anchor = false;
+        self.pending_scroll = 0.;
+        self.focus = None;
+    }
     pub fn next_hunk(&mut self, forward: bool) -> Option<(usize, usize)> {
         let current = self.hunk_target.unwrap_or(self.cursor.row);
         let index = if forward {
@@ -1523,6 +1534,104 @@ mod hunk_navigation_tests {
         assert_eq!(v.next_hunk(false), None);
         v.scroll(0., 20.);
         assert_eq!(v.next_hunk(true), Some((2, 3)));
+    }
+}
+
+#[cfg(test)]
+mod first_hunk_reset_tests {
+    use super::{Cursor, Viewport};
+    use diffz_core::{
+        anchor::ViewportAnchor,
+        domain::{Side, Snapshot, SourcePoint},
+        patch::parse_patch,
+    };
+    use std::sync::Arc;
+
+    fn viewport_with_hunks() -> Viewport {
+        let snapshot = Arc::new(
+            Snapshot::new(
+                "test".into(),
+                parse_patch(
+                    b"diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1,1 +1,1 @@\n-old\n+new\n@@ -5,1 +5,1 @@\n-old2\n+new2\n",
+                    Default::default(),
+                )
+                .unwrap(),
+                None,
+                vec![],
+            ),
+        );
+        let file = snapshot.patch.files[0].id.clone();
+        Viewport::new(snapshot, file, false, false, 14., "Menlo".into(), None)
+    }
+
+    #[test]
+    fn reset_jumps_to_first_hunk_and_discards_stale_anchor_state() {
+        let mut v = viewport_with_hunks();
+        let first = v.hunk_rows[0];
+        let second = v.hunk_rows[1];
+        v.cursor = Cursor {
+            row: second,
+            offset: 19.,
+        };
+        v.hunk_target = Some(second);
+        v.anchor = Some(ViewportAnchor {
+            point: SourcePoint {
+                snapshot: v.snapshot.id.clone(),
+                file: v.file.clone(),
+                side: Side::Right,
+                line: 5,
+                byte_column: 0,
+            },
+            viewport_y: 42.,
+            horizontal: 77.,
+        });
+        v.pending_anchor = true;
+        v.pending_scroll = 123.;
+
+        v.jump_first_hunk();
+
+        assert_eq!(v.cursor.row, first);
+        assert_eq!(v.cursor.offset, 0.);
+        assert_eq!(v.hunk_target, Some(first));
+        assert!(v.anchor.is_none());
+        assert!(!v.pending_anchor);
+        assert_eq!(v.pending_scroll, 0.);
+    }
+
+    #[test]
+    fn reset_falls_back_to_the_top_when_no_hunk_exists() {
+        let mut v = viewport_with_hunks();
+        v.rows = Arc::new(vec![diffz_core::presentation::DisplayRow::Notice(
+            "plain file".into(),
+        )]);
+        v.hunk_rows.clear();
+        v.cursor = Cursor {
+            row: 12,
+            offset: 9.,
+        };
+        v.hunk_target = Some(12);
+        v.anchor = Some(ViewportAnchor {
+            point: SourcePoint {
+                snapshot: v.snapshot.id.clone(),
+                file: v.file.clone(),
+                side: Side::Right,
+                line: 1,
+                byte_column: 0,
+            },
+            viewport_y: 42.,
+            horizontal: 77.,
+        });
+        v.pending_anchor = true;
+        v.pending_scroll = 123.;
+
+        v.jump_first_hunk();
+
+        assert_eq!(v.cursor.row, 0);
+        assert_eq!(v.cursor.offset, 0.);
+        assert!(v.hunk_target.is_none());
+        assert!(v.anchor.is_none());
+        assert!(!v.pending_anchor);
+        assert_eq!(v.pending_scroll, 0.);
     }
 }
 
