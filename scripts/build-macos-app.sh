@@ -4,10 +4,27 @@ cd "$(dirname "$0")/.."
 [[ "$(uname -s)" == Darwin ]] || { echo 'An app bundle can only be built on macOS.' >&2; exit 2; }
 mode="${1:-debug}"
 case "$mode" in
-  debug) cargo build --locked -p diffz --features syntax ;;
-  release) cargo build --locked --release -p diffz --features syntax ;;
+  debug) build_args=(build --locked -p diffz --features syntax) ;;
+  release) build_args=(build --locked --release -p diffz --features syntax) ;;
   *) echo 'Usage: bash scripts/build-macos-app.sh [debug|release]' >&2; exit 2 ;;
 esac
+python3 - "$mode" <<'PYTHON'
+import json, pathlib, shutil, subprocess, sys
+metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"]))
+target = pathlib.Path(metadata["target_directory"]) / sys.argv[1]
+
+def remove_path(path):
+    if path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+for stale in (target / "Diffz.app", target / "diffz.app"):
+    remove_path(stale)
+PYTHON
+cargo "${build_args[@]}"
 python3 - "$mode" <<'PYTHON'
 import json, pathlib, plistlib, shutil, subprocess, sys
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"]))

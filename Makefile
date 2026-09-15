@@ -7,7 +7,7 @@ KACHE_CONFIG := $(abspath scripts/kache.toml)
 KACHE_SOCKET := $(abspath target/kache/runtime/daemon.sock)
 KACHE_ENV := KACHE_CONFIG="$(KACHE_CONFIG)" KACHE_HOST_CONFIG= KACHE_SOCKET_PATH="$(KACHE_SOCKET)" RUSTC_WRAPPER="$(abspath $(KACHE_BIN))"
 
-.PHONY: help kache build build-release build-plain check check-native
+.PHONY: help kache build build-release build-plain check check-native package-macos
 
 help:
 	@printf '%s\n' \
@@ -16,6 +16,7 @@ help:
 		'make build-plain   Build diffz with regular Cargo' \
 		'make check         Run core checks with local Kache' \
 		'make check-native  Run native checks with local Kache' \
+		'make package-macos Package the macOS DMG with local Kache' \
 		'make help          List development commands'
 
 kache:
@@ -41,3 +42,6 @@ check: kache
 
 check-native: kache
 	$(KACHE_ENV) bash scripts/check.sh native
+
+package-macos: kache
+	$(KACHE_ENV) bash scripts/package-macos.sh
