@@ -17,6 +17,10 @@ app = target / "Diffz.app"
 contents = app / "Contents"
 (contents / "MacOS").mkdir(parents=True, exist_ok=True)
 shutil.copy2(target / "diffz", contents / "MacOS" / "diffz")
+resources = contents / "Resources"
+resources.mkdir(parents=True, exist_ok=True)
+shutil.copy2("LICENSE", resources / "LICENSE")
+shutil.copy2("THIRD_PARTY_NOTICES.md", resources / "THIRD_PARTY_NOTICES.md")
 (contents / "Info.plist").write_bytes(plistlib.dumps({
     "CFBundleExecutable": "diffz",
     "CFBundleIdentifier": "io.github.zzwong.Diffz",

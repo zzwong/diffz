@@ -13,8 +13,10 @@ on:
       - 'scripts/package-linux-deb.sh'
       - 'scripts/stage-linux.sh'
       - 'scripts/tests/test_package_linux_deb.py'
+      - 'scripts/tests/test_stage_linux.py'
       - 'docs/linux.md'
       - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
   workflow_call:
   workflow_dispatch:
 
@@ -72,6 +74,7 @@ jobs:
             libssl-dev libzstd-dev libvulkan-dev \
             dpkg-dev binutils desktop-file-utils appstream
 
+          python3 scripts/tests/test_stage_linux.py -v
           python3 scripts/tests/test_package_linux_deb.py
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
           if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
@@ -90,6 +93,8 @@ jobs:
             dist/linux-root/usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
           bash scripts/package-linux-deb.sh
           (cd dist && sha256sum ./*.deb > SHA256SUMS)
+          dpkg-deb --fsys-tarfile dist/*.deb \
+            | tar -tf - -- ./usr/share/doc/diffz/THIRD_PARTY_NOTICES.md >/dev/null
           BUILD
 
       # Start again from the base image: build dependencies must not mask

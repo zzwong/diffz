@@ -54,4 +54,6 @@ package() {
   install -Dm644 packaging/linux/icons/io.github.zzwong.Diffz.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.zzwong.Diffz.svg"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY_NOTICES.md \
+    "$pkgdir/usr/share/doc/$pkgname/THIRD_PARTY_NOTICES.md"
 }

@@ -91,7 +91,7 @@ jobs:
             echo 'Update the Arch package version for this release.' >&2
             exit 1
           fi
-          if ! git diff --quiet "$_commit" HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml crates fixtures packaging/linux LICENSE; then
+          if ! git diff --quiet "$_commit" HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml crates fixtures packaging/linux LICENSE THIRD_PARTY_NOTICES.md; then
             echo 'Update the Arch source commit and checksum to include the application changes.' >&2
             exit 1
           fi

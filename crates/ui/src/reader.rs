@@ -1,11 +1,52 @@
 use crate::{
-    app::{Panel, Workbench},
+    app::{Panel, PanelResizeState, Workbench},
     commands::{self, Command},
     viewport::ContextRequest,
 };
 use diffz_core::{domain::*, provider::OpenRequest};
 use gpui_kit::component::{StyledExt, button::*, input::Input};
 use gpui_kit::{prelude::*, *};
+
+const FILES_EDGE_X: f32 = 24.;
+const FILES_COLLAPSE_WIDTH: f32 = 150.;
+const FILES_COLLAPSE_VELOCITY: f32 = -900.;
+
+fn should_collapse_files(pointer_x: f32, raw_desired_width: f32, velocity_x: f32) -> bool {
+    pointer_x <= FILES_EDGE_X
+        || (raw_desired_width <= FILES_COLLAPSE_WIDTH && velocity_x <= FILES_COLLAPSE_VELOCITY)
+}
+
+fn effective_resize_velocity(velocity_x: f32, sample_age: std::time::Duration) -> f32 {
+    if sample_age <= std::time::Duration::from_millis(100) {
+        velocity_x
+    } else {
+        0.
+    }
+}
+
+fn cancel_resize_on_unpressed_mouse(
+    resizing_panel: &mut Option<PanelResizeState>,
+    pressed_button: Option<MouseButton>,
+) -> bool {
+    if resizing_panel.is_some() && pressed_button != Some(MouseButton::Left) {
+        *resizing_panel = None;
+        true
+    } else {
+        false
+    }
+}
+
+fn adjacent_file_index(index: usize, len: usize, forward: bool) -> Option<usize> {
+    if index >= len {
+        return None;
+    }
+    if forward {
+        index.checked_add(1).filter(|next| *next < len)
+    } else {
+        index.checked_sub(1)
+    }
+}
+
 impl Workbench {
     /// Move between changed files after scrolling reaches an edge; both rich and source
     /// views use this helper. Positive `direction` advances.
@@ -151,7 +192,10 @@ impl Workbench {
     }
     fn panel_divider(&self, left: bool, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();
-        let active = self.resizing_panel.is_some_and(|(side, _, _)| side == left);
+        let active = self
+            .resizing_panel
+            .as_ref()
+            .is_some_and(|state| state.left == left);
         div()
             .id(if left {
                 "resize-files"
@@ -203,15 +247,19 @@ impl Workbench {
                     } else {
                         a.overview_resize_focus.focus(w, cx);
                     }
-                    a.resizing_panel = Some((
+                    let x = f32::from(e.position.x);
+                    a.resizing_panel = Some(PanelResizeState {
                         left,
-                        f32::from(e.position.x),
-                        if left {
+                        start_x: x,
+                        start_width: if left {
                             a.files_width
                         } else {
                             a.overview_width
                         },
-                    ));
+                        last_x: x,
+                        last_sample: std::time::Instant::now(),
+                        velocity_x: 0.,
+                    });
                     a.drag_start = None;
                     cx.stop_propagation();
                     cx.notify();
@@ -375,13 +423,16 @@ impl Workbench {
                     .visible_files
                     .iter()
                     .position(|f| Some(f) == current.as_ref())
+                    && let Some(next) = adjacent_file_index(
+                        at,
+                        self.visible_files.len(),
+                        command == Command::NextFile,
+                    )
                 {
-                    let next = if command == Command::NextFile {
-                        (at + 1).min(self.visible_files.len() - 1)
-                    } else {
-                        at.saturating_sub(1)
-                    };
                     self.select_file(self.visible_files[next].clone(), cx);
+                    if let Some(v) = &self.viewport {
+                        v.borrow_mut().jump_first_hunk();
+                    }
                 }
             }
             Command::Export => self.begin_export(cx),
@@ -677,7 +728,7 @@ impl Render for Workbench {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         diffz_core::timing::mark_once("first render");
         let skin = self.skin();
-        let titlebar = self.topbar(cx);
+        let titlebar = self.topbar(window, cx);
         let toolbar = self.toolbar(cx);
         let mut source = div().v_flex().flex_1().min_w_0().min_h_0().child(toolbar);
         if self.find_visible {
@@ -796,22 +847,57 @@ impl Render for Workbench {
         let mut root = div()
             .id("workbench")
             .on_mouse_move(cx.listener(|a, e: &MouseMoveEvent, window, cx| {
-                if let Some((left, start, width)) = a.resizing_panel {
-                    if e.pressed_button != Some(MouseButton::Left) {
-                        a.resizing_panel = None;
+                if cancel_resize_on_unpressed_mouse(&mut a.resizing_panel, e.pressed_button) {
+                    cx.notify();
+                    return;
+                }
+                if let Some(state) = a.resizing_panel.as_mut() {
+                    let x = f32::from(e.position.x);
+                    let now = std::time::Instant::now();
+                    let elapsed = now.saturating_duration_since(state.last_sample);
+                    if elapsed.is_zero() {
+                        state.velocity_x = 0.;
                     } else {
-                        let delta = f32::from(e.position.x) - start;
-                        a.resize_panel(left, width + if left { delta } else { -delta }, window);
+                        state.velocity_x = (x - state.last_x) / elapsed.as_secs_f32();
                     }
+                    state.last_x = x;
+                    state.last_sample = now;
+                    let left = state.left;
+                    let desired = state.start_width
+                        + if left {
+                            x - state.start_x
+                        } else {
+                            state.start_x - x
+                        };
+                    a.resize_panel(left, desired, window);
                     cx.notify();
                 }
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|a, _, _, cx| {
-                    if a.resizing_panel.take().is_some() {
-                        cx.notify();
+                cx.listener(|a, e: &MouseUpEvent, window, cx| {
+                    let Some(state) = a.resizing_panel.take() else {
+                        return;
+                    };
+                    let x = f32::from(e.position.x);
+                    let desired = state.start_width
+                        + if state.left {
+                            x - state.start_x
+                        } else {
+                            state.start_x - x
+                        };
+                    let velocity_x = effective_resize_velocity(
+                        state.velocity_x,
+                        std::time::Instant::now().saturating_duration_since(state.last_sample),
+                    );
+                    a.resize_panel(state.left, desired, window);
+                    if state.left && should_collapse_files(x, desired, velocity_x) {
+                        a.files_width = state.start_width;
+                        a.files_visible = false;
+                        a.diff_focus.focus(window, cx);
+                        a.schedule_view_save(cx);
                     }
+                    cx.notify();
                 }),
             )
             .track_focus(&self.root_focus)
@@ -914,5 +1000,84 @@ impl Render for Workbench {
             root = root.child(self.panel_view(cx));
         }
         root
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn files_collapse_at_the_pointer_edge() {
+        assert!(should_collapse_files(24., 180., 0.));
+        assert!(!should_collapse_files(24.1, 180., 0.));
+    }
+
+    #[::core::prelude::v1::test]
+    fn files_collapse_at_the_fast_raw_width_boundary() {
+        assert!(should_collapse_files(100., 150., -900.));
+        assert!(!should_collapse_files(100., 150., -899.9));
+        assert!(!should_collapse_files(100., 150.1, -1_000.));
+    }
+
+    #[::core::prelude::v1::test]
+    fn slow_drag_below_minimum_does_not_collapse_files() {
+        assert!(!should_collapse_files(100., 170., -100.));
+    }
+
+    #[::core::prelude::v1::test]
+    fn resize_velocity_expires_after_100_milliseconds() {
+        assert_eq!(
+            effective_resize_velocity(-1_000., std::time::Duration::from_millis(100)),
+            -1_000.
+        );
+        assert_eq!(
+            effective_resize_velocity(-1_000., std::time::Duration::from_millis(101)),
+            0.
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn unpressed_mouse_move_cancels_active_resize() {
+        let now = std::time::Instant::now();
+        let mut resizing = Some(PanelResizeState {
+            left: true,
+            start_x: 300.,
+            start_width: 282.,
+            last_x: 300.,
+            last_sample: now,
+            velocity_x: 0.,
+        });
+
+        assert!(cancel_resize_on_unpressed_mouse(&mut resizing, None));
+        assert!(resizing.is_none());
+    }
+
+    #[::core::prelude::v1::test]
+    fn returns_only_existing_forward_and_backward_neighbors() {
+        for (index, len, direction, expected) in [
+            (0, 3, true, Some(1)),
+            (1, 3, true, Some(2)),
+            (2, 3, true, None),
+            (2, 3, false, Some(1)),
+            (1, 3, false, Some(0)),
+            (0, 3, false, None),
+        ] {
+            assert_eq!(adjacent_file_index(index, len, direction), expected);
+        }
+    }
+
+    #[::core::prelude::v1::test]
+    fn rejects_empty_and_out_of_range_file_lists() {
+        for (index, len, direction) in [
+            (0, 0, true),
+            (0, 0, false),
+            (3, 3, true),
+            (3, 3, false),
+            (usize::MAX, 3, true),
+            (usize::MAX, 3, false),
+        ] {
+            assert_eq!(adjacent_file_index(index, len, direction), None);
+        }
     }
 }

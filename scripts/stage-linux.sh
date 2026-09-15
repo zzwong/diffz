@@ -13,6 +13,9 @@ binary="${DIFFZ_BINARY:-target/release/diffz}"
 
 rm -rf "$stage"
 install -Dm755 "$binary" "$stage/usr/bin/diffz"
+install -Dm644 LICENSE "$stage/usr/share/licenses/diffz/LICENSE"
+install -Dm644 THIRD_PARTY_NOTICES.md \
+  "$stage/usr/share/doc/diffz/THIRD_PARTY_NOTICES.md"
 install -Dm644 packaging/linux/io.github.zzwong.Diffz.desktop \
   "$stage/usr/share/applications/io.github.zzwong.Diffz.desktop"
 install -Dm644 packaging/linux/io.github.zzwong.Diffz.metainfo.xml \
