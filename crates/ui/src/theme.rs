@@ -96,17 +96,15 @@ impl Skin {
     }
     pub fn token(self, t: Token) -> Hsla {
         match t {
-            Token::Keyword => self.accent,
+            Token::Keyword | Token::Operator => self.accent,
             Token::Function => self.function,
-            Token::Type | Token::Namespace | Token::Attribute | Token::Label => self.symbol,
-            Token::String | Token::Number | Token::Constant => self.warning,
-            Token::Comment => self.muted,
-            Token::Property
-            | Token::Parameter
-            | Token::Variable
-            | Token::Operator
-            | Token::Punctuation
-            | Token::Embedded => self.text,
+            Token::Type | Token::Namespace | Token::Attribute | Token::Label | Token::Property => {
+                self.symbol
+            }
+            Token::String => self.positive,
+            Token::Number | Token::Constant => self.warning,
+            Token::Comment | Token::Punctuation => self.muted,
+            Token::Variable | Token::Parameter | Token::Embedded => self.text,
         }
     }
 }
@@ -130,5 +128,39 @@ pub fn code_font() -> &'static str {
         "Menlo"
     } else {
         "DejaVu Sans Mono"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn syntax_tokens_use_their_semantic_palette_colors() {
+        let skin = Skin::new(true);
+
+        for token in [Token::Keyword, Token::Operator] {
+            assert_eq!(skin.token(token), skin.accent);
+        }
+        assert_eq!(skin.token(Token::Function), skin.function);
+        for token in [
+            Token::Type,
+            Token::Namespace,
+            Token::Attribute,
+            Token::Label,
+            Token::Property,
+        ] {
+            assert_eq!(skin.token(token), skin.symbol);
+        }
+        assert_eq!(skin.token(Token::String), skin.positive);
+        for token in [Token::Number, Token::Constant] {
+            assert_eq!(skin.token(token), skin.warning);
+        }
+        for token in [Token::Comment, Token::Punctuation] {
+            assert_eq!(skin.token(token), skin.muted);
+        }
+        for token in [Token::Variable, Token::Parameter, Token::Embedded] {
+            assert_eq!(skin.token(token), skin.text);
+        }
     }
 }

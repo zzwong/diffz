@@ -176,15 +176,26 @@ mod enabled {
         "",
         tree_sitter_typescript::LOCALS_QUERY
     );
-    grammar!(
-        TSX,
-        build_tsx,
-        "tsx",
-        tree_sitter_typescript::LANGUAGE_TSX,
-        tree_sitter_typescript::HIGHLIGHTS_QUERY,
-        "",
-        tree_sitter_typescript::LOCALS_QUERY
-    );
+    static TSX: Lang = Lang {
+        name: "tsx",
+        build: build_tsx,
+        config: OnceLock::new(),
+    };
+    fn build_tsx() -> HighlightConfiguration {
+        let highlights = [
+            tree_sitter_javascript::HIGHLIGHT_QUERY,
+            tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
+            tree_sitter_typescript::HIGHLIGHTS_QUERY,
+        ]
+        .join("\n");
+        build_config(
+            tree_sitter_typescript::LANGUAGE_TSX,
+            "tsx",
+            &highlights,
+            "",
+            tree_sitter_typescript::LOCALS_QUERY,
+        )
+    }
     grammar!(
         JSON,
         build_json,
@@ -439,6 +450,41 @@ mod tests {
         assert!(has(&lines, 1, 4..7, Token::Keyword));
         assert!(has(&lines, 1, 12..13, Token::Constant));
         assert!(has(&lines, 1, 15..20, Token::Comment));
+    }
+    #[test]
+    fn tsx_captures_javascript_jsx_and_typescript_tokens() {
+        let source = "import { useState } from \"react\"; // import/string/comment\n\n".to_owned()
+            + "type Props = { title: string };\n"
+            + "function render(props: Props) {\n"
+            + "    const count: number = 1;\n"
+            + "    return <button aria-label={props.title}>{props.title + count}</button>;\n"
+            + "}";
+        let lines = highlight("component.test.tsx", &source, &AtomicUsize::new(0));
+
+        assert!(has_text(&lines, &source, "import", Token::Keyword));
+        assert!(has_text(&lines, &source, "\"react\"", Token::String));
+        assert!(has_text(
+            &lines,
+            &source,
+            "// import/string/comment",
+            Token::Comment
+        ));
+        assert!(has_text(&lines, &source, "Props", Token::Type));
+        assert!(has_text(&lines, &source, "render", Token::Function));
+        assert!(has_text(&lines, &source, "button", Token::Attribute));
+        assert!(has_text(&lines, &source, "aria-label", Token::Attribute));
+        assert!(has_text(&lines, &source, "props", Token::Parameter));
+        assert!(has_text(&lines, &source, "title", Token::Property));
+        assert!(has_text(&lines, &source, "+", Token::Operator));
+        assert!(has_text(&lines, &source, "(", Token::Punctuation));
+    }
+
+    fn has_text(lines: &[Vec<Span>], source: &str, text: &str, token: Token) -> bool {
+        source.lines().enumerate().any(|(line, source_line)| {
+            lines[line].iter().any(|span| {
+                span.token == token && source_line.get(span.bytes.clone()) == Some(text)
+            })
+        })
     }
     #[test]
     fn every_grammar_compiles_and_highlights_something() {
