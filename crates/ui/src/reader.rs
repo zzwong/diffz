@@ -36,6 +36,17 @@ fn cancel_resize_on_unpressed_mouse(
     }
 }
 
+fn adjacent_file_index(index: usize, len: usize, forward: bool) -> Option<usize> {
+    if index >= len {
+        return None;
+    }
+    if forward {
+        index.checked_add(1).filter(|next| *next < len)
+    } else {
+        index.checked_sub(1)
+    }
+}
+
 impl Workbench {
     /// Move between changed files after scrolling reaches an edge; both rich and source
     /// views use this helper. Positive `direction` advances.
@@ -412,12 +423,12 @@ impl Workbench {
                     .visible_files
                     .iter()
                     .position(|f| Some(f) == current.as_ref())
+                    && let Some(next) = adjacent_file_index(
+                        at,
+                        self.visible_files.len(),
+                        command == Command::NextFile,
+                    )
                 {
-                    let next = if command == Command::NextFile {
-                        (at + 1).min(self.visible_files.len() - 1)
-                    } else {
-                        at.saturating_sub(1)
-                    };
                     self.select_file(self.visible_files[next].clone(), cx);
                     if let Some(v) = &self.viewport {
                         v.borrow_mut().jump_first_hunk();
@@ -1040,5 +1051,33 @@ mod tests {
 
         assert!(cancel_resize_on_unpressed_mouse(&mut resizing, None));
         assert!(resizing.is_none());
+    }
+
+    #[::core::prelude::v1::test]
+    fn returns_only_existing_forward_and_backward_neighbors() {
+        for (index, len, direction, expected) in [
+            (0, 3, true, Some(1)),
+            (1, 3, true, Some(2)),
+            (2, 3, true, None),
+            (2, 3, false, Some(1)),
+            (1, 3, false, Some(0)),
+            (0, 3, false, None),
+        ] {
+            assert_eq!(adjacent_file_index(index, len, direction), expected);
+        }
+    }
+
+    #[::core::prelude::v1::test]
+    fn rejects_empty_and_out_of_range_file_lists() {
+        for (index, len, direction) in [
+            (0, 0, true),
+            (0, 0, false),
+            (3, 3, true),
+            (3, 3, false),
+            (usize::MAX, 3, true),
+            (usize::MAX, 3, false),
+        ] {
+            assert_eq!(adjacent_file_index(index, len, direction), None);
+        }
     }
 }
