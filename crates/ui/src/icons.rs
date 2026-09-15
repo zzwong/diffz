@@ -49,9 +49,43 @@ pub enum AppIcon {
     FileNpm,
     FileSettings,
     FileLock,
+    FileCsharp,
+    FileFsharp,
+    FileVisualBasic,
+    FileVisualStudio,
+    FileObjectiveC,
+    FileSwift,
+    FileKotlin,
+    FileScala,
+    FilePhp,
+    FileLua,
+    FilePerl,
+    FileR,
+    FileDart,
+    FileHaskell,
+    FileZig,
+    FileNim,
+    FileOcaml,
+    FileErlang,
+    FileClojure,
+    FileVue,
+    FileSvelte,
+    FileAstro,
+    FileGraphql,
+    FileProto,
+    FileTerraform,
+    FileHcl,
+    FilePrisma,
+    FileJupyter,
+    FileGradle,
+    FileMaven,
+    FileCmake,
+    FileMeson,
+    FileNix,
+    FileAsciidoc,
 }
 impl AppIcon {
-    pub const ALL: [AppIcon; 43] = [
+    pub const ALL: [AppIcon; 77] = [
         AppIcon::WrapText,
         AppIcon::Columns2,
         AppIcon::Rows2,
@@ -95,6 +129,40 @@ impl AppIcon {
         AppIcon::FileNpm,
         AppIcon::FileSettings,
         AppIcon::FileLock,
+        AppIcon::FileCsharp,
+        AppIcon::FileFsharp,
+        AppIcon::FileVisualBasic,
+        AppIcon::FileVisualStudio,
+        AppIcon::FileObjectiveC,
+        AppIcon::FileSwift,
+        AppIcon::FileKotlin,
+        AppIcon::FileScala,
+        AppIcon::FilePhp,
+        AppIcon::FileLua,
+        AppIcon::FilePerl,
+        AppIcon::FileR,
+        AppIcon::FileDart,
+        AppIcon::FileHaskell,
+        AppIcon::FileZig,
+        AppIcon::FileNim,
+        AppIcon::FileOcaml,
+        AppIcon::FileErlang,
+        AppIcon::FileClojure,
+        AppIcon::FileVue,
+        AppIcon::FileSvelte,
+        AppIcon::FileAstro,
+        AppIcon::FileGraphql,
+        AppIcon::FileProto,
+        AppIcon::FileTerraform,
+        AppIcon::FileHcl,
+        AppIcon::FilePrisma,
+        AppIcon::FileJupyter,
+        AppIcon::FileGradle,
+        AppIcon::FileMaven,
+        AppIcon::FileCmake,
+        AppIcon::FileMeson,
+        AppIcon::FileNix,
+        AppIcon::FileAsciidoc,
     ];
     pub fn for_path(path: &str) -> Self {
         let lower_path = path.to_ascii_lowercase().replace('\\', "/");
@@ -144,14 +212,121 @@ impl AppIcon {
         if matches!(basename, "go.mod" | "go.sum" | "go.work" | "go.work.sum") {
             return Self::FileGo;
         }
+        let is_requirements_variant = basename
+            .strip_prefix("requirements-")
+            .or_else(|| basename.strip_prefix("requirements."))
+            .is_some_and(|suffix| {
+                suffix
+                    .strip_suffix(".txt")
+                    .or_else(|| suffix.strip_suffix(".in"))
+                    .is_some_and(|name| !name.is_empty())
+            });
+        if matches!(
+            basename,
+            "pyproject.toml"
+                | "pipfile"
+                | "pipfile.lock"
+                | "poetry.lock"
+                | "requirements"
+                | "requirements.txt"
+                | "requirements.in"
+        ) || is_requirements_variant
+        {
+            return Self::FilePython;
+        }
         if is_name_variant("gemfile") || is_name_variant("rakefile") {
             return Self::FileRuby;
         }
-        if basename == "mix.exs" {
+        if matches!(basename, "mix.exs" | "mix.lock") {
             return Self::FileElixir;
+        }
+        if matches!(basename, "rebar.config" | "rebar.lock") {
+            return Self::FileErlang;
+        }
+        if basename.ends_with(".rproj") {
+            return Self::FileR;
+        }
+        if matches!(basename, "pubspec.yaml" | "pubspec.lock") {
+            return Self::FileDart;
+        }
+        if matches!(basename, "mvnw" | "mvnw.cmd") {
+            return Self::FileMaven;
+        }
+        if matches!(
+            basename,
+            "cabal.project" | "stack.yaml" | "package.yaml" | "flake.lock"
+        ) || basename.starts_with("cabal.project.")
+            || basename.starts_with("stack.yaml.")
+        {
+            return if basename == "flake.lock" {
+                Self::FileNix
+            } else {
+                Self::FileHaskell
+            };
+        }
+        if basename == ".terraform.lock.hcl"
+            || basename.ends_with(".tf.json")
+            || basename.ends_with(".tfvars.json")
+            || basename.ends_with(".tfstate.backup")
+        {
+            return Self::FileTerraform;
+        }
+        if basename.ends_with(".csproj") {
+            return Self::FileCsharp;
+        }
+        if basename.ends_with(".sln") || basename.ends_with(".slnf") || basename.ends_with(".slnx")
+        {
+            return Self::FileVisualStudio;
+        }
+        if basename.ends_with(".fsproj") {
+            return Self::FileFsharp;
+        }
+        if basename.ends_with(".vbproj") {
+            return Self::FileVisualBasic;
+        }
+        if basename.ends_with(".vcxproj") {
+            return Self::FileCpp;
         }
         if basename == "gleam.toml" {
             return Self::FileGleam;
+        }
+        if matches!(
+            basename,
+            "build.gradle"
+                | "build.gradle.kts"
+                | "settings.gradle"
+                | "settings.gradle.kts"
+                | "gradle.properties"
+                | "gradlew"
+                | "gradlew.bat"
+                | "gradle-wrapper.properties"
+        ) {
+            return Self::FileGradle;
+        }
+        if matches!(basename, "pom.xml" | "maven.config" | "jvm.config") {
+            return Self::FileMaven;
+        }
+        if matches!(
+            basename,
+            "cmakelists.txt" | "cmakecache.txt" | "cmakepresets.json"
+        ) {
+            return Self::FileCmake;
+        }
+        if matches!(
+            basename,
+            "meson.build" | "meson_options.txt" | "meson.options"
+        ) {
+            return Self::FileMeson;
+        }
+        if matches!(
+            basename,
+            ".graphqlconfig" | "prisma.yml" | "prisma.config.ts"
+        ) {
+            return if basename == ".graphqlconfig" {
+                Self::FileGraphql
+            } else {
+                Self::FilePrisma
+            };
         }
         if basename == "pkgbuild" {
             return Self::FileShell;
@@ -162,6 +337,25 @@ impl AppIcon {
 
         match extension {
             Some("rs") => Self::FileRust,
+            Some("cs" | "csx" | "csharp") => Self::FileCsharp,
+            Some("fs" | "fsx" | "fsi" | "fsscript") => Self::FileFsharp,
+            Some("vb" | "vbs" | "vbproj" | "bas" | "vba") => Self::FileVisualBasic,
+            Some("m" | "mm") => Self::FileObjectiveC,
+            Some("swift" | "xcplayground") => Self::FileSwift,
+            Some("kt" | "kts") => Self::FileKotlin,
+            Some("scala" | "sc") => Self::FileScala,
+            Some("php" | "php4" | "php5" | "phtml" | "ctp") => Self::FilePhp,
+            Some("lua") => Self::FileLua,
+            Some("pl" | "pm" | "raku" | "pod" | "psgi" | "t") => Self::FilePerl,
+            Some("r" | "rmd" | "rhistory" | "rprofile" | "rt") => Self::FileR,
+            Some("dart") => Self::FileDart,
+            Some("hs" | "lhs") => Self::FileHaskell,
+            Some("cabal") => Self::FileHaskell,
+            Some("zig" | "zon") => Self::FileZig,
+            Some("nim" | "nimble") => Self::FileNim,
+            Some("ml" | "mli" | "cmx") => Self::FileOcaml,
+            Some("erl" | "hrl") => Self::FileErlang,
+            Some("clj" | "cljs" | "cljc" | "cljx" | "clojure" | "edn") => Self::FileClojure,
             Some("js" | "mjs" | "cjs" | "es6" | "esx" | "pac") => Self::FileJavascript,
             Some("jsx") => Self::FileReact,
             Some("ts" | "mts" | "cts") => Self::FileTypescript,
@@ -196,6 +390,9 @@ impl AppIcon {
             Some("css" | "scss" | "sass" | "less") => Self::FileCss,
             Some("ex" | "exs" | "eex" | "leex" | "heex") => Self::FileElixir,
             Some("gleam") => Self::FileGleam,
+            Some("vue") => Self::FileVue,
+            Some("svelte") => Self::FileSvelte,
+            Some("astro") => Self::FileAstro,
             Some(
                 "md" | "markdown" | "mdx" | "rst" | "copilotmd" | "litcoffee" | "markdn" | "mdown"
                 | "mdtext" | "mdtxt" | "mdwn" | "mkd" | "mkdn" | "ronn" | "workbook" | "txt",
@@ -206,6 +403,12 @@ impl AppIcon {
                 | "bmp" | "heif" | "heic" | "jxl" | "raw" | "tga" | "xcf" | "icns",
             ) => Self::FileImage,
             Some("diff" | "patch" | "rej") => Self::FileDiff,
+            Some("graphql" | "gql") => Self::FileGraphql,
+            Some("proto") => Self::FileProto,
+            Some("tf" | "tfvars" | "tfstate" | "tfbackend") => Self::FileTerraform,
+            Some("hcl") => Self::FileHcl,
+            Some("prisma") => Self::FilePrisma,
+            Some("ipynb") => Self::FileJupyter,
             Some(
                 "sql" | "pks" | "pkb" | "accdb" | "mdb" | "sqlite" | "sqlite3" | "pgsql"
                 | "postgres" | "plpgsql" | "psql" | "db" | "db3" | "dblite" | "dblite3" | "odb"
@@ -237,6 +440,11 @@ impl AppIcon {
                 Self::FileFont
             }
             Some("mk") => Self::FileMakefile,
+            Some("gradle") => Self::FileGradle,
+            Some("cmake") => Self::FileCmake,
+            Some("wrap") => Self::FileMeson,
+            Some("nix") => Self::FileNix,
+            Some("ad" | "adoc" | "asciidoc") => Self::FileAsciidoc,
             Some("dockerignore" | "containerignore" | "dockerfile" | "containerfile") => {
                 Self::FileDocker
             }
@@ -295,6 +503,40 @@ impl AppIcon {
             AppIcon::FileNpm => "icons/diffz/file-npm.svg",
             AppIcon::FileSettings => "icons/diffz/file-settings.svg",
             AppIcon::FileLock => "icons/diffz/file-lock.svg",
+            AppIcon::FileCsharp => "icons/diffz/file-csharp.svg",
+            AppIcon::FileFsharp => "icons/diffz/file-fsharp.svg",
+            AppIcon::FileVisualBasic => "icons/diffz/file-visual-basic.svg",
+            AppIcon::FileVisualStudio => "icons/diffz/file-visual-studio.svg",
+            AppIcon::FileObjectiveC => "icons/diffz/file-objective-c.svg",
+            AppIcon::FileSwift => "icons/diffz/file-swift.svg",
+            AppIcon::FileKotlin => "icons/diffz/file-kotlin.svg",
+            AppIcon::FileScala => "icons/diffz/file-scala.svg",
+            AppIcon::FilePhp => "icons/diffz/file-php.svg",
+            AppIcon::FileLua => "icons/diffz/file-lua.svg",
+            AppIcon::FilePerl => "icons/diffz/file-perl.svg",
+            AppIcon::FileR => "icons/diffz/file-r.svg",
+            AppIcon::FileDart => "icons/diffz/file-dart.svg",
+            AppIcon::FileHaskell => "icons/diffz/file-haskell.svg",
+            AppIcon::FileZig => "icons/diffz/file-zig.svg",
+            AppIcon::FileNim => "icons/diffz/file-nim.svg",
+            AppIcon::FileOcaml => "icons/diffz/file-ocaml.svg",
+            AppIcon::FileErlang => "icons/diffz/file-erlang.svg",
+            AppIcon::FileClojure => "icons/diffz/file-clojure.svg",
+            AppIcon::FileVue => "icons/diffz/file-vue.svg",
+            AppIcon::FileSvelte => "icons/diffz/file-svelte.svg",
+            AppIcon::FileAstro => "icons/diffz/file-astro.svg",
+            AppIcon::FileGraphql => "icons/diffz/file-graphql.svg",
+            AppIcon::FileProto => "icons/diffz/file-proto.svg",
+            AppIcon::FileTerraform => "icons/diffz/file-terraform.svg",
+            AppIcon::FileHcl => "icons/diffz/file-hcl.svg",
+            AppIcon::FilePrisma => "icons/diffz/file-prisma.svg",
+            AppIcon::FileJupyter => "icons/diffz/file-jupyter.svg",
+            AppIcon::FileGradle => "icons/diffz/file-gradle.svg",
+            AppIcon::FileMaven => "icons/diffz/file-maven.svg",
+            AppIcon::FileCmake => "icons/diffz/file-cmake.svg",
+            AppIcon::FileMeson => "icons/diffz/file-meson.svg",
+            AppIcon::FileNix => "icons/diffz/file-nix.svg",
+            AppIcon::FileAsciidoc => "icons/diffz/file-asciidoc.svg",
         }
     }
     fn bytes(path: &str) -> Option<&'static [u8]> {
@@ -344,6 +586,44 @@ impl AppIcon {
             "icons/diffz/file-npm.svg" => include_bytes!("../icons/file-npm.svg"),
             "icons/diffz/file-settings.svg" => include_bytes!("../icons/file-settings.svg"),
             "icons/diffz/file-lock.svg" => include_bytes!("../icons/file-lock.svg"),
+            "icons/diffz/file-csharp.svg" => include_bytes!("../icons/file-csharp.svg"),
+            "icons/diffz/file-fsharp.svg" => include_bytes!("../icons/file-fsharp.svg"),
+            "icons/diffz/file-visual-basic.svg" => {
+                include_bytes!("../icons/file-visual-basic.svg")
+            }
+            "icons/diffz/file-visual-studio.svg" => {
+                include_bytes!("../icons/file-visual-studio.svg")
+            }
+            "icons/diffz/file-objective-c.svg" => include_bytes!("../icons/file-objective-c.svg"),
+            "icons/diffz/file-swift.svg" => include_bytes!("../icons/file-swift.svg"),
+            "icons/diffz/file-kotlin.svg" => include_bytes!("../icons/file-kotlin.svg"),
+            "icons/diffz/file-scala.svg" => include_bytes!("../icons/file-scala.svg"),
+            "icons/diffz/file-php.svg" => include_bytes!("../icons/file-php.svg"),
+            "icons/diffz/file-lua.svg" => include_bytes!("../icons/file-lua.svg"),
+            "icons/diffz/file-perl.svg" => include_bytes!("../icons/file-perl.svg"),
+            "icons/diffz/file-r.svg" => include_bytes!("../icons/file-r.svg"),
+            "icons/diffz/file-dart.svg" => include_bytes!("../icons/file-dart.svg"),
+            "icons/diffz/file-haskell.svg" => include_bytes!("../icons/file-haskell.svg"),
+            "icons/diffz/file-zig.svg" => include_bytes!("../icons/file-zig.svg"),
+            "icons/diffz/file-nim.svg" => include_bytes!("../icons/file-nim.svg"),
+            "icons/diffz/file-ocaml.svg" => include_bytes!("../icons/file-ocaml.svg"),
+            "icons/diffz/file-erlang.svg" => include_bytes!("../icons/file-erlang.svg"),
+            "icons/diffz/file-clojure.svg" => include_bytes!("../icons/file-clojure.svg"),
+            "icons/diffz/file-vue.svg" => include_bytes!("../icons/file-vue.svg"),
+            "icons/diffz/file-svelte.svg" => include_bytes!("../icons/file-svelte.svg"),
+            "icons/diffz/file-astro.svg" => include_bytes!("../icons/file-astro.svg"),
+            "icons/diffz/file-graphql.svg" => include_bytes!("../icons/file-graphql.svg"),
+            "icons/diffz/file-proto.svg" => include_bytes!("../icons/file-proto.svg"),
+            "icons/diffz/file-terraform.svg" => include_bytes!("../icons/file-terraform.svg"),
+            "icons/diffz/file-hcl.svg" => include_bytes!("../icons/file-hcl.svg"),
+            "icons/diffz/file-prisma.svg" => include_bytes!("../icons/file-prisma.svg"),
+            "icons/diffz/file-jupyter.svg" => include_bytes!("../icons/file-jupyter.svg"),
+            "icons/diffz/file-gradle.svg" => include_bytes!("../icons/file-gradle.svg"),
+            "icons/diffz/file-maven.svg" => include_bytes!("../icons/file-maven.svg"),
+            "icons/diffz/file-cmake.svg" => include_bytes!("../icons/file-cmake.svg"),
+            "icons/diffz/file-meson.svg" => include_bytes!("../icons/file-meson.svg"),
+            "icons/diffz/file-nix.svg" => include_bytes!("../icons/file-nix.svg"),
+            "icons/diffz/file-asciidoc.svg" => include_bytes!("../icons/file-asciidoc.svg"),
             _ => return None,
         })
     }
@@ -543,6 +823,203 @@ mod tests {
             ),
             ("icons/diffz/file-lock.svg", ["tmp/session.lock"].as_slice()),
             (
+                "icons/diffz/file-terraform.svg",
+                [
+                    "infra/.terraform.lock.hcl",
+                    "infra/config.tf.json",
+                    "infra/variables.tfvars.json",
+                    "infra/state.tfstate.backup",
+                ]
+                .as_slice(),
+            ),
+            ("icons/diffz/file-csharp.svg", ["src/App.csproj"].as_slice()),
+            (
+                "icons/diffz/file-visual-studio.svg",
+                ["src/App.sln", "src/App.slnf", "src/App.slnx"].as_slice(),
+            ),
+            ("icons/diffz/file-fsharp.svg", ["src/App.fsproj"].as_slice()),
+            (
+                "icons/diffz/file-visual-basic.svg",
+                ["src/App.vbproj"].as_slice(),
+            ),
+            ("icons/diffz/file-cpp.svg", ["src/App.vcxproj"].as_slice()),
+            (
+                "icons/diffz/file-maven.svg",
+                ["mvnw", "mvnw.cmd"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-dart.svg",
+                ["pubspec.yaml", "pubspec.lock"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-r.svg",
+                ["analysis/report.rproj"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-erlang.svg",
+                ["rebar.config", "rebar.lock"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-haskell.svg",
+                [
+                    "cabal.project",
+                    "cabal.project.local",
+                    "stack.yaml",
+                    "stack.yaml.lock",
+                    "package.yaml",
+                    "package.cabal",
+                ]
+                .as_slice(),
+            ),
+            ("icons/diffz/file-nix.svg", ["flake.lock"].as_slice()),
+            ("icons/diffz/file-elixir.svg", ["mix.lock"].as_slice()),
+            (
+                "icons/diffz/file-python.svg",
+                [
+                    "pyproject.toml",
+                    "Pipfile",
+                    "Pipfile.lock",
+                    "poetry.lock",
+                    "requirements.txt",
+                    "requirements-dev.txt",
+                    "requirements",
+                ]
+                .as_slice(),
+            ),
+            (
+                "icons/diffz/file-csharp.svg",
+                ["src/Program.cs", "src/Program.csx"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-fsharp.svg",
+                ["src/Program.fs", "src/Program.fsx"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-visual-basic.svg",
+                ["src/Module.vb"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-objective-c.svg",
+                ["Sources/App.m", "Sources/App.mm"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-swift.svg",
+                ["Sources/App.swift"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-kotlin.svg",
+                ["src/Main.kt", "src/Main.kts"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-scala.svg",
+                ["src/Main.scala", "src/Build.sc"].as_slice(),
+            ),
+            ("icons/diffz/file-php.svg", ["public/index.php"].as_slice()),
+            ("icons/diffz/file-lua.svg", ["scripts/init.lua"].as_slice()),
+            (
+                "icons/diffz/file-perl.svg",
+                ["scripts/build.pl", "lib/Module.pm"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-r.svg",
+                ["analysis/report.r", "analysis/report.Rmd"].as_slice(),
+            ),
+            ("icons/diffz/file-dart.svg", ["lib/main.dart"].as_slice()),
+            (
+                "icons/diffz/file-haskell.svg",
+                ["src/Main.hs", "src/Main.lhs"].as_slice(),
+            ),
+            ("icons/diffz/file-zig.svg", ["src/main.zig"].as_slice()),
+            ("icons/diffz/file-nim.svg", ["src/main.nim"].as_slice()),
+            (
+                "icons/diffz/file-ocaml.svg",
+                ["lib/main.ml", "lib/main.mli"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-erlang.svg",
+                ["src/app.erl", "src/app.hrl"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-clojure.svg",
+                [
+                    "src/app.clj",
+                    "src/app.cljs",
+                    "src/app.cljc",
+                    "data/app.edn",
+                ]
+                .as_slice(),
+            ),
+            ("icons/diffz/file-vue.svg", ["web/App.vue"].as_slice()),
+            ("icons/diffz/file-svelte.svg", ["web/App.svelte"].as_slice()),
+            ("icons/diffz/file-astro.svg", ["web/index.astro"].as_slice()),
+            (
+                "icons/diffz/file-graphql.svg",
+                ["schema.graphql", "schema.gql", ".graphqlconfig"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-proto.svg",
+                ["api/service.proto"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-terraform.svg",
+                ["infra/main.tf", "infra/variables.tfvars"].as_slice(),
+            ),
+            ("icons/diffz/file-hcl.svg", ["infra/config.hcl"].as_slice()),
+            (
+                "icons/diffz/file-prisma.svg",
+                ["db/schema.prisma", "prisma.yml", "prisma.config.ts"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-jupyter.svg",
+                ["notebooks/analysis.ipynb"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-gradle.svg",
+                [
+                    "build.gradle",
+                    "build.gradle.kts",
+                    "settings.gradle",
+                    "settings.gradle.kts",
+                    "gradle.properties",
+                    "gradlew",
+                    "gradlew.bat",
+                    "gradle-wrapper.properties",
+                ]
+                .as_slice(),
+            ),
+            (
+                "icons/diffz/file-maven.svg",
+                ["pom.xml", "maven.config", "jvm.config"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-cmake.svg",
+                [
+                    "CMakeLists.txt",
+                    "CMakeCache.txt",
+                    "CMakePresets.json",
+                    "build/tool.cmake",
+                ]
+                .as_slice(),
+            ),
+            (
+                "icons/diffz/file-meson.svg",
+                [
+                    "meson.build",
+                    "meson_options.txt",
+                    "meson.options",
+                    "wrap/project.wrap",
+                ]
+                .as_slice(),
+            ),
+            (
+                "icons/diffz/file-nix.svg",
+                ["flake.nix", "shell.nix"].as_slice(),
+            ),
+            (
+                "icons/diffz/file-asciidoc.svg",
+                ["docs/guide.ad", "docs/guide.adoc", "docs/guide.asciidoc"].as_slice(),
+            ),
+            (
                 "icons/diffz/file.svg",
                 ["src/example", "src/example.bin"].as_slice(),
             ),
@@ -555,5 +1032,13 @@ mod tests {
                 );
             }
         }
+        assert_eq!(
+            AppIcon::for_path("config/requirements.yml").path(),
+            "icons/diffz/file-yaml.svg"
+        );
+        assert_eq!(
+            AppIcon::for_path("config/requirements.json").path(),
+            "icons/diffz/file-json.svg"
+        );
     }
 }
