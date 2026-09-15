@@ -143,11 +143,7 @@ impl Workbench {
                             .h_flex()
                             .items_center()
                             .gap_0p5()
-                            .child(
-                                Icon::new(AppIcon::for_path(&row.path))
-                                    .size(px(13.))
-                                    .text_color(skin.muted),
-                            )
+                            .child(Icon::new(AppIcon::for_path(&row.path)).size(px(13.)))
                             .when(reviewed, |d| {
                                 d.child(
                                     Icon::new(IconName::Check)
