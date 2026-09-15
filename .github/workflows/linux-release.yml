@@ -25,7 +25,7 @@ jobs:
             openssl-devel fontconfig-devel \
             libX11-devel libXcursor-devel libXi-devel libxcb-devel \
             libxkbcommon-devel libxkbcommon-x11-devel wayland-devel \
-            vulkan-loader-devel zstd-devel \
+            vulkan-loader-devel libzstd-devel \
             desktop-file-utils appstream rpm-build tar gzip curl
 
       - name: Install pinned Rust toolchain
@@ -85,6 +85,7 @@ jobs:
       - name: Install dependencies declared by the Arch recipe
         shell: bash
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           source packaging/arch/PKGBUILD
           if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$pkgver" ]]; then
             echo 'Update the Arch package version for this release.' >&2
