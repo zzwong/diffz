@@ -43,10 +43,25 @@ the combined `SHA256SUMS` file. Verify the downloaded package with
 The `--ignore-missing` option checks the matching local asset without requiring
 every release asset to be downloaded.
 
-Signed and notarized macOS downloads are not yet available. macOS 15 or newer
-users must build from source using the instructions below. Unsigned local macOS
-ZIPs are for testing only, are not release assets, and must not be presented as
-releases.
+### macOS DMG
+
+macOS 15 or newer Apple Silicon users can download the arm64 DMG and the
+combined `SHA256SUMS` file from the [GitHub Releases
+page](https://github.com/zzwong/diffz/releases). In the directory containing
+both files, verify the download:
+
+```sh
+shasum -a 256 --ignore-missing -c SHA256SUMS
+```
+
+Open the DMG and drag `Diffz.app` to Applications. The app is ad-hoc signed;
+it is not Developer ID signed or notarized. Remove macOS's quarantine marker
+and open it with:
+
+```sh
+xattr -d com.apple.quarantine /Applications/Diffz.app
+open /Applications/Diffz.app
+```
 
 Install and authenticate `gh` for GitHub reviews or `glab` for GitLab reviews.
 Patch files and local Git comparisons do not require either provider CLI.
@@ -72,10 +87,11 @@ macOS can additionally produce an app bundle:
 
 ```sh
 bash scripts/build-macos-app.sh release
-open target/release/diffz.app
+open target/release/Diffz.app
 ```
 
-Neither signing nor notarization is applied to the bundle.
+This source-build bundle is unsigned. Release DMGs are ad-hoc signed, but are
+not Developer ID signed or notarized.
 
 
 ## Usage

@@ -13,15 +13,15 @@ import json, pathlib, plistlib, shutil, subprocess, sys
 metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"]))
 version = next(p["version"] for p in metadata["packages"] if p["name"] == "diffz")
 target = pathlib.Path(metadata["target_directory"]) / sys.argv[1]
-app = target / "diffz.app"
+app = target / "Diffz.app"
 contents = app / "Contents"
 (contents / "MacOS").mkdir(parents=True, exist_ok=True)
 shutil.copy2(target / "diffz", contents / "MacOS" / "diffz")
 (contents / "Info.plist").write_bytes(plistlib.dumps({
     "CFBundleExecutable": "diffz",
-    "CFBundleIdentifier": "local.diffz",
-    "CFBundleName": "diffz",
-    "CFBundleDisplayName": "diffz",
+    "CFBundleIdentifier": "io.github.zzwong.Diffz",
+    "CFBundleName": "Diffz",
+    "CFBundleDisplayName": "Diffz",
     "CFBundlePackageType": "APPL",
     "CFBundleVersion": "1",
     "CFBundleShortVersionString": version,
