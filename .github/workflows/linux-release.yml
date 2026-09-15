@@ -1,4 +1,4 @@
-name: Linux release artifacts
+name: Release artifacts
 
 on:
   push:
@@ -122,9 +122,27 @@ jobs:
   debian:
     uses: ./.github/workflows/debian-packages.yml
 
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build macOS DMG
+        run: make package-macos
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diffz-macos-release
+          path: |
+            target/dist/**/*.dmg
+            target/dist/**/SHA256SUMS
+          if-no-files-found: error
+
   publish:
     if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
-    needs: [linux, arch, debian]
+    needs: [linux, arch, debian, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -159,7 +177,8 @@ jobs:
               -name '*.deb' -o \
               -name '*.rpm' -o \
               -name '*.tar.gz' -o \
-              -name '*.pkg.tar.zst' \
+              -name '*.pkg.tar.zst' -o \
+              -name '*.dmg' \
             \) -print0
           )
 
@@ -175,7 +194,8 @@ jobs:
                 -name '*.deb' -o \
                 -name '*.rpm' -o \
                 -name '*.tar.gz' -o \
-                -name '*.pkg.tar.zst' \
+                -name '*.pkg.tar.zst' -o \
+                -name '*.dmg' \
               \) -printf '%f\0' | LC_ALL=C sort -z
             )
             sha256sum -- "${asset_names[@]}" | LC_ALL=C sort -k2,2 > SHA256SUMS
