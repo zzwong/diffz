@@ -11,8 +11,10 @@ and moves the release entries in `CHANGELOG.md` under a dated
 for its required checks to pass, review it, and merge it before preparing the
 Arch pin.
 
-After that PR merges, compute the reproducible source archive from its tested
-merge commit and record its SHA-256. Then open a small Arch-pin PR that sets
+After that PR merges, compute the source archive from its tested merge commit
+with the same Arch Linux Git tooling used by CI and record its SHA-256. A
+macOS-generated Git archive can have a different checksum. Then open a small
+Arch-pin PR that sets
 `pkgver`, `pkgrel`, `_commit`, and `sha256sums` in
 `packaging/arch/PKGBUILD`; `_commit` must point to the tested release-preparation
 merge commit, not to the Arch-pin PR's own merge commit, while `sha256sums`
