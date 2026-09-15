@@ -134,15 +134,32 @@ impl Workbench {
                         .map(|f| counts.get(&f.display_path()).copied().unwrap_or(0))
                         .unwrap_or(0);
                     let icon = if row.file.is_some() {
-                        if reviewed {
-                            IconName::Check
-                        } else {
-                            IconName::File
-                        }
-                    } else if row.expanded {
-                        IconName::ChevronDown
+                        div()
+                            .h_flex()
+                            .items_center()
+                            .gap_0p5()
+                            .child(
+                                Icon::new(AppIcon::for_path(&row.path))
+                                    .size(px(13.))
+                                    .text_color(skin.muted),
+                            )
+                            .when(reviewed, |d| {
+                                d.child(
+                                    Icon::new(IconName::Check)
+                                        .size(px(9.))
+                                        .text_color(skin.positive),
+                                )
+                            })
                     } else {
-                        IconName::ChevronRight
+                        div().child(
+                            Icon::new(if row.expanded {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .size(px(13.))
+                            .text_color(skin.muted),
+                        )
                     };
                     div()
                         .h_flex()
@@ -172,11 +189,7 @@ impl Workbench {
                                 .tab_stop(false)
                                 .tooltip(row.path.clone())
                                 .accessibility_label(row.path.clone())
-                                .child(Icon::new(icon).size(px(13.)).text_color(if reviewed {
-                                    skin.positive
-                                } else {
-                                    skin.muted
-                                }))
+                                .child(icon)
                                 .child(
                                     div()
                                         .flex_1()

@@ -382,6 +382,9 @@ impl Workbench {
                         at.saturating_sub(1)
                     };
                     self.select_file(self.visible_files[next].clone(), cx);
+                    if let Some(v) = &self.viewport {
+                        v.borrow_mut().jump_first_hunk();
+                    }
                 }
             }
             Command::Export => self.begin_export(cx),
