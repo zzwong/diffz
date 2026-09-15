@@ -7,6 +7,11 @@ use crate::{
 use diffz_core::patch::ChangeKind;
 use gpui_kit::component::{Icon, IconName, Sizable, StyledExt, TitleBar, button::*, input::Input};
 use gpui_kit::{prelude::*, *};
+
+fn titlebar_left_inset(is_macos: bool, is_fullscreen: bool) -> Option<f32> {
+    (is_macos && is_fullscreen).then_some(0.)
+}
+
 impl Workbench {
     pub(crate) fn activate_tree(
         &mut self,
@@ -279,7 +284,7 @@ impl Workbench {
         self.schedule_view_save(cx);
         cx.notify();
     }
-    pub(crate) fn topbar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn topbar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();
         let title = self
             .active
@@ -319,7 +324,12 @@ impl Workbench {
                     .sum::<usize>(),
             )
         });
-        TitleBar::new()
+        let mut titlebar = TitleBar::new();
+        if let Some(inset) = titlebar_left_inset(cfg!(target_os = "macos"), window.is_fullscreen())
+        {
+            titlebar = titlebar.pl(px(inset));
+        }
+        titlebar
             .on_close_window(cx.listener(|a, _, window, cx| {
                 if a.unsaved() || a.busy {
                     a.status = "Let pending changes finish saving before you close.".into();
@@ -842,5 +852,21 @@ impl Workbench {
                     .on_click(cx.listener(|a, _, w, c| a.command(Command::Themes, w, c))),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn fullscreen_macos_titlebar_drops_the_dependency_left_inset() {
+        assert_eq!(titlebar_left_inset(true, true), Some(0.));
+    }
+
+    #[::core::prelude::v1::test]
+    fn titlebar_keeps_the_dependency_inset_outside_macos_fullscreen() {
+        assert_eq!(titlebar_left_inset(true, false), None);
+        assert_eq!(titlebar_left_inset(false, true), None);
     }
 }
