@@ -165,12 +165,13 @@ jobs:
           asset_count=0
           while IFS= read -r -d '' source; do
             basename="${source##*/}"
-            if [[ -n "${seen[$basename]+x}" ]]; then
-              echo "Duplicate release asset basename: $basename" >&2
+            published_basename="${basename//\~/.}"
+            if [[ -n "${seen[$published_basename]+x}" ]]; then
+              echo "Duplicate release asset basename: $published_basename" >&2
               exit 1
             fi
-            seen["$basename"]=1
-            cp -- "$source" "release/$basename"
+            seen["$published_basename"]=1
+            cp -- "$source" "release/$published_basename"
             asset_count=$((asset_count + 1))
           done < <(
             find artifacts -type f \( \
