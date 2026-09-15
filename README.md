@@ -29,31 +29,24 @@ Git repository. The implementation is Rust, on top of [GPUI](https://www.gpui.rs
 
 ## Installing
 
-### macOS app
+### Linux packages
 
-**Downloads are coming with the first release.** The planned public packages
-will be Developer ID signed and notarized by Apple. Signing is not configured
-yet; current local builds are unsigned. Until release assets are published,
-use the source instructions below.
+For each published release, download Linux packages from the [GitHub Releases
+page](https://github.com/zzwong/diffz/releases). The supported assets are an
+x86_64 RPM, an x86_64 portable `.tar.gz` archive, an x86_64 Arch Linux package,
+and distro-specific `amd64` DEBs built for Debian 12, Debian 13, Ubuntu 24.04
+LTS, and Ubuntu 26.04 LTS.
 
-When the release is available:
+Download the package matching your distribution and architecture together with
+the combined `SHA256SUMS` file. Verify the downloaded package with
+`sha256sum -c --ignore-missing SHA256SUMS` before installing or unpacking it.
+The `--ignore-missing` option checks the matching local asset without requiring
+every release asset to be downloaded.
 
-1. Open the [Releases page](https://github.com/zzwong/diffz/releases) and download
-   the ZIP for your Mac: `arm64` for Apple silicon or `x86_64` for Intel. Only
-   architectures listed in that release are available.
-2. Unzip the download and drag `diffz.app` into Applications.
-3. Open diffz from Applications. Rust and Xcode are not needed for the packaged app.
-
-macOS 15 or newer is required. Release notes will identify the available
-architectures and confirm signing and notarization. A checksum file will be
-provided with each release; it checks download integrity, while macOS verifies
-the app's signing identity.
-
-For terminal use, the executable is inside the app bundle:
-
-```sh
-/Applications/diffz.app/Contents/MacOS/diffz --patch change.patch
-```
+Signed and notarized macOS downloads are not yet available. macOS 15 or newer
+users must build from source using the instructions below. Unsigned local macOS
+ZIPs are for testing only, are not release assets, and must not be presented as
+releases.
 
 Install and authenticate `gh` for GitHub reviews or `glab` for GitLab reviews.
 Patch files and local Git comparisons do not require either provider CLI.

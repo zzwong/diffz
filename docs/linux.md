@@ -35,8 +35,9 @@ bash scripts/package-linux-tarball.sh
 sudo dnf install ./dist/diffz-*.rpm
 ```
 
-Packages and the checksum manifest are written to `dist/`. Verify downloaded
-or copied packages with `sha256sum -c SHA256SUMS` from that directory.
+Packages and the checksum manifest are written to `dist/`. Verify each
+downloaded or copied package with `sha256sum -c --ignore-missing SHA256SUMS`
+from that directory.
 
 ### Debian and Ubuntu
 
@@ -81,11 +82,14 @@ differs. Building the package does not need root. It includes the executable,
 desktop entry, scalable icon, AppStream metadata, license, and package changelog.
 APT installs dependencies automatically; installing the binary alone does not.
 
-CI artifacts include their target in the version, for example
-`diffz_0.1.0-1~ubuntu24.04_amd64.deb`. Download the artifact for your exact
-release and CPU architecture, extract it, and verify it with
-`sha256sum -c SHA256SUMS` before using `sudo apt install ./<filename>.deb`.
-Workflow artifacts are not an APT repository or automatic release publishing.
+For a published release, download the `.deb` built for your exact distribution
+and `amd64` architecture from the [GitHub Releases page](https://github.com/zzwong/diffz/releases),
+together with the combined `SHA256SUMS` file. Verify the downloaded package with
+`sha256sum -c --ignore-missing SHA256SUMS` before installing it. The
+`--ignore-missing` option checks the matching local asset without requiring
+every release asset to be downloaded. The combined manifest covers the Debian
+and Ubuntu packages along with the other Linux release assets; standalone
+workflow artifacts are build outputs, not public release downloads.
 
 The helper derives linked-library requirements with `dpkg-shlibdeps`, including
 minimum ABI versions and distribution-specific names such as `libssl3t64`.

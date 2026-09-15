@@ -1,53 +1,50 @@
 # Releases
 
-The first planned release is `v0.1.0`. Keep its changelog entries under
-Unreleased until publication. No release tag or hosted build is needed while
-the repository is private.
+The version in the Cargo workspace's `[workspace.package]` section is the
+source of truth for every release.
 
-## Prepare locally
+## Release-preparation PR
 
-Run `bash scripts/check.sh native`, then `bash scripts/package-macos.sh` on the
-Mac used to produce the release. The packaging script builds the release app
-for that Mac's architecture, checks the binary architecture, and creates a ZIP
-plus `SHA256SUMS.txt` under `target/dist/v<version>/<architecture>/`.
-Bundle versions come from Cargo metadata. The current script produces unsigned,
-unnotarized packages for local testing. It does not implement the signed public
-installation path described as planned in the README.
+The release-preparation PR updates the Cargo workspace version in `Cargo.toml`
+and moves the release entries in `CHANGELOG.md` under a dated
+`## [<version>] - YYYY-MM-DD` section, leaving `## [Unreleased]` empty. Wait
+for its required checks to pass, review it, and merge it before preparing the
+Arch pin.
 
-Before offering signed downloads, configure an Apple Developer ID identity and
-notarization credentials, sign the app, submit it for notarization, staple the
-accepted ticket, and create the archive from that finalized app. Verify signing,
-notarization, and a normal first launch on a separate Mac. Do not publish the
-current unsigned ZIP as a signed release. Keep credentials outside the repository.
+After that PR merges, compute the source archive from its tested merge commit
+with the same Arch Linux Git tooling used by CI and record its SHA-256. A
+macOS-generated Git archive can have a different checksum. Then open a small
+Arch-pin PR that sets
+`pkgver`, `pkgrel`, `_commit`, and `sha256sums` in
+`packaging/arch/PKGBUILD`; `_commit` must point to the tested release-preparation
+merge commit, not to the Arch-pin PR's own merge commit, while `sha256sums`
+verifies the generated source archive. Wait for the Arch-pin PR's required
+checks to pass and merge it.
 
-Extract the archive into a temporary folder, verify its checksum, and open the
-extracted app with an offline fixture. Check theme selection, file comments,
-line comments, search, and scrolling. Build Intel packages on an Intel Mac;
-do not label an Apple silicon binary as universal. Linux packages need desktop
-validation before being offered.
+## Linux release
 
-## Publish after the repository becomes public
+After the Arch-pin PR is green, create the immutable `v<version>` tag at the
+tested Arch-pin merge commit and push it. The tag must match the Cargo workspace
+version and triggers the Linux release workflow, which builds every supported
+Linux format:
 
-1. Confirm the repository is ready for public distribution and review the
-   supported platforms and installation instructions.
-2. Move the first release's Unreleased entries under `0.1.0` with the actual
-   publication date. Leave an empty Unreleased section for subsequent work.
-3. Amend the initial commit if retaining single-commit history, and finish the
-   guarded push before creating the release tag.
-4. Tag the tested commit as `v0.1.0`. Create a draft GitHub release, attach the
-   tested ZIP and checksum file, and include the changelog, supported architecture,
-   macOS minimum version, and signing status in its notes.
-5. If publishing multiple architectures, combine their checksum entries into
-   one `SHA256SUMS.txt`. Verify each archive against its entry.
-6. Publish the release after reviewing the assets. Update the README's pending
-   download notice to point to the published release and list its actual assets.
+- x86_64 RPM
+- x86_64 portable `.tar.gz` archive
+- x86_64 Arch Linux package
+- distro-specific `amd64` DEBs for Debian 12, Debian 13, Ubuntu 24.04 LTS, and
+  Ubuntu 26.04 LTS
 
-Do not rewrite a published release tag.
+The workflow creates the GitHub Release with generated notes and one combined
+`SHA256SUMS` manifest covering all Linux assets. See [Linux](linux.md) for
+package details and local build instructions.
 
-## Linux artifacts
+A manual workflow dispatch is build-only: it does not create or publish a
+GitHub Release. Never rewrite a release tag; make a new version and tag for a
+correction.
 
-The Linux artifact workflow builds Fedora and Arch packages on `v*` tags or
-manual dispatch. It uploads packages and checksum manifests as workflow
-artifacts; attaching them to a GitHub release is a separate publication step.
-See [Linux](linux.md) for local packaging commands. Update the Arch recipe's
-source pin, checksum and package version before creating a release tag.
+## macOS prerequisite
+
+macOS 15 or newer is required. macOS signing and notarization are a separate
+prerequisite for any public macOS download. Unsigned ZIPs may be used for local
+testing, but they are not public release assets and must not be presented as
+releases.

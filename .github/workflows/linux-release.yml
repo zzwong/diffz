@@ -25,7 +25,7 @@ jobs:
             openssl-devel fontconfig-devel \
             libX11-devel libXcursor-devel libXi-devel libxcb-devel \
             libxkbcommon-devel libxkbcommon-x11-devel wayland-devel \
-            vulkan-loader-devel zstd-devel \
+            vulkan-loader-devel libzstd-devel \
             desktop-file-utils appstream rpm-build tar gzip curl
 
       - name: Install pinned Rust toolchain
@@ -57,7 +57,7 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: |
-          sha256sum *.rpm *.tar.gz > SHA256SUMS
+          sha256sum -- *.rpm *.tar.gz > SHA256SUMS
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -85,6 +85,7 @@ jobs:
       - name: Install dependencies declared by the Arch recipe
         shell: bash
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           source packaging/arch/PKGBUILD
           if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$pkgver" ]]; then
             echo 'Update the Arch package version for this release.' >&2
@@ -103,7 +104,7 @@ jobs:
         run: |
           runuser -u builder -- bash scripts/package-arch.sh --noconfirm
           cd target/arch-package
-          sha256sum diffz-[0-9]*.pkg.tar.zst > SHA256SUMS
+          sha256sum -- diffz-[0-9]*.pkg.tar.zst > SHA256SUMS
 
       - name: Verify Arch package installation
         run: |
@@ -117,3 +118,75 @@ jobs:
             target/arch-package/diffz-[0-9]*.pkg.tar.zst
             target/arch-package/SHA256SUMS
           if-no-files-found: error
+
+  debian:
+    uses: ./.github/workflows/debian-packages.yml
+
+  publish:
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+    needs: [linux, arch, debian]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: diffz-*
+          path: artifacts
+          merge-multiple: false
+
+      - name: Collect release assets and generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf release
+          mkdir release
+
+          declare -A seen=()
+          asset_count=0
+          while IFS= read -r -d '' source; do
+            basename="${source##*/}"
+            if [[ -n "${seen[$basename]+x}" ]]; then
+              echo "Duplicate release asset basename: $basename" >&2
+              exit 1
+            fi
+            seen["$basename"]=1
+            cp -- "$source" "release/$basename"
+            asset_count=$((asset_count + 1))
+          done < <(
+            find artifacts -type f \( \
+              -name '*.deb' -o \
+              -name '*.rpm' -o \
+              -name '*.tar.gz' -o \
+              -name '*.pkg.tar.zst' \
+            \) -print0
+          )
+
+          if (( asset_count == 0 )); then
+            echo 'No release assets found.' >&2
+            exit 1
+          fi
+
+          (
+            cd release
+            mapfile -d '' asset_names < <(
+              find . -maxdepth 1 -type f \( \
+                -name '*.deb' -o \
+                -name '*.rpm' -o \
+                -name '*.tar.gz' -o \
+                -name '*.pkg.tar.zst' \
+              \) -printf '%f\0' | LC_ALL=C sort -z
+            )
+            sha256sum -- "${asset_names[@]}" | LC_ALL=C sort -k2,2 > SHA256SUMS
+          )
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "diffz $GITHUB_REF_NAME"
