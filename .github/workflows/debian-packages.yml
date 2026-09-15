@@ -93,6 +93,8 @@ jobs:
             dist/linux-root/usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
           bash scripts/package-linux-deb.sh
           (cd dist && sha256sum ./*.deb > SHA256SUMS)
+          dpkg-deb --fsys-tarfile dist/*.deb \
+            | tar -tf - -- ./usr/share/doc/diffz/THIRD_PARTY_NOTICES.md >/dev/null
           BUILD
 
       # Start again from the base image: build dependencies must not mask
@@ -122,7 +124,6 @@ jobs:
           test -r /usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
           test -r /usr/share/icons/hicolor/scalable/apps/io.github.zzwong.Diffz.svg
           test -r /usr/share/doc/diffz/copyright
-          test -r /usr/share/doc/diffz/THIRD_PARTY_NOTICES.md
           INSTALL
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
