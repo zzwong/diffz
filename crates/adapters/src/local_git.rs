@@ -128,7 +128,8 @@ impl LocalGit {
             std::str::from_utf8(raw_root).map_err(|_| "repository root is not UTF-8")?,
         )
         .canonicalize()?;
-        if self.program.starts_with(&root) {
+        // The PATH lookup keeps a symlinked tool's own name, so check where it really points too.
+        if self.program.starts_with(&root) || self.program.canonicalize()?.starts_with(&root) {
             return Err("the Git executable cannot live inside the repository under review".into());
         }
         match mode {

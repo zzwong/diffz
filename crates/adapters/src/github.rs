@@ -1,7 +1,7 @@
 //! gh CLI transport: fixed host and account, capped pagination, immutable PR snapshots that stay coherent.
 use crate::{
     AdapterError, Result,
-    process::{ProcessRequest, Runner},
+    process::{ProcessOutput, ProcessRequest, Runner, stderr_excerpt},
 };
 use diffz_core::{
     domain::*,
@@ -136,6 +136,16 @@ pub fn decode_http(bytes: &[u8]) -> Result<HttpResponse> {
         body: bytes[at + skip..].to_vec(),
     })
 }
+/// Explains a CLI run without a parseable response, including what the tool itself reported.
+pub(crate) fn incomplete_http(tool: &str, output: &ProcessOutput) -> AdapterError {
+    let said = stderr_excerpt(&output.stderr)
+        .map(|e| format!("; {tool} reported: {e}"))
+        .unwrap_or_default();
+    AdapterError::Message(format!(
+        "{tool} exited before a full HTTP response arrived (exit {:?}){said}; verify {tool} auth status covers this host",
+        output.status.code()
+    ))
+}
 /// Percent-encode repo paths so they fit inside a URL.
 pub fn encode_path(path: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
@@ -210,7 +220,7 @@ impl GithubReader {
             r.stdin = serde_json::to_vec(body)?;
         }
         let output = Runner::run(r, cancel)?;
-        decode_http(&output.stdout).map_err(|_|AdapterError::Message(format!("gh exited before a full HTTP response arrived (exit {:?}); verify gh auth status covers this host",output.status.code())))
+        decode_http(&output.stdout).map_err(|_| incomplete_http("gh", &output))
     }
     pub fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
         let endpoint = format!(

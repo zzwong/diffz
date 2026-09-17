@@ -1,4 +1,5 @@
-//! Process execution has fixed limits and no shell. Errors omit arguments and captured stderr.
+//! Process execution has fixed limits and no shell. Errors omit arguments; captured stderr is only
+//! shown through the bounded, redacted `stderr_excerpt`.
 //! On Unix, the process group is this component's sole unsafe boundary.
 use crate::{AdapterError, Result};
 use diffz_core::provider::Cancellation;
@@ -213,12 +214,18 @@ impl Runner {
     }
 }
 /// Search only absolute PATH entries. LocalGit also rejects tools found inside its repository.
+///
+/// The containing directory is canonicalized, but the file name is kept as found, so a symlink
+/// shim such as mise's `gh -> mise` still runs with the argv[0] it dispatches on.
 pub fn resolve_program(name: &str) -> Result<PathBuf> {
+    let path = std::env::var_os("PATH").ok_or("PATH is unset")?;
+    resolve_program_in(name, &path)
+}
+fn resolve_program_in(name: &str, path: &std::ffi::OsStr) -> Result<PathBuf> {
     if name.contains('/') || name.contains('\\') {
         return Err("the program name must not contain a path".into());
     }
-    let path = std::env::var_os("PATH").ok_or("PATH is unset")?;
-    for dir in std::env::split_paths(&path) {
+    for dir in std::env::split_paths(path) {
         if !dir.is_absolute() {
             continue;
         }
@@ -233,9 +240,57 @@ pub fn resolve_program(name: &str) -> Result<PathBuf> {
                 continue;
             }
         }
-        return Ok(p.canonicalize()?);
+        return Ok(dir.canonicalize()?.join(name));
     }
     Err(format!("no absolute PATH directory contains {name}").into())
+}
+/// A short, single-line stderr excerpt for error messages. Control characters are dropped and
+/// words that look like credentials are redacted, since CLI tools may echo headers or URLs.
+pub fn stderr_excerpt(stderr: &[u8]) -> Option<String> {
+    const LIMIT: usize = 300;
+    const SECRET_PREFIXES: [&str; 8] = [
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghs_",
+        "ghr_",
+        "github_pat_",
+        "glpat-",
+        "gloas-",
+    ];
+    let text = String::from_utf8_lossy(&stderr[..stderr.len().min(4096)]);
+    let mut words = vec![];
+    let mut redact_next = false;
+    // Bidirectional and zero-width format characters could disguise the displayed text.
+    let hidden = |c: char| matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}');
+    for word in text.split(|c: char| c.is_whitespace() || c.is_control() || hidden(c)) {
+        if word.is_empty() {
+            continue;
+        }
+        let lower = word.to_ascii_lowercase();
+        let secret = (redact_next && word.len() >= 16)
+            || SECRET_PREFIXES.iter().any(|p| lower.contains(p))
+            || lower.contains("token=")
+            || lower.contains("private-token:")
+            || (lower.contains("://") && word.contains('@'));
+        redact_next = matches!(
+            lower.trim_end_matches(':'),
+            "bearer" | "basic" | "token" | "authorization" | "private-token"
+        );
+        words.push(if secret { "[redacted]" } else { word });
+    }
+    let line = words.join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    if line.len() <= LIMIT {
+        return Some(line);
+    }
+    let mut end = LIMIT;
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(format!("{}…", &line[..end]))
 }
 pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     let mut opts = std::fs::OpenOptions::new();
@@ -261,4 +316,75 @@ pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
         return Err("the file is over the safety limit; truncated input was not loaded".into());
     }
     Ok(bytes)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    fn executable(path: &Path, script: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, script).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    #[test]
+    #[cfg(unix)]
+    fn symlinked_multicall_tool_keeps_its_own_name() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let (real, shims) = (temp.path().join("real"), temp.path().join("shims"));
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&shims).unwrap();
+        // Like mise or busybox: the shim is a symlink, and the target dispatches on argv[0].
+        executable(
+            &real.join("multicall"),
+            "#!/bin/sh\nprintf '%s' \"${0##*/}\"\n",
+        );
+        symlink(real.join("multicall"), shims.join("gh")).unwrap();
+        let linked_dir = temp.path().join("linked-shims");
+        symlink(&shims, &linked_dir).unwrap();
+        let path = std::env::join_paths([PathBuf::from("relative/shims"), linked_dir]).unwrap();
+
+        let resolved = resolve_program_in("gh", &path).unwrap();
+        assert_eq!(resolved, shims.canonicalize().unwrap().join("gh"));
+        let output = Runner::run(ProcessRequest::new(resolved), Cancellation::default()).unwrap();
+        assert_eq!(output.stdout, b"gh");
+    }
+    #[test]
+    #[cfg(unix)]
+    fn only_absolute_path_entries_are_searched() {
+        let temp = tempfile::tempdir().unwrap();
+        executable(&temp.path().join("gh"), "#!/bin/sh\n");
+        let relative = relative_to_cwd(temp.path());
+        let path = std::env::join_paths([relative]).unwrap();
+        assert!(resolve_program_in("gh", &path).is_err());
+        assert!(resolve_program_in("../gh", temp.path().as_os_str()).is_err());
+        assert!(resolve_program_in("gh", temp.path().as_os_str()).is_ok());
+    }
+    #[cfg(unix)]
+    fn relative_to_cwd(dir: &Path) -> PathBuf {
+        let cwd = std::env::current_dir().unwrap();
+        let depth = cwd.components().count() - 1;
+        let mut up: PathBuf = std::iter::repeat_n("..", depth).collect();
+        up.push(dir.strip_prefix("/").unwrap());
+        up
+    }
+    #[test]
+    fn stderr_excerpt_is_bounded_single_line_and_redacted() {
+        assert_eq!(stderr_excerpt(b" \n\t "), None);
+        assert_eq!(
+            stderr_excerpt(b"mise ERROR no tasks defined in ~\n\x1b[0m\r\n").as_deref(),
+            Some("mise ERROR no tasks defined in ~ [0m")
+        );
+        let noisy = "HTTP 401: Bad credentials\nAuthorization: token ghp_abcdefghijklmnopqrstuvwxyz0123456789 \
+             Bearer abcdefghijklmnopqrstuvwxyz https://user:secret@github.com/x?access_token=abc \
+             glpat-0123456789abcdef \u{202e}txt.exe token expired";
+        let excerpt = stderr_excerpt(noisy.as_bytes()).unwrap();
+        assert_eq!(
+            excerpt,
+            "HTTP 401: Bad credentials Authorization: token [redacted] Bearer [redacted] \
+             [redacted] [redacted] txt.exe token expired"
+        );
+        let long = stderr_excerpt("é".repeat(1000).as_bytes()).unwrap();
+        assert!(long.len() <= 300 + '…'.len_utf8() && long.ends_with('…'));
+    }
 }
