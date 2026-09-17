@@ -7,6 +7,20 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-17
+
+### Changed
+
+- `--inspect` prints repository paths as JSON strings. Paths that are not valid UTF-8 stay byte arrays, and saved reviews and snapshot IDs are unchanged.
+- Local Arch package builds no longer produce a separate `diffz-debug` package.
+
+### Fixed
+
+- `--inspect`, `--doctor`, `--help`, and `--version` exit cleanly when their output is piped into a command that stops reading, instead of aborting.
+- GitHub pull requests and GitLab merge requests open when `gh` or `glab` is a symlinked shim, such as a mise shim on a desktop launcher's `PATH`.
+- Errors from `gh` and `glab` include a short, redacted excerpt of the tool's own error output.
+- The release `SHA256SUMS` manifest lists Debian package filenames as GitHub publishes them.
+
 ## [0.1.0] - 2026-09-14
 
 ### Added
