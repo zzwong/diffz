@@ -68,3 +68,22 @@ jobs:
         run: cargo test --locked --workspace --all-features
       - name: Lint every crate with all features
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+      # KACHE=0 builds with plain Cargo, like the test step, whose artifacts it reuses,
+      # instead of bootstrapping Kache. Installs only under RUNNER_TEMP.
+      - name: Smoke-test install-dev and uninstall-dev
+        run: |
+          sudo apt-get install -y --no-install-recommends desktop-file-utils
+          root="$RUNNER_TEMP/install-dev"
+          dirs=(PREFIX="$root/prefix" DATADIR="$root/share" DEV_STATE_DIR="$root/state")
+          make install-dev KACHE=0 "${dirs[@]}"
+          find "$root" -type f | sort
+          "$root/prefix/bin/diffz-dev" --version
+          "$root/prefix/bin/diffz-dev" --state-dir "$root/state" --inspect --fixture F01 > /dev/null
+          desktop-file-validate "$root/share/applications/io.github.zzwong.Diffz.Dev.desktop"
+          make uninstall-dev "${dirs[@]}"
+          leftover="$(find "$root/prefix" "$root/share" -type f)"
+          if [ -n "$leftover" ]; then
+            printf 'uninstall-dev left files behind:\n%s\n' "$leftover" >&2
+            exit 1
+          fi
+          test -d "$root/state"
