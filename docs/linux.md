@@ -134,6 +134,8 @@ verifies its checksum, and invokes makepkg. Prepared sources and packages
 are written to `target/arch-package/`. Cargo also populates its cache;
 `--syncdeps` installs missing dependencies with pacman. The recipe uses
 Arch's packaged Rust compiler and declares build and runtime dependencies.
+The release workflow builds the package with `--nocheck` because tests run
+in the CI workflow; a local makepkg build still runs the recipe's `check()`.
 
 For a clean chroot build with Arch devtools:
 
