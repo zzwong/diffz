@@ -34,6 +34,35 @@ fn reader(dir: &std::path::Path) -> Arc<GitlabReader> {
 }
 #[test]
 #[cfg(unix)]
+fn failed_glab_run_reports_its_stderr() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let glab = temp.path().join("glab");
+    std::fs::write(
+        &glab,
+        "#!/bin/sh\necho 'glab: 401 Unauthorized' >&2\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&glab, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let err = GitlabReader::new(glab)
+        .snapshot(
+            &MrAddress::parse("team/repo!7").unwrap(),
+            Cancellation::default(),
+        )
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        err.contains("glab exited before a full HTTP response arrived (exit Some(1))"),
+        "{err}"
+    );
+    assert!(
+        err.contains("glab reported: glab: 401 Unauthorized;"),
+        "{err}"
+    );
+}
+#[test]
+#[cfg(unix)]
 fn gitlab_read_publish_and_history_are_local_mocked() {
     let temp = tempfile::tempdir().unwrap();
     let r = reader(temp.path());

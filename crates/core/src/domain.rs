@@ -155,9 +155,63 @@ impl SourceDocument {
         Ok(l.content.start + column)
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "Vec<u8>", into = "Vec<u8>")]
+/// A Git path, kept as raw bytes because Git permits paths that are not UTF-8.
+///
+/// Serialized as a string when the bytes are UTF-8 and as a byte array otherwise.
+/// Deserialization takes either form, so data stored as byte arrays still loads.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RepoPath(Vec<u8>);
+thread_local! {
+    static LEGACY_PATH_ENCODING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+/// Runs `f` with every [`RepoPath`] serialized as a byte array, as it was before paths became strings.
+/// Identity digests hash that encoding so stored snapshot IDs keep verifying.
+fn with_legacy_path_encoding<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LEGACY_PATH_ENCODING.set(self.0);
+        }
+    }
+    let _restore = Restore(LEGACY_PATH_ENCODING.replace(true));
+    f()
+}
+impl Serialize for RepoPath {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match std::str::from_utf8(&self.0) {
+            Ok(text) if !LEGACY_PATH_ENCODING.get() => serializer.serialize_str(text),
+            _ => self.0.serialize(serializer),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for RepoPath {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PathVisitor;
+        impl<'de> serde::de::Visitor<'de> for PathVisitor {
+            type Value = RepoPath;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a repository path as a string or an array of bytes")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<RepoPath, E> {
+                RepoPath::new(v.as_bytes().to_vec()).map_err(E::custom)
+            }
+            fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<RepoPath, E> {
+                RepoPath::new(v.to_vec()).map_err(E::custom)
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<RepoPath, A::Error> {
+                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(4096));
+                while let Some(b) = seq.next_element::<u8>()? {
+                    bytes.push(b);
+                }
+                RepoPath::new(bytes).map_err(serde::de::Error::custom)
+            }
+        }
+        deserializer.deserialize_any(PathVisitor)
+    }
+}
 impl TryFrom<Vec<u8>> for RepoPath {
     type Error = String;
     fn try_from(v: Vec<u8>) -> Result<Self, String> {
@@ -377,20 +431,23 @@ impl Snapshot {
     }
     fn identity(patch: &PatchReport, remote: Option<&RemoteTarget>, origin: &str) -> SnapshotId {
         // Identity input leaves out title changes, pending status, comment data, and account display.
-        let bytes = serde_json::to_vec(&(
-            origin,
-            patch,
-            remote.map(|r| {
-                (
-                    &r.repository,
-                    r.pr,
-                    &r.target_tip,
-                    &r.comparison_base,
-                    &r.head,
-                    &r.account,
-                )
-            }),
-        ))
+        // Paths keep their original byte-array encoding here so existing snapshot IDs stay valid.
+        let bytes = with_legacy_path_encoding(|| {
+            serde_json::to_vec(&(
+                origin,
+                patch,
+                remote.map(|r| {
+                    (
+                        &r.repository,
+                        r.pr,
+                        &r.target_tip,
+                        &r.comparison_base,
+                        &r.head,
+                        &r.account,
+                    )
+                }),
+            ))
+        })
         .expect("serializing only string/integer source data");
         let version: &[u8] = if remote.is_some_and(|r| r.provider == ProviderKind::GitLab) {
             b"snapshot-gitlab-v1"

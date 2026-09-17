@@ -126,7 +126,7 @@ impl GitlabReader {
             req.stdin = serde_json::to_vec(body)?;
         }
         let out = Runner::run(req, cancel)?;
-        decode_http(&out.stdout)
+        decode_http(&out.stdout).map_err(|_| crate::github::incomplete_http("glab", &out))
     }
     pub fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
         let a = MrAddress::from_target(t);

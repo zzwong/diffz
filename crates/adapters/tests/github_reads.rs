@@ -53,3 +53,25 @@ fn check_metadata_distinguishes_running_and_completed() {
     );
     assert_eq!(failed.conclusion.as_deref(), Some("failure"));
 }
+
+#[test]
+#[cfg(unix)]
+fn failed_gh_run_reports_its_redacted_stderr() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let gh = temp.path().join("gh");
+    std::fs::write(
+        &gh,
+        "#!/bin/sh\nprintf 'mise ERROR no tasks defined in ~\\ntoken ghp_abcdefghijklmnopqrstuvwxyz0123\\n' >&2\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let err = diffz_adapters::github::GithubReader::new(gh)
+        .account("github.com", diffz_core::provider::Cancellation::default())
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "gh exited before a full HTTP response arrived (exit Some(1)); gh reported: mise ERROR no tasks defined in ~ token [redacted]; verify gh auth status covers this host"
+    );
+}
