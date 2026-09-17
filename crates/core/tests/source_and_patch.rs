@@ -210,3 +210,77 @@ fn marker_separator_is_not_part_of_quoted_path() {
         "docs/quote \"name\" ü.md".as_bytes()
     );
 }
+
+#[test]
+fn utf8_paths_serialize_as_strings() {
+    let path = RepoPath::new("src/café.rs".as_bytes().to_vec()).unwrap();
+    let json = serde_json::to_string(&path).unwrap();
+    assert_eq!(json, r#""src/café.rs""#);
+    assert_eq!(serde_json::from_str::<RepoPath>(&json).unwrap(), path);
+}
+
+#[test]
+fn non_utf8_paths_round_trip_as_bytes() {
+    let path = RepoPath::new(b"bad\xffname.txt".to_vec()).unwrap();
+    let json = serde_json::to_string(&path).unwrap();
+    assert_eq!(json, "[98,97,100,255,110,97,109,101,46,116,120,116]");
+    assert_eq!(serde_json::from_str::<RepoPath>(&json).unwrap(), path);
+}
+
+#[test]
+fn byte_array_paths_still_deserialize() {
+    let path: RepoPath = serde_json::from_str("[115,114,99,47,97,46,114,115]").unwrap();
+    assert_eq!(path.bytes(), b"src/a.rs");
+}
+
+#[test]
+fn deserialized_paths_are_validated() {
+    for json in [
+        r#""""#,
+        r#""/etc/passwd""#,
+        r#""a/../b""#,
+        r#""a//b""#,
+        "[]",
+        "[47,97]",
+        "[46,46]",
+        "[97,0]",
+        "[97,256]",
+        "7",
+    ] {
+        assert!(serde_json::from_str::<RepoPath>(json).is_err(), "{json}");
+    }
+}
+
+/// A snapshot stored before paths serialized as strings, with the identity that version computed.
+const LEGACY_SNAPSHOT: &str = r#"{"id":"e9f9e69558cc92ad55d3edd2deead6745cbea6f71db6e910f92b1b2e57138a0a","title":"t","origin":"patch-bytes","patch":{"files":[{"id":"7a9bf10293bbeb436abafedd786744ba636ead0b1950021d36d8daf66373c637","old_path":[98,97,100,255,110,97,109,101,46,116,120,116],"new_path":[115,114,99,47,99,97,102,195,169,46,114,115],"kind":"Renamed","content":"Text","old_mode":null,"new_mode":null,"old_oid":null,"new_oid":null,"hunks":[{"old_start":1,"old_count":1,"new_start":1,"new_count":1,"section":"","rows":[{"old_line":1,"new_line":null,"text":"old","ending":"Lf","kind":"Removed"},{"old_line":null,"new_line":1,"text":"new","ending":"Lf","kind":"Added"}]}],"metadata":["similarity index 50%"]}]},"remote":null,"comments":[],"overview":{"description":null,"author":null,"decision":null,"checks":[],"notices":[],"captured_at":null,"conversation":[]},"warnings":[]}"#;
+const LEGACY_PATCH: &[u8] = b"diff --git \"a/bad\\377name.txt\" b/src/caf\xc3\xa9.rs\nsimilarity index 50%\nrename from \"bad\\377name.txt\"\nrename to src/caf\xc3\xa9.rs\n--- \"a/bad\\377name.txt\"\n+++ b/src/caf\xc3\xa9.rs\n@@ -1 +1 @@\n-old\n+new\n";
+
+#[test]
+fn stored_snapshots_keep_their_identity_across_path_encodings() {
+    use diffz_core::domain::Snapshot;
+    let legacy: Snapshot = serde_json::from_str(LEGACY_SNAPSHOT).unwrap();
+    assert!(legacy.verify_identity());
+
+    let fresh = Snapshot::new(
+        "t".into(),
+        parse_patch(LEGACY_PATCH, ParseLimits::default()).unwrap(),
+        None,
+        vec![],
+    );
+    assert_eq!(fresh.id, legacy.id);
+
+    let json = serde_json::to_string(&fresh).unwrap();
+    assert!(json.contains(r#""new_path":"src/café.rs""#), "{json}");
+    assert!(json.contains(r#""old_path":[98,97,100,255,"#), "{json}");
+    let restored: Snapshot = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.id, legacy.id);
+    assert!(restored.verify_identity());
+    assert_eq!(
+        restored.patch.files[0].old_path,
+        legacy.patch.files[0].old_path
+    );
+    assert_eq!(
+        restored.patch.files[0].new_path,
+        legacy.patch.files[0].new_path
+    );
+}
