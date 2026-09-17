@@ -35,3 +35,36 @@ jobs:
         run: bash scripts/check.sh core
       - name: Audit dependencies
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+  # Compiles GPUI and the `desktop` feature, and runs the `diffz-ui` tests, which
+  # `check` skips. The `cargo build` lines of `scripts/check.sh native` are left
+  # to the package workflows.
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Fresh runner each time: incremental artifacts only cost time and cache space.
+      CARGO_INCREMENTAL: 0
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Same libraries as the Debian and Ubuntu build in docs/linux.md.
+      - name: Install GPUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake pkg-config \
+            libfontconfig-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
+            libssl-dev libzstd-dev libvulkan-dev
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      # Must follow toolchain installation: the cache key includes the rustc version.
+      - name: Cache Cargo registry and dependency artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Test every crate with all features
+        run: cargo test --locked --workspace --all-features
+      - name: Lint every crate with all features
+        run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
