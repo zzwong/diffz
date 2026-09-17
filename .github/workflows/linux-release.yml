@@ -99,10 +99,11 @@ jobs:
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
-      - name: Build and test Arch package as an unprivileged user
+      - name: Build Arch package as an unprivileged user
         shell: bash
         run: |
-          runuser -u builder -- bash scripts/package-arch.sh --noconfirm
+          # ci.yml runs the tests; the recipe's check() is for local builds.
+          runuser -u builder -- bash scripts/package-arch.sh --noconfirm --nocheck
           cd target/arch-package
           sha256sum -- diffz-[0-9]*.pkg.tar.zst > SHA256SUMS
 
@@ -130,7 +131,8 @@ jobs:
           persist-credentials: false
 
       - name: Build macOS DMG
-        run: make package-macos
+        # Kache's cache is local to the runner, so bootstrapping it only adds time.
+        run: bash scripts/package-macos.sh
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
