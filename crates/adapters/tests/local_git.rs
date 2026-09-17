@@ -56,3 +56,23 @@ fn unborn_staged_repository() {
         .unwrap();
     assert_eq!(s.patch.files.len(), 1);
 }
+#[test]
+#[cfg(unix)]
+fn symlinked_git_that_points_into_the_repository_is_rejected() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = tempfile::tempdir().unwrap();
+    git(repo.path(), &["init", "-b", "main"]);
+    let inner = repo.path().join("git");
+    std::fs::write(&inner, "#!/bin/sh\nexec git \"$@\"\n").unwrap();
+    std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let bin = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(&inner, bin.path().join("git")).unwrap();
+    let err = LocalGit::new(bin.path().canonicalize().unwrap().join("git"))
+        .snapshot(repo.path(), LocalMode::Staged, Cancellation::default())
+        .err()
+        .unwrap();
+    assert!(
+        err.to_string()
+            .contains("cannot live inside the repository")
+    );
+}
