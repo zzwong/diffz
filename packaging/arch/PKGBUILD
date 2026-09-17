@@ -34,6 +34,8 @@ prepare() {
 build() {
   cd "$pkgname-$pkgver"
   export PATH="/usr/bin:$PATH"
+  # makepkg only remaps build paths with its debug option; keep them out anyway.
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/usr/src/debug/$pkgname"
   cargo build --frozen --release -p diffz
 }
 
