@@ -154,6 +154,10 @@ metadata and MIT license. For a new package version, update `_commit`,
 CI rejects mismatched release tags and application changes absent from the
 pinned source.
 
+To run a development build beside the installed package, with its own state
+directory and launcher, see `make run` and `make install-dev` in
+[CONTRIBUTING.md](../CONTRIBUTING.md#development-builds-beside-an-installed-release).
+
 ## Desktop use
 
 Launch Diffz from the application menu or open a patch with `diffz change.patch`.
