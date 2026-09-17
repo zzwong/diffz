@@ -53,6 +53,8 @@ distribution, validates desktop metadata, and installs the result in a fresh
 container with only declared runtime dependencies. The headless smoke tests
 cover `--version`, `--help`, and patch inspection, not GPU rendering or a live
 Wayland/X11 session. Check the workflow result before relying on an artifact.
+Pull requests build only Debian 12 and Ubuntu 26.04; pushes to `main`, release
+tags, and manual runs build all four.
 
 Install the native build dependencies, then use the pinned rustup toolchain:
 

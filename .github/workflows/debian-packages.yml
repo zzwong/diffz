@@ -17,6 +17,25 @@ on:
       - 'docs/linux.md'
       - 'LICENSE'
       - 'THIRD_PARTY_NOTICES.md'
+  # Main builds all distributions after merge and saves caches pull requests can restore.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/debian-packages.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'crates/**'
+      - 'packaging/debian/**'
+      - 'packaging/linux/**'
+      - 'scripts/package-linux-deb.sh'
+      - 'scripts/stage-linux.sh'
+      - 'scripts/tests/test_package_linux_deb.py'
+      - 'scripts/tests/test_stage_linux.py'
+      - 'docs/linux.md'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
   workflow_call:
   workflow_dispatch:
 
@@ -34,19 +53,26 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      # Pull requests build the oldest Debian and the newest Ubuntu. Main, release
+      # tags (via workflow_call), and manual runs build all four. `matrix` and `env`
+      # are unavailable in `strategy`, so the lists are inline JSON.
       matrix:
-        include:
-          - image: debian:12-slim
-            target: debian12
-          - image: debian:13-slim
-            target: debian13
-          - image: ubuntu:24.04
-            target: ubuntu24.04
-          - image: ubuntu:26.04
-            target: ubuntu26.04
+        include: >-
+          ${{ fromJSON(github.event_name == 'pull_request' && '[
+            {"image": "debian:12-slim", "target": "debian12"},
+            {"image": "ubuntu:26.04", "target": "ubuntu26.04"}
+          ]' || '[
+            {"image": "debian:12-slim", "target": "debian12"},
+            {"image": "debian:13-slim", "target": "debian13"},
+            {"image": "ubuntu:24.04", "target": "ubuntu24.04"},
+            {"image": "ubuntu:26.04", "target": "ubuntu26.04"}
+          ]') }}
     env:
       IMAGE: ${{ matrix.image }}
       TARGET: ${{ matrix.target }}
+      # Only pull requests and pushes to main use the dependency cache; release tags
+      # and manual runs build cold. Under workflow_call, `github` is the caller's.
+      USE_CACHE: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,14 +81,33 @@ jobs:
       - name: Set reproducible package timestamp
         run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
 
+      # rust-cache runs `cargo metadata` and hashes `rustc -vV` on the host, which
+      # uses the same pinned toolchain as the container.
+      - name: Install pinned Rust toolchain on the host
+        if: ${{ env.USE_CACHE == 'true' }}
+        run: rustup show
+
+      # The key separates distributions: build scripts probe each one's libraries.
+      - name: Cache Cargo registry and dependency artifacts
+        if: ${{ env.USE_CACHE == 'true' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.target }}
+          cache-bin: false
+
       # Build against each distribution's own glibc and library package names.
       # A .deb made from the Fedora binary is not a Debian compatibility test.
+      # Only the host's registry and git sources are shared; rustup installs its
+      # own binaries into the container's /cargo/bin and /root/.rustup.
       - name: Build and validate native Debian package
         shell: bash
         run: |
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          mkdir -p "$cargo_home/registry" "$cargo_home/git"
           docker run --rm -i \
             -e SOURCE_DATE_EPOCH -e DIFFZ_DEB_REVISION="1~$TARGET" \
-            -e GITHUB_REF_TYPE -e GITHUB_REF_NAME \
+            -e GITHUB_REF_TYPE -e GITHUB_REF_NAME -e CARGO_HOME=/cargo \
+            -v "$cargo_home/registry:/cargo/registry" -v "$cargo_home/git:/cargo/git" \
             -v "$GITHUB_WORKSPACE:/src" -w /src "$IMAGE" bash -s <<'BUILD'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
@@ -83,7 +128,7 @@ jobs:
           fi
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
           sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain none
-          . "$HOME/.cargo/env"
+          . /cargo/env
           rustup show
           cargo build --locked --release -p diffz
           bash scripts/stage-linux.sh
@@ -96,6 +141,14 @@ jobs:
           dpkg-deb --fsys-tarfile dist/*.deb \
             | tar -tf - -- ./usr/share/doc/diffz/THIRD_PARTY_NOTICES.md >/dev/null
           BUILD
+
+      # The container runs as root. Return ownership so rust-cache's post step
+      # can prune and save the target directory and registry.
+      - name: Restore ownership of cached directories
+        if: ${{ always() && env.USE_CACHE == 'true' }}
+        run: |
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          sudo chown -R "$(id -u):$(id -g)" target "$cargo_home/registry" "$cargo_home/git"
 
       # Start again from the base image: build dependencies must not mask
       # incomplete runtime Depends. No compiler, Rust, gh, or glab is installed.
