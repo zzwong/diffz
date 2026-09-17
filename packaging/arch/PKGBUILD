@@ -20,8 +20,9 @@ optdepends=('xdg-utils: open review links in a browser'
 _commit=1016c3797032cfb12224f99ca40a87b891f63c12
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('52edf2bc78eb9a3dc6b6f80fe9629a8ea0c7e5944dbdf342f489de43128f29cf')
-# Cargo.toml owns LTO; retain makepkg's other build policies.
-options=('!lto')
+# Cargo.toml owns LTO and strips symbols, so makepkg's debug option would only
+# compile debuginfo that is discarded; retain makepkg's other build policies.
+options=('!lto' '!debug')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -33,6 +34,8 @@ prepare() {
 build() {
   cd "$pkgname-$pkgver"
   export PATH="/usr/bin:$PATH"
+  # makepkg only remaps build paths with its debug option; keep them out anyway.
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/usr/src/debug/$pkgname"
   cargo build --frozen --release -p diffz
 }
 
