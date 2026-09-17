@@ -5,7 +5,11 @@ use diffz_adapters::{
     service::{Services, default_state_dir},
 };
 use diffz_core::provider::{Cancellation, OpenRequest, WorkbenchServices};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    io::{ErrorKind, Write},
+    path::PathBuf,
+    sync::Arc,
+};
 #[cfg(all(target_os = "linux", feature = "desktop"))]
 mod code_font;
 
@@ -153,6 +157,16 @@ fn early_exit(args: &[String]) -> Option<String> {
         None
     }
 }
+/// Writes `text` and a newline. A closed reader, as in `diffz --inspect | head`, ends output without an error.
+fn print_to(out: &mut impl Write, text: &str) -> std::io::Result<()> {
+    match writeln!(out, "{text}").and_then(|()| out.flush()) {
+        Err(e) if e.kind() == ErrorKind::BrokenPipe => Ok(()),
+        result => result,
+    }
+}
+fn print(text: &str) -> Result<()> {
+    print_to(&mut std::io::stdout().lock(), text).context("failed writing to stdout")
+}
 #[cfg(feature = "desktop")]
 fn desktop_font(requested: Option<String>) -> Result<Option<String>> {
     #[cfg(target_os = "linux")]
@@ -181,26 +195,25 @@ fn main() {
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(text) = early_exit(&args) {
-        println!("{text}");
-        return Ok(());
+        return print(&text);
     }
     if args == ["--doctor"] {
-        println!(
-            "OS={} ARCH={} desktop_feature={}",
+        let mut report = format!(
+            "OS={} ARCH={} desktop_feature={}\n",
             std::env::consts::OS,
             std::env::consts::ARCH,
             cfg!(feature = "desktop")
         );
         for tool in ["git", "gh", "cargo", "rustc"] {
-            println!(
-                "{tool}: {}",
+            report.push_str(&format!(
+                "{tool}: {}\n",
                 resolve_program(tool)
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|e| format!("missing ({e})"))
-            );
+            ));
         }
-        println!("This report implies no native runtime and no credential capability.");
-        return Ok(());
+        report.push_str("This report implies no native runtime and no credential capability.");
+        return print(&report);
     }
     let options = parse(args)?;
     #[cfg(not(feature = "desktop"))]
@@ -232,8 +245,7 @@ fn run() -> Result<()> {
     diffz_core::timing::mark("services");
     if options.inspect {
         let opened = services.open(options.request, Cancellation::default())?;
-        println!("{}", serde_json::to_string_pretty(&opened.snapshot)?);
-        return Ok(());
+        return print(&serde_json::to_string_pretty(&opened.snapshot)?);
     }
     #[cfg(feature = "desktop")]
     {
@@ -326,6 +338,30 @@ mod tests {
     #[test]
     fn unknown_flags_are_rejected() {
         assert!(parse(["--chat-claude".into()]).is_err());
+    }
+    struct FailingWriter(ErrorKind);
+    impl Write for FailingWriter {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(self.0.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn closed_stdout_ends_output_cleanly() {
+        assert!(print_to(&mut FailingWriter(ErrorKind::BrokenPipe), "{}").is_ok());
+    }
+    #[test]
+    fn other_stdout_errors_are_reported() {
+        let error = print_to(&mut FailingWriter(ErrorKind::StorageFull), "{}").unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::StorageFull);
+    }
+    #[test]
+    fn printed_text_ends_with_a_newline() {
+        let mut out = Vec::new();
+        print_to(&mut out, "{}").unwrap();
+        assert_eq!(out, b"{}\n");
     }
     #[test]
     fn version_is_handled_before_parse() {
