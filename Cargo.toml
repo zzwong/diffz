@@ -37,6 +37,12 @@ gpui-kit = "=0.6.0"
 smol = "2"
 unicode-linebreak = "0.1.5"
 
+# Temporary: carries the Vulkan-first GPU init and on-demand path textures that are
+# going upstream to zed-industries/zed. Remove this and the deny.toml allow-git entry
+# once a gpui-pre snapshot ships them.
+[patch.crates-io]
+gpui-pre-wgpu = { git = "https://github.com/zzwong/gpui-pre-wgpu", rev = "69a37f2a4370c638be580cca12611248b8b24aa8" }
+
 [profile.dev]
 debug = 1
 
