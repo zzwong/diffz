@@ -717,6 +717,7 @@ fn panel_status(status: &str) -> bool {
         || status.starts_with("Snapshot loaded.")
         || status.starts_with("Start of file")
         || status.starts_with("End of file")
+        || status.starts_with("Keep pulling")
         || status.starts_with("End of the changed-file list")
         || status.starts_with("File "))
 }
@@ -725,8 +726,9 @@ mod tests {
     #[test]
     fn navigation_statuses_stay_out_of_panels() {
         assert!(!super::panel_status(
-            "End of file · scroll again for the next file"
+            "End of file · scroll again to pull the next file in"
         ));
+        assert!(!super::panel_status("Keep pulling for the next file"));
         assert!(!super::panel_status("File 3 of 42"));
         assert!(super::panel_status("Could not save settings: disk full"));
     }

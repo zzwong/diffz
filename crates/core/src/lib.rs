@@ -19,6 +19,7 @@ pub mod height_index;
 pub mod file_tree;
 
 pub mod review_details;
+pub mod scroll;
 
 pub mod source_link;
 pub mod timefmt;

@@ -40,10 +40,28 @@ fn momentum_does_not_skip_files() {
     for _ in 0..20 {
         assert_eq!(gate.update(1, 12., false), None);
     }
-    assert_eq!(gate.update(1, 12., true), Some(1));
+    // A fresh gesture pulls against the edge and turns once it has come far enough.
+    assert_eq!(gate.update(1, 12., true), None);
+    let mut turned = None;
+    for _ in 0..20 {
+        turned = gate.update(1, 12., false);
+        if turned.is_some() {
+            break;
+        }
+    }
+    assert_eq!(turned, Some(1));
     assert_eq!(gate.update(1, 12., false), None);
+    // Reversing at the other edge first arms it, then one fresh pull turns.
     assert_eq!(gate.update(-1, -12., true), None);
-    assert_eq!(gate.update(-1, -12., true), Some(-1));
+    assert_eq!(gate.update(-1, -12., true), None);
+    let mut turned = None;
+    for _ in 0..20 {
+        turned = gate.update(-1, -12., false);
+        if turned.is_some() {
+            break;
+        }
+    }
+    assert_eq!(turned, Some(-1));
 }
 
 #[test]
@@ -83,10 +101,13 @@ fn unified_context_finds_threads_from_the_other_side() {
 }
 
 #[test]
-fn fresh_gesture_after_reaching_boundary_continues_immediately() {
+fn fresh_gesture_after_reaching_boundary_pulls_to_the_threshold() {
+    use diffz_core::scroll::PULL_THRESHOLD;
     let mut gate = BoundaryScroll::default();
     assert_eq!(gate.update(0, 100., false), None);
-    assert_eq!(gate.update(1, 20., true), Some(1));
+    assert_eq!(gate.update(1, 20., true), None);
+    assert!(gate.progress() > 0.);
+    assert_eq!(gate.update(1, PULL_THRESHOLD, false), Some(1));
 }
 
 #[test]

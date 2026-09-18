@@ -121,8 +121,18 @@ pub(crate) struct Workbench {
     pub overview_focus: FocusHandle,
     pub overview_tab: usize,
     pub comment_page: usize,
-    pub boundary_scroll: diffz_core::review_details::BoundaryScroll,
+    pub boundary_scroll: diffz_core::scroll::BoundaryScroll,
     pub last_wheel: Option<std::time::Instant>,
+    /// Inertia after a touchpad gesture; see `scrolling.rs`.
+    pub kinetic: diffz_core::scroll::Kinetic,
+    /// A finger is on the pad (or a wheel gesture is in progress).
+    pub gesture_active: bool,
+    /// Decides that the finger lifted when the platform never says so.
+    pub gesture_task: Option<Task<()>>,
+    /// A coast is being advanced frame by frame.
+    pub coast_ticking: bool,
+    /// Zero point for the millisecond clock the scroll state machines use.
+    pub gesture_epoch: std::time::Instant,
     pub export_context: Option<ContextExport>,
     pub outbox: Vec<OutboxEntry>,
     pub recent: Vec<RecentSession>,
@@ -311,6 +321,11 @@ impl Workbench {
             comment_page: 0,
             boundary_scroll: Default::default(),
             last_wheel: None,
+            kinetic: Default::default(),
+            gesture_active: false,
+            gesture_task: None,
+            coast_ticking: false,
+            gesture_epoch: std::time::Instant::now(),
             export_context: None,
             outbox: vec![],
             recent: vec![],
@@ -479,6 +494,7 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
     }
     pub fn select_file(&mut self, id: FileId, cx: &mut Context<Self>) {
         self.boundary_scroll = Default::default();
+        self.cancel_scroll_gesture();
         self.remember_anchor();
         let Some(a) = &mut self.active else { return };
         let Some(file) = a.snapshot.file(&id) else {
