@@ -149,8 +149,11 @@ macOS uses `Cmd`; Linux uses `Ctrl`.
 | Larger / smaller text | `Cmd =` / `Cmd -` |
 | Close the open panel, or drop the current selection | `Esc` |
 
-Scrolling past one file's last line carries on into the next file. A `+` in the
-gutter starts a comment anchored to that line.
+Scrolling stops at a file's first and last line. To move on, lift your finger and
+scroll again in the same direction: a bar along that edge fills as you pull, and the
+neighbouring file opens once it is full. Touchpad flicks keep coasting after the
+finger lifts, on Linux as well as macOS. A `+` in the gutter starts a comment
+anchored to that line.
 
 ## Where data lives
 

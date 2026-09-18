@@ -9,6 +9,16 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Touchpad scrolling coasts after the finger lifts on Linux, where the
+  compositor delivers raw finger deltas and nothing more; a quick flick now
+  travels three to five times as far as the finger did, in line with browsers.
+  A finger set back on the pad stops the coast.
+- Turning to the neighbouring file at a file edge is now a deliberate pull: a
+  second gesture in the same direction fills a bar along that edge and the file
+  turns once the bar is full. A slow drag that paused at the edge, a resting
+  finger's jitter, or a coast can no longer turn the file by accident.
+- `DIFFZ_SCROLL_TRACE=1` writes each wheel event and coast start to stderr.
+
 - Linux windows start faster and use much less memory: the renderer no longer
   initialises Mesa's GL stack beside Vulkan, and path-rasterization targets are
   allocated only while vector paths are drawn. Measured on a 2880x1920 display,

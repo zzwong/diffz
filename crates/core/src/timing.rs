@@ -27,3 +27,16 @@ pub fn mark_once(name: &str) {
         mark(name);
     }
 }
+/// Whether scroll tracing (`DIFFZ_SCROLL_TRACE`) is enabled: each wheel event and every
+/// coast start are written to stderr, which shows what a touchpad actually delivers.
+pub fn scroll_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("DIFFZ_SCROLL_TRACE").is_some())
+}
+/// Microseconds since the first call, for scroll traces.
+pub fn trace_us() -> u128 {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_micros()
+}

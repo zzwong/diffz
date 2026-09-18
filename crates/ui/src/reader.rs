@@ -543,6 +543,10 @@ impl Workbench {
                 .map(|d| (d.side, d.line))
                 .collect();
         }
+        v.borrow_mut().pull = (
+            self.boundary_scroll.pulling(),
+            self.boundary_scroll.progress(),
+        );
         let measure = v.clone();
         let paint = v.clone();
         let skin = self.skin();
@@ -568,38 +572,8 @@ impl Workbench {
                     cx.notify();
                 }
             }))
-            .on_scroll_wheel(cx.listener(|this,event:&ScrollWheelEvent,window,cx| {
-                if this.panel!=Panel::None {return;}
-                if matches!(event.touch_phase,TouchPhase::Ended|TouchPhase::Cancelled) {return;}
-                let now=std::time::Instant::now();
-                let fresh=event.touch_phase==TouchPhase::Started || this.last_wheel.is_none_or(|last|now.duration_since(last)>std::time::Duration::from_millis(350));
-                this.last_wheel=Some(now);
-                if let Some(v) = &this.viewport { v.borrow_mut().scrollbars_visible = true; }
-                this.scrollbar_hide_task = Some(cx.spawn(async move |this, cx| {
-                    loop {
-                        smol::Timer::after(std::time::Duration::from_millis(700)).await;
-                        let done = this.update(cx, |this, cx| {
-                            if this.scrollbar_drag || this.horizontal_drag { return false; }
-                            if let Some(v) = &this.viewport { v.borrow_mut().scrollbars_visible = false; }
-                            cx.notify();
-                            true
-                        }).unwrap_or(true);
-                        if done { break; }
-                    }
-                }));
-                let mut turn=None;
-                if let Some(v)=&this.viewport {
-                    let mut v=v.borrow_mut();
-                    let (x,y)=match event.delta {ScrollDelta::Pixels(p)=>(f32::from(p.x),f32::from(p.y)),ScrollDelta::Lines(p)=>(p.x*v.font_size*1.4,p.y*v.font_size*1.4)};
-                    if y.abs()>x.abs() && y.abs()>0.1 {
-                        let edge=v.boundary(-y);
-                        turn=this.boundary_scroll.update(edge,-y,fresh);
-                        if edge!=0 {this.status=if edge>0 {"End of file · scroll again for the next file"}else{"Start of file · scroll again for the previous file"}.into();}
-                    }
-                    if turn.is_none(){v.scroll(-x,-y);}
-                }
-                if let Some(direction)=turn {this.turn_file(direction,window,cx);}
-                this.schedule_view_save(cx);cx.stop_propagation();cx.notify();
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                this.wheel(event, crate::scrolling::ScrollTarget::Source, window, cx)
             }))
             .on_mouse_down(
                 MouseButton::Left,
