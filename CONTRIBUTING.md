@@ -53,6 +53,16 @@ the state directory. Both take absolute `PREFIX` and `DATADIR` (default
 Cargo, or `BIN=target/debug/diffz` to install a binary that is already built.
 Windows opened by either build share the `io.github.zzwong.Diffz` app ID.
 
+### Patched GPUI renderer
+
+`Cargo.toml` points `gpui-pre-wgpu` at
+[zzwong/gpui-pre-wgpu](https://github.com/zzwong/gpui-pre-wgpu), a pinned fork of
+the published crate carrying Vulkan-first GPU initialisation and on-demand path
+textures while those changes go upstream to Zed. `deny.toml` allows that Git
+source. When a `gpui-pre` snapshot ships them, update the dependencies, delete
+both entries, and archive the fork. A `cargo update` that moves `gpui-pre`
+without rebasing the fork drops the patch with a "patch was not used" warning.
+
 For desktop changes, run `make check-native` on macOS and try the affected
 interaction. Keep PRs focused, add regression tests where useful, and mention
 what you tested. Contributions use the project's MIT license.

@@ -7,6 +7,15 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Linux windows start faster and use much less memory: the renderer no longer
+  initialises Mesa's GL stack beside Vulkan, and path-rasterization targets are
+  allocated only while vector paths are drawn. Measured on a 2880x1920 display,
+  resident memory falls from 209 MB to 74 MB, GPU memory from 246 MB to 136 MB,
+  and content appears about 90 ms sooner. Machines without a usable Vulkan
+  driver still fall back to GL.
+
 ## [0.1.1] - 2026-09-17
 
 ### Changed
