@@ -1464,7 +1464,7 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                 if let Err(e) = result {
                     eprintln!("could not create native window: {e}");
                     WINDOW_FAILED.store(true, std::sync::atomic::Ordering::Release);
-                    let _ = cx.update(|cx| cx.quit());
+                    cx.update(|cx| cx.quit());
                 }
             })
             .detach();
