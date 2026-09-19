@@ -249,15 +249,18 @@ fn run() -> Result<()> {
     }
     #[cfg(feature = "desktop")]
     {
-        diffz_ui::launch(
+        if diffz_ui::launch(
             services,
             diffz_ui::LaunchOptions {
                 initial: options.request,
                 font_family: desktop_font(options.font)?,
                 theme: options.theme,
             },
-        );
-        Ok(())
+        ) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("no native window could be created"))
+        }
     }
     #[cfg(not(feature = "desktop"))]
     {
