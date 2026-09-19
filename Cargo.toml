@@ -46,8 +46,20 @@ gpui-pre-wgpu = { git = "https://github.com/zzwong/gpui-pre-wgpu", rev = "69a37f
 [profile.dev]
 debug = 1
 
-[profile.dev.package."*"]
-opt-level = 2
+# Around 400 dependency crates' debug info made the dev binary 454 MB and every
+# link 1.85 s; without it the binary is 257 MB and the link 1.25 s. Workspace
+# crates keep `debug = 1`, and so does the GPUI stack, where the crashes that
+# need a gdb session are. CONTRIBUTING.md has the trade-off and how to get the
+# rest back for one build.
+[profile.dev.package]
+"*" = { opt-level = 2, debug = 0 }
+gpui-pre = { debug = 1 }
+gpui-pre-linux = { debug = 1 }
+gpui-pre-platform = { debug = 1 }
+gpui-pre-wgpu = { debug = 1 }
+gpui-base = { debug = 1 }
+gpui-component = { debug = 1 }
+gpui-kit = { debug = 1 }
 
 [profile.release]
 lto = "thin"

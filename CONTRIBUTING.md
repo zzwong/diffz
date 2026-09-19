@@ -53,6 +53,33 @@ the state directory. Both take absolute `PREFIX` and `DATADIR` (default
 Cargo, or `BIN=target/debug/diffz` to install a binary that is already built.
 Windows opened by either build share the `io.github.zzwong.Diffz` app ID.
 
+### Debug info in development builds
+
+Workspace crates build with `debug = 1`. Dependencies build without debug info,
+except the GPUI stack (`gpui-pre`, `gpui-pre-linux`, `gpui-pre-platform`,
+`gpui-pre-wgpu`, `gpui-base`, `gpui-component`, `gpui-kit`), which keeps it
+because that is where a crash worth a gdb session usually is. The dev binary is
+257 MB instead of 454 MB and each link takes 1.25 s instead of 1.85 s.
+
+Panic backtraces still list and name workspace and GPUI frames with their
+`file:line`. A frame inside any other dependency keeps its symbol name but loses
+its `file:line`, and frames inlined into it are no longer listed at all. Bundled
+C code (SQLite, the tree-sitter parsers) compiles without `-g` for the same
+reason, so gdb cannot place those frames either.
+
+To get the debug info back for one build, without editing the manifest:
+
+```sh
+cargo build --config 'profile.dev.package."*".debug=1' -p diffz  # every dependency
+cargo build --config 'profile.dev.package.zbus.debug=1' -p diffz # one dependency
+```
+
+Each form changes the fingerprint of the packages it covers, so that build and
+the first build without the flag afterwards recompile them; for the whole tree
+that is about 8 to 11 minutes on eight cores. A
+`CARGO_PROFILE_DEV_PACKAGE_*_DEBUG` environment variable does not work, because
+Cargo does not read package-scoped profile keys from the environment.
+
 ### Patched GPUI renderer
 
 `Cargo.toml` points `gpui-pre-wgpu` at
