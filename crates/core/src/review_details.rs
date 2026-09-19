@@ -165,36 +165,7 @@ pub fn visible_markdown(body: &str) -> String {
     }
     out.replace("![", "[image: ").trim().to_string()
 }
-#[derive(Default)]
-pub struct BoundaryScroll {
-    armed: i8,
-}
-impl BoundaryScroll {
-    pub fn update(&mut self, edge: i8, delta: f32, fresh: bool) -> Option<i8> {
-        let direction = if delta > 0. {
-            1
-        } else if delta < 0. {
-            -1
-        } else {
-            0
-        };
-        if edge == 0 {
-            self.armed = direction;
-            return None;
-        }
-        if edge != direction {
-            self.armed = 0;
-            return None;
-        }
-        if fresh && self.armed == edge {
-            self.armed = 0;
-            Some(edge)
-        } else {
-            self.armed = edge;
-            None
-        }
-    }
-}
+pub use crate::scroll::BoundaryScroll;
 
 pub fn thread_roots_at(
     snapshot: &crate::domain::Snapshot,

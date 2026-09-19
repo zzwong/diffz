@@ -137,6 +137,8 @@ pub struct Viewport {
     cache_bytes: usize,
     pub hovered: Option<SourcePoint>,
     pub hover_cursor: CursorStyle,
+    /// Edge being pulled to turn the file (`0` for none) and how far, 0 to 1.
+    pub pull: (i8, f32),
     height_index: HeightIndex,
     digits: usize,
     /// Display-row positions of hunk headers, kept in sync when rows change.
@@ -220,6 +222,7 @@ impl Viewport {
             cache_bytes: 0,
             hovered: None,
             hover_cursor: CursorStyle::Arrow,
+            pull: (0, 0.),
         }
     }
     pub fn draft_selection(&self) -> Option<SourceSelection> {
@@ -1096,6 +1099,21 @@ impl Viewport {
         }
         if self.scrollbars_visible && self.max_horizontal > 0.0 {
             window.paint_quad(fill(frame.horizontal_thumb, skin.muted.opacity(0.5)));
+        }
+        let (edge, progress) = self.pull;
+        if edge != 0 && progress > 0.0 {
+            let y = if edge > 0 {
+                frame.bounds.bottom() - px(3.0)
+            } else {
+                frame.bounds.top()
+            };
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(frame.bounds.left(), y),
+                    size(px(self.width * progress.clamp(0.0, 1.0)), px(3.0)),
+                ),
+                skin.accent,
+            ));
         }
     }
     fn selection_range(

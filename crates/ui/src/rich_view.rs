@@ -109,50 +109,21 @@ impl Workbench {
             .text_size(px(font))
             .text_color(skin.text)
             // The list handles its own scrolling first (children bubble ahead of parents); here we
-            // only choose whether a wheel gesture at either end turns to another file.
+            // track the gesture and choose whether a pull at either end turns to another file.
             .on_scroll_wheel(
                 cx.listener(move |this, event: &ScrollWheelEvent, window, cx| {
-                    if this.panel != crate::app::Panel::None
-                        || matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled)
-                    {
-                        return;
-                    }
-                    let now = std::time::Instant::now();
-                    let fresh = event.touch_phase == TouchPhase::Started
-                        || this
-                            .last_wheel
-                            .is_none_or(|last| now.duration_since(last).as_millis() > 350);
-                    this.last_wheel = Some(now);
-                    let y = match event.delta {
-                        ScrollDelta::Pixels(p) => f32::from(p.y),
-                        ScrollDelta::Lines(p) => p.y * font * 1.4,
-                    };
-                    if y.abs() <= 0.1 {
-                        return;
-                    }
-                    let top = wheel_state.logical_scroll_top();
-                    let at_start = top.item_ix == 0 && top.offset_in_item <= px(0.5);
-                    let count = wheel_state.item_count();
-                    let viewport = wheel_state.viewport_bounds();
-                    let at_end = count == 0
-                        || wheel_state
-                            .bounds_for_item(count - 1)
-                            .is_some_and(|b| b.bottom() <= viewport.bottom() + px(0.5));
-                    let edge = Workbench::edge_of(-y, at_start, at_end);
-                    if edge != 0 {
-                        this.status = if edge > 0 {
-                            "End of file · scroll again for the next file"
-                        } else {
-                            "Start of file · scroll again for the previous file"
-                        }
-                        .into();
-                    }
-                    if let Some(direction) = this.boundary_scroll.update(edge, -y, fresh) {
-                        this.turn_file(direction, window, cx);
-                    }
-                    cx.notify();
+                    this.wheel(
+                        event,
+                        crate::scrolling::ScrollTarget::Rich(wheel_state.clone()),
+                        window,
+                        cx,
+                    )
                 }),
             );
+        let pull = (
+            self.boundary_scroll.pulling(),
+            self.boundary_scroll.progress(),
+        );
         if items.is_empty() {
             return container
                 .p_4()
@@ -164,6 +135,8 @@ impl Workbench {
                 .into_any_element();
         }
         container
+            .relative()
+            .child(pull_bar(pull, &skin))
             .child(
                 list(state, move |ix, _, _| {
                     let row = match &items[ix] {
@@ -182,6 +155,24 @@ impl Workbench {
             )
             .into_any_element()
     }
+}
+/// A thin bar along the edge being pulled, filling as the pull nears the turn.
+fn pull_bar((edge, progress): (i8, f32), skin: &Skin) -> AnyElement {
+    if edge == 0 || progress <= 0. {
+        return div().into_any_element();
+    }
+    let bar = div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .h(px(3.))
+        .child(div().h_full().w(relative(progress)).bg(skin.accent));
+    if edge > 0 {
+        bar.bottom_0()
+    } else {
+        bar.top_0()
+    }
+    .into_any_element()
 }
 /// Word marks, prototype stage: strikes on removed words, highlights on added ones.
 /// A block carrying no Markdown syntax, so rendering it as an HTML paragraph is safe.

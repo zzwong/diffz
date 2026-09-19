@@ -15,3 +15,4 @@ mod keyboard;
 
 mod review_panels;
 pub(crate) mod rich_view;
+mod scrolling;
