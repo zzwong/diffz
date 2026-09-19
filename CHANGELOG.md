@@ -7,6 +7,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-19
+
 ### Changed
 
 - Touchpad scrolling coasts after the finger lifts on Linux, where the
