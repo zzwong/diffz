@@ -76,7 +76,7 @@ desktop-file-validate dist/linux-root/usr/share/applications/io.github.zzwong.Di
 appstreamcli validate --no-net dist/linux-root/usr/share/metainfo/io.github.zzwong.Diffz.metainfo.xml
 bash scripts/package-linux-deb.sh
 (cd dist && sha256sum ./*.deb > SHA256SUMS)
-sudo apt install ./dist/diffz_0.1.1-1_amd64.deb
+sudo apt install ./dist/diffz_0.1.2-1_amd64.deb
 ```
 
 Use the actual filename printed by the helper if the version or architecture
@@ -128,7 +128,7 @@ Build a package as your normal user:
 ```sh
 sudo pacman -S --needed base-devel rust
 bash scripts/package-arch.sh --syncdeps
-sudo pacman -U target/arch-package/diffz-0.1.1-1-x86_64.pkg.tar.zst
+sudo pacman -U target/arch-package/diffz-0.1.2-1-x86_64.pkg.tar.zst
 ```
 
 The helper exports a pinned source snapshot from the local Git checkout,
