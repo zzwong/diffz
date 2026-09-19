@@ -18,7 +18,6 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   turns once the bar is full. A slow drag that paused at the edge, a resting
   finger's jitter, or a coast can no longer turn the file by accident.
 - `DIFFZ_SCROLL_TRACE=1` writes each wheel event and coast start to stderr.
-
 - Linux windows start faster and use much less memory: the renderer no longer
   initialises Mesa's GL stack beside Vulkan, and path-rasterization targets are
   allocated only while vector paths are drawn. Measured on a 2880x1920 display,
