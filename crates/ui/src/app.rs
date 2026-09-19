@@ -1409,7 +1409,9 @@ pub(crate) fn apply_appearance(
 fn hex(rgb: Rgb) -> Option<gpui_kit::SharedString> {
     Some(rgb.hex().into())
 }
-pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) {
+static WINDOW_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Runs the desktop application. Returns `false` when no window could be created.
+pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> bool {
     gpui_kit::application()
         .with_assets(crate::icons::Assets)
         .run(move |cx| {
@@ -1461,6 +1463,8 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) {
                 });
                 if let Err(e) = result {
                     eprintln!("could not create native window: {e}");
+                    WINDOW_FAILED.store(true, std::sync::atomic::Ordering::Release);
+                    let _ = cx.update(|cx| cx.quit());
                 }
             })
             .detach();
@@ -1471,6 +1475,7 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) {
             })
             .detach();
         });
+    !WINDOW_FAILED.load(std::sync::atomic::Ordering::Acquire)
 }
 
 #[cfg(test)]
