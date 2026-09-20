@@ -7,6 +7,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The patched GPUI renderer allocates its path-rasterization targets on the
+  first frame that draws a vector path and then keeps them, rather than
+  releasing them after two idle seconds. diffz draws no vector paths, so it
+  still allocates none of them and its memory footprint is unchanged.
+
 ## [0.1.2] - 2026-09-19
 
 ### Changed
