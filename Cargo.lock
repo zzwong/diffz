@@ -2980,7 +2980,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-wgpu"
 version = "0.3.3"
-source = "git+https://github.com/zzwong/gpui-pre-wgpu?rev=69a37f2a4370c638be580cca12611248b8b24aa8#69a37f2a4370c638be580cca12611248b8b24aa8"
+source = "git+https://github.com/zzwong/gpui-pre-wgpu?rev=c74eb0aa61c314c94769f98c887cb3659cd24b3f#c74eb0aa61c314c94769f98c887cb3659cd24b3f"
 dependencies = [
  "anyhow",
  "bytemuck",
