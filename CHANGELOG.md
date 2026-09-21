@@ -16,9 +16,20 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after the pointer leaves them; clicking the toggle pins it as before.
   The panel fades in as it slides the last few pixels into place and fades back
   out on the way, so catching it again with the pointer holds it where it is.
+- A keyboard sheet lists every bound key, grouped by what it does, under `?`
+  from the diff or the file tree and under `F1` from anywhere, including while
+  a field has the caret. Its rows come from the same table the command palette
+  and the menus read, so they cannot drift from the bindings, and clicking a
+  row closes the sheet and runs the command. `?`, `F1`, and Esc all close it.
 
 ### Changed
 
+- The status line keeps its room in the footer. Instead of a fixed strip of up
+  to twelve key hints, which clipped mid-word and pushed the status text, the
+  outbox, and the theme buttons off screen below about 1150 pixels, the footer
+  shows at most three hints chosen for what is in front of you: the focused
+  file tree, the find bar, a live selection, or plain reading. A `?` chip for
+  the full sheet is always there, and under 600 pixels it is all that is left.
 - The patched GPUI renderer allocates its path-rasterization targets on the
   first frame that draws a vector path and then keeps them, rather than
   releasing them after two idle seconds. diffz draws no vector paths, so it

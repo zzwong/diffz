@@ -1,7 +1,7 @@
 //! GPUI Kit supplies the standard controls; review state stays outside them.
 use crate::{
     app::{Panel, SourceMode, Workbench},
-    commands::{COMMANDS, Command},
+    commands::{COMMANDS, Command, SHEET, SheetGroup, SheetKeys},
 };
 use diffz_core::{palette::Mode, provider::OpenRequest, review::*};
 use gpui_kit::component::{
@@ -49,9 +49,10 @@ impl Workbench {
             )
     }
 
-    pub fn panel_view(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub fn panel_view(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();
         let title = match self.panel {
+            Panel::Keys => "Keyboard shortcuts",
             Panel::Open => "Open source",
             Panel::Recent => "Recent reviews",
             Panel::Themes => "Themes",
@@ -688,6 +689,95 @@ impl Workbench {
                     card = card.child("No prepared or submitted reviews.");
                 }
             }
+            Panel::Keys => {
+                let single = f32::from(window.viewport_size().width) < 620.;
+                let split = if single {
+                    SHEET.len()
+                } else {
+                    sheet_split(SHEET)
+                };
+                let mut columns = div().h_flex().items_start().gap_6().w_full();
+                let mut next_row = 0usize;
+                for groups in [&SHEET[..split], &SHEET[split..]] {
+                    if groups.is_empty() {
+                        continue;
+                    }
+                    let mut column = div().v_flex().flex_1().min_w_0().gap_3();
+                    for group in groups {
+                        let mut section = div().v_flex().gap_1().child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(skin.muted)
+                                .child(group.name),
+                        );
+                        for row in group.rows {
+                            let keys = crate::commands::sheet_keys(row);
+                            let caps =
+                                div()
+                                    .h_flex()
+                                    .gap_1()
+                                    .w(px(104.))
+                                    .flex_shrink_0()
+                                    .children(keys.iter().map(|key| {
+                                        crate::chrome::keycap(skin.border, key.clone())
+                                    }));
+                            let ix = next_row;
+                            next_row += 1;
+                            section = section.child(match row.keys {
+                                SheetKeys::Run(commands) => {
+                                    let command = commands[0];
+                                    Button::new(("sheet-row", ix))
+                                        .cursor_pointer()
+                                        .accessibility_label(format!(
+                                            "{} ({})",
+                                            row.label,
+                                            keys.join(" ")
+                                        ))
+                                        .ghost()
+                                        .small()
+                                        .w_full()
+                                        .justify_start()
+                                        .child(caps)
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .text_left()
+                                                .text_size(px(12.))
+                                                .child(row.label),
+                                        )
+                                        .on_click(cx.listener(move |a, _, w, c| {
+                                            a.return_focus
+                                                .take()
+                                                .unwrap_or_else(|| a.diff_focus.clone())
+                                                .focus(w, c);
+                                            a.panel = Panel::None;
+                                            a.command(command, w, c);
+                                        }))
+                                        .into_any_element()
+                                }
+                                SheetKeys::Fixed(_) => div()
+                                    .h_flex()
+                                    .gap_1()
+                                    .px_2()
+                                    .py(px(3.))
+                                    .child(caps)
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .text_size(px(12.))
+                                            .child(row.label),
+                                    )
+                                    .into_any_element(),
+                            });
+                        }
+                        column = column.child(section);
+                    }
+                    columns = columns.child(column);
+                }
+                card = card.child(columns);
+            }
             Panel::None | Panel::Line => {}
         }
         if panel_status(&self.status) {
@@ -710,6 +800,21 @@ impl Workbench {
             .into_any_element()
     }
 }
+/// Split the sheet's groups between two columns of about the same height, in
+/// the order they are written.
+fn sheet_split(groups: &[SheetGroup]) -> usize {
+    let total: usize = groups.iter().map(|g| g.rows.len()).sum();
+    let mut before = 0;
+    let mut best = (usize::MAX, groups.len());
+    for (ix, group) in groups.iter().enumerate() {
+        before += group.rows.len();
+        let gap = before.abs_diff(total - before);
+        if gap < best.0 {
+            best = (gap, ix + 1);
+        }
+    }
+    best.1
+}
 /// Decide whether a status message belongs in a panel; navigation updates from
 /// file changes and edge scrolling remain in the main view.
 fn panel_status(status: &str) -> bool {
@@ -731,5 +836,16 @@ mod tests {
         assert!(!super::panel_status("Keep pulling for the next file"));
         assert!(!super::panel_status("File 3 of 42"));
         assert!(super::panel_status("Could not save settings: disk full"));
+    }
+    #[test]
+    fn the_sheet_columns_come_out_about_even() {
+        let split = super::sheet_split(crate::commands::SHEET);
+        let rows = |groups: &[crate::commands::SheetGroup]| -> usize {
+            groups.iter().map(|g| g.rows.len()).sum()
+        };
+        let left = rows(&crate::commands::SHEET[..split]);
+        let right = rows(&crate::commands::SHEET[split..]);
+        assert!(split > 0 && split < crate::commands::SHEET.len());
+        assert!(left.abs_diff(right) * 3 <= left + right, "{left} / {right}");
     }
 }

@@ -131,6 +131,11 @@ impl Workbench {
             cx.notify();
             return;
         }
+        if self.panel == Panel::Keys && key == "?" {
+            self.command(Command::Cancel, window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.panel != Panel::None {
             return;
         }
@@ -147,6 +152,13 @@ impl Workbench {
             return;
         }
         if self.tree_focus.is_focused(window) {
+            // The filter input sits inside the tree's key context, so a bound `?`
+            // there would swallow the character while a filter is being typed.
+            if key == "?" {
+                self.command(Command::Keys, window, cx);
+                cx.stop_propagation();
+                return;
+            }
             match key {
                 "down" => {
                     self.tree_cursor =

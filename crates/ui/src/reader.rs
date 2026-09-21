@@ -509,7 +509,8 @@ impl Workbench {
         if matches!(
             command,
             Command::Open | Command::Palette | Command::Preview | Command::Export
-        ) {
+        ) || (command == Command::Keys && self.panel == Panel::None)
+        {
             self.return_focus = window.focused(cx);
         }
         match command {
@@ -672,6 +673,14 @@ impl Workbench {
                     if let Some(v) = &self.viewport {
                         v.borrow_mut().jump_first_hunk();
                     }
+                }
+            }
+            Command::Keys => {
+                if self.panel == Panel::Keys {
+                    self.command(Command::Cancel, window, cx);
+                } else {
+                    self.panel = Panel::Keys;
+                    self.panel_focus.focus(window, cx);
                 }
             }
             Command::Export => self.begin_export(cx),
@@ -1262,6 +1271,7 @@ impl Render for Workbench {
             .on_action(
                 cx.listener(|a, _: &commands::ZoomOut, w, c| a.command(Command::ZoomOut, w, c)),
             )
+            .on_action(cx.listener(|a, _: &commands::Keys, w, c| a.command(Command::Keys, w, c)))
             .on_action(
                 cx.listener(|a, _: &commands::Cancel, w, c| a.command(Command::Cancel, w, c)),
             )
@@ -1271,7 +1281,7 @@ impl Render for Workbench {
         if self.panel == Panel::Line {
             root = root.child(self.line_panel(window, cx));
         } else if self.panel != Panel::None {
-            root = root.child(self.panel_view(cx));
+            root = root.child(self.panel_view(window, cx));
         }
         root
     }

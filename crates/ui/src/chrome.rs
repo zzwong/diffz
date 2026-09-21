@@ -12,6 +12,113 @@ fn titlebar_left_inset(is_macos: bool, is_fullscreen: bool) -> Option<f32> {
     (is_macos && is_fullscreen).then_some(0.)
 }
 
+/// The bordered key box the footer hints and the keyboard sheet share.
+pub(crate) fn keycap(border: Hsla, text: String) -> Div {
+    div()
+        .h_flex()
+        .justify_center()
+        .h(px(18.))
+        .min_w(px(18.))
+        .flex_shrink_0()
+        .px(px(4.))
+        .line_height(px(14.))
+        .border_1()
+        .border_color(border)
+        .rounded_sm()
+        .text_size(px(10.))
+        .child(text)
+}
+
+/// What the footer knows about the moment, so the hints can follow it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct HintContext {
+    pub source_open: bool,
+    pub tree_focused: bool,
+    pub find_focused: bool,
+    pub selection: bool,
+}
+pub(crate) struct Hint {
+    /// Commands whose bound keys make the key text; empty when `fixed` supplies it.
+    keys: &'static [Command],
+    /// Key text for a hint no command owns: a modifier prefix and the key after it.
+    fixed: (&'static str, &'static str),
+    label: &'static str,
+    /// What a click runs; without one the hint is a plain chip.
+    command: Option<Command>,
+}
+impl Hint {
+    fn key_text(&self) -> String {
+        if self.keys.is_empty() {
+            crate::commands::fixed_key(self.fixed.0, self.fixed.1)
+        } else {
+            self.keys
+                .iter()
+                .copied()
+                .filter_map(crate::commands::shortcut)
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+    }
+}
+const fn run(keys: &'static [Command], label: &'static str, command: Command) -> Hint {
+    Hint {
+        keys,
+        fixed: ("", ""),
+        label,
+        command: Some(command),
+    }
+}
+const fn fixed(modifier: &'static str, key: &'static str, label: &'static str) -> Hint {
+    Hint {
+        keys: &[],
+        fixed: (modifier, key),
+        label,
+        command: None,
+    }
+}
+/// Pick the few hints worth the footer's width for what is on screen.
+pub(crate) fn footer_hints(ctx: HintContext) -> &'static [Hint] {
+    const NO_SOURCE: &[Hint] = &[
+        run(&[Command::Open], "open source", Command::Open),
+        run(&[Command::Recent], "recent reviews", Command::Recent),
+    ];
+    const TREE: &[Hint] = &[
+        fixed("", "↵", "open"),
+        fixed("", "Space", "reviewed"),
+        fixed("", "← →", "fold"),
+    ];
+    const FIND: &[Hint] = &[
+        fixed("", "↵", "next"),
+        fixed("shift-", "↵", "previous"),
+        run(&[Command::Cancel], "close", Command::Cancel),
+    ];
+    const SELECTION: &[Hint] = &[
+        run(&[Command::Comment], "comment", Command::Comment),
+        run(&[Command::Copy], "copy", Command::Copy),
+        run(&[Command::Cancel], "clear", Command::Cancel),
+    ];
+    const READING: &[Hint] = &[
+        run(&[Command::NextHunk], "next hunk", Command::NextHunk),
+        run(
+            &[Command::PreviousFile, Command::NextFile],
+            "files",
+            Command::NextFile,
+        ),
+        run(&[Command::Comment], "comment", Command::Comment),
+    ];
+    if !ctx.source_open {
+        NO_SOURCE
+    } else if ctx.tree_focused {
+        TREE
+    } else if ctx.find_focused {
+        FIND
+    } else if ctx.selection {
+        SELECTION
+    } else {
+        READING
+    }
+}
+
 impl Workbench {
     pub(crate) fn activate_tree(
         &mut self,
@@ -696,13 +803,8 @@ impl Workbench {
     }
     pub(crate) fn footer(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();
-        let primary = if cfg!(target_os = "macos") {
-            "⌘"
-        } else {
-            "Ctrl+"
-        };
         // Every ghost button paints its own foreground, so the tone goes on per button.
-        let hint = skin.muted.opacity(0.75);
+        let tone = skin.muted.opacity(0.75);
         let mut strip = div()
             .h_flex()
             .gap_1()
@@ -713,99 +815,57 @@ impl Workbench {
             .border_color(skin.border)
             .bg(skin.surface)
             .text_size(px(11.))
-            .text_color(hint);
-        let wide = f32::from(window.viewport_size().width) >= 1150.;
-        for (id, key, label, command, extra) in [
-            ("hint-open", "primary-o", "open", Command::Open, true),
-            ("hint-files", "[ ]", "files", Command::NextFile, false),
-            ("hint-next-hunk", "N", "next hunk", Command::NextHunk, false),
-            (
-                "hint-prev-hunk",
-                "P",
-                "previous hunk",
-                Command::PreviousHunk,
-                false,
-            ),
-            ("hint-find", "primary-f", "find", Command::Find, false),
-            ("hint-wrap", "alt-z", "wrap", Command::Wrap, false),
-            ("hint-split", "primary-alt-s", "split", Command::Split, true),
-            ("hint-copy", "primary-c", "copy", Command::Copy, true),
-            ("hint-comment", "C", "comment", Command::Comment, false),
-            (
-                "hint-comment-file",
-                "⇧C",
-                "file comment",
-                Command::CommentFile,
-                false,
-            ),
-            (
-                "hint-review",
-                "primary-enter",
-                "review",
-                Command::Preview,
-                true,
-            ),
-        ] {
-            if extra && !wide {
-                continue;
-            }
-            let key = crate::commands::display_key(key);
-            strip = strip.child(
-                Button::new(id)
+            .text_color(tone);
+        let hints: &[Hint] = if f32::from(window.viewport_size().width) < 600. {
+            &[]
+        } else {
+            footer_hints(HintContext {
+                source_open: self.active.is_some(),
+                tree_focused: self.tree_focus.is_focused(window),
+                find_focused: self.find_visible
+                    && (self.find_input.read(cx).focus_handle(cx).is_focused(window)
+                        || self.find_next_focus.contains_focused(window, cx)),
+                selection: self
+                    .viewport
+                    .as_ref()
+                    .is_some_and(|v| v.borrow().selection.is_some()),
+            })
+        };
+        for (ix, hint) in hints.iter().enumerate() {
+            let key = hint.key_text();
+            let label = hint.label;
+            strip = strip.child(match hint.command {
+                Some(command) => Button::new(("hint", ix))
                     .accessibility_label(format!("{label} ({key})"))
                     .cursor_pointer()
                     .ghost()
                     .small()
-                    .text_color(hint)
-                    .child(
-                        div()
-                            .h_flex()
-                            .justify_center()
-                            .h(px(18.))
-                            .min_w(px(18.))
-                            .flex_shrink_0()
-                            .px(px(4.))
-                            .line_height(px(14.))
-                            .border_1()
-                            .border_color(skin.border)
-                            .rounded_sm()
-                            .text_size(px(10.))
-                            .child(key),
-                    )
+                    .text_color(tone)
+                    .child(keycap(skin.border, key))
                     .child(div().text_size(px(11.)).line_height(px(16.)).child(label))
-                    .on_click(cx.listener(move |a, _, w, c| a.command(command, w, c))),
-            );
+                    .on_click(cx.listener(move |a, _, w, c| a.command(command, w, c)))
+                    .into_any_element(),
+                None => div()
+                    .h_flex()
+                    .gap_1()
+                    .px_1()
+                    .child(keycap(skin.border, key))
+                    .child(div().text_size(px(11.)).line_height(px(16.)).child(label))
+                    .into_any_element(),
+            });
         }
         strip
             .child(
-                Button::new("palette")
-                    .accessibility_label("Command palette")
+                Button::new("hint-keys")
+                    .accessibility_label("Keyboard shortcuts (?)")
                     .cursor_pointer()
                     .ghost()
                     .small()
-                    .text_color(hint)
-                    .child(
-                        div()
-                            .h_flex()
-                            .justify_center()
-                            .h(px(18.))
-                            .min_w(px(18.))
-                            .flex_shrink_0()
-                            .px(px(4.))
-                            .line_height(px(14.))
-                            .border_1()
-                            .border_color(skin.border)
-                            .rounded_sm()
-                            .text_size(px(10.))
-                            .child(format!("{primary}K")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .line_height(px(16.))
-                            .child("commands"),
-                    )
-                    .on_click(cx.listener(|a, _, w, c| a.command(Command::Palette, w, c))),
+                    .text_color(tone)
+                    .tooltip(tip("Keyboard shortcuts", Command::Keys))
+                    .child(keycap(skin.border, "?".into()))
+                    .child(div().text_size(px(11.)).line_height(px(16.)).child("keys"))
+                    .on_click(cx.listener(|a, _, w, c| a.command(Command::Keys, w, c))),
             )
             .child(
                 div()
@@ -874,5 +934,110 @@ mod tests {
     fn titlebar_keeps_the_dependency_inset_outside_macos_fullscreen() {
         assert_eq!(titlebar_left_inset(true, false), None);
         assert_eq!(titlebar_left_inset(false, true), None);
+    }
+
+    const READING: HintContext = HintContext {
+        source_open: true,
+        tree_focused: false,
+        find_focused: false,
+        selection: false,
+    };
+
+    fn labels(ctx: HintContext) -> Vec<&'static str> {
+        footer_hints(ctx).iter().map(|h| h.label).collect()
+    }
+
+    #[::core::prelude::v1::test]
+    fn an_empty_workbench_offers_a_source() {
+        assert_eq!(
+            labels(HintContext {
+                source_open: false,
+                tree_focused: true,
+                selection: true,
+                ..READING
+            }),
+            ["open source", "recent reviews"]
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_focused_pane_decides_the_hints() {
+        assert_eq!(
+            labels(HintContext {
+                tree_focused: true,
+                find_focused: true,
+                selection: true,
+                ..READING
+            }),
+            ["open", "reviewed", "fold"]
+        );
+        assert_eq!(
+            labels(HintContext {
+                find_focused: true,
+                selection: true,
+                ..READING
+            }),
+            ["next", "previous", "close"]
+        );
+        assert_eq!(
+            labels(HintContext {
+                selection: true,
+                ..READING
+            }),
+            ["comment", "copy", "clear"]
+        );
+        assert_eq!(labels(READING), ["next hunk", "files", "comment"]);
+    }
+
+    #[::core::prelude::v1::test]
+    fn no_context_crowds_the_status_text() {
+        for source_open in [false, true] {
+            for tree_focused in [false, true] {
+                for find_focused in [false, true] {
+                    for selection in [false, true] {
+                        let ctx = HintContext {
+                            source_open,
+                            tree_focused,
+                            find_focused,
+                            selection,
+                        };
+                        assert!(footer_hints(ctx).len() <= 3, "{ctx:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[::core::prelude::v1::test]
+    fn command_hints_take_their_key_text_from_the_bindings() {
+        for hint in footer_hints(READING) {
+            let Some(command) = hint.command else {
+                continue;
+            };
+            if hint.keys.len() == 1 {
+                assert_eq!(Some(hint.key_text()), crate::commands::shortcut(command));
+            }
+        }
+        let files = &footer_hints(READING)[1];
+        assert_eq!(
+            files.key_text(),
+            format!(
+                "{} {}",
+                crate::commands::shortcut(Command::PreviousFile).expect("bound"),
+                crate::commands::shortcut(Command::NextFile).expect("bound")
+            )
+        );
+    }
+
+    #[::core::prelude::v1::test]
+    fn hints_without_a_command_are_not_clickable() {
+        assert!(
+            footer_hints(HintContext {
+                tree_focused: true,
+                ..READING
+            })
+            .iter()
+            .all(|h| h.command.is_none())
+        );
     }
 }
