@@ -10,6 +10,94 @@ use gpui_kit::{prelude::*, *};
 const FILES_EDGE_X: f32 = 24.;
 const FILES_COLLAPSE_WIDTH: f32 = 150.;
 const FILES_COLLAPSE_VELOCITY: f32 = -900.;
+/// The pointer crosses a few titlebar pixels that belong to neither region on its way
+/// from the toggle to the panel, so a leave has to wait before it closes the peek.
+const FILES_PEEK_GRACE_MS: u64 = 200;
+const FILES_PEEK_IN_MS: f32 = 180.;
+const FILES_PEEK_OUT_MS: f32 = 120.;
+const FILES_PEEK_SLIDE_PX: f32 = 16.;
+/// A stalled frame must not carry the panel across the whole path in one step.
+const FILES_PEEK_STEP_MS: f32 = 32.;
+
+fn ease_out_cubic(t: f32) -> f32 {
+    let remaining = 1. - t;
+    1. - remaining * remaining * remaining
+}
+
+/// The floating file panel shown while the collapsed panel's toggle, or the panel
+/// itself, is hovered. `open` is the target; `visibility` is where the motion is.
+#[derive(Default)]
+pub struct FilesPeek {
+    pub open: bool,
+    visibility: f32,
+    button_hovered: bool,
+    panel_hovered: bool,
+}
+
+impl FilesPeek {
+    /// Arms on the hover-enter event alone: a click that collapses the pinned panel
+    /// leaves the pointer on the button, and reading "is hovered" would reopen it.
+    pub(crate) fn hover_button(&mut self, hovered: bool, pinned: bool) -> bool {
+        let entered = hovered && !self.button_hovered;
+        self.button_hovered = hovered;
+        if entered && !pinned {
+            self.open = true;
+        }
+        self.closing()
+    }
+    pub(crate) fn hover_panel(&mut self, hovered: bool) -> bool {
+        self.panel_hovered = hovered;
+        // A pointer that catches the fading panel brings it back from where it is.
+        if hovered && self.visibility > 0. {
+            self.open = true;
+        }
+        self.closing()
+    }
+    fn closing(&self) -> bool {
+        self.open && !self.button_hovered && !self.panel_hovered
+    }
+    fn expire(&mut self) -> bool {
+        let close = self.closing();
+        if close {
+            self.open = false;
+        }
+        close
+    }
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+    fn shown(&self) -> bool {
+        self.open || self.visibility > 0.
+    }
+    fn target(&self) -> f32 {
+        if self.open { 1. } else { 0. }
+    }
+    fn moving(&self) -> bool {
+        self.visibility != self.target()
+    }
+    /// Steps the progress towards the target; true while it has further to go.
+    fn advance(&mut self, dt_ms: f32) -> bool {
+        let target = self.target();
+        let step = dt_ms
+            / if self.open {
+                FILES_PEEK_IN_MS
+            } else {
+                FILES_PEEK_OUT_MS
+            };
+        self.visibility = if self.visibility < target {
+            (self.visibility + step).min(target)
+        } else {
+            (self.visibility - step).max(target)
+        };
+        self.moving()
+    }
+    /// Left offset in pixels and opacity. Both directions read the same progress
+    /// through the same curve, so a reversal mid-flight stays continuous.
+    fn frame(&self) -> (f32, f32) {
+        let eased = ease_out_cubic(self.visibility);
+        (-FILES_PEEK_SLIDE_PX * (1. - eased), eased)
+    }
+}
 
 fn should_collapse_files(pointer_x: f32, raw_desired_width: f32, velocity_x: f32) -> bool {
     pointer_x <= FILES_EDGE_X
@@ -190,6 +278,61 @@ impl Workbench {
             self.overview_width = desired.clamp(minimum, limit);
         }
     }
+    /// Called from both peek hover handlers with the "a close is due" answer.
+    pub(crate) fn files_peek_hovered(
+        &mut self,
+        close: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.files_peek_close = close.then(|| {
+            cx.spawn_in(window, async move |this, cx| {
+                smol::Timer::after(std::time::Duration::from_millis(FILES_PEEK_GRACE_MS)).await;
+                let _ = this.update_in(cx, |this, window, cx| {
+                    if !this.files_peek.expire() {
+                        return;
+                    }
+                    let filter = this.filter_input.read(cx).focus_handle(cx);
+                    if this.tree_focus.contains_focused(window, cx)
+                        || filter.contains_focused(window, cx)
+                    {
+                        this.diff_focus.focus(window, cx);
+                    }
+                    this.animate_files_peek(window, cx);
+                    cx.notify();
+                });
+            })
+        });
+        self.animate_files_peek(window, cx);
+        cx.notify();
+    }
+    /// Advance the peek once per frame until it settles on its target.
+    fn animate_files_peek(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.files_peek_frame.is_some() || !self.files_peek.moving() {
+            return;
+        }
+        self.files_peek_frame = Some(std::time::Instant::now());
+        cx.on_next_frame(window, |this, window, cx| this.files_peek_tick(window, cx));
+    }
+    fn files_peek_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = std::time::Instant::now();
+        let Some(previous) = self.files_peek_frame.replace(now) else {
+            return;
+        };
+        let dt = (now.saturating_duration_since(previous).as_secs_f32() * 1_000.)
+            .min(FILES_PEEK_STEP_MS);
+        if self.files_peek.advance(dt) {
+            cx.on_next_frame(window, |this, window, cx| this.files_peek_tick(window, cx));
+        } else {
+            self.files_peek_frame = None;
+        }
+        cx.notify();
+    }
+    pub(crate) fn reset_files_peek(&mut self) {
+        self.files_peek.reset();
+        self.files_peek_close = None;
+        self.files_peek_frame = None;
+    }
     fn panel_divider(&self, left: bool, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();
         let active = self
@@ -296,6 +439,7 @@ impl Workbench {
             }
             Command::Files => {
                 self.files_visible = !self.files_visible;
+                self.reset_files_peek();
                 if !self.files_visible {
                     self.diff_focus.focus(window, cx);
                 }
@@ -804,6 +948,35 @@ impl Render for Workbench {
                     .child(self.panel_divider(false, cx)),
             );
         }
+        if !self.files_visible && self.files_peek.shown() {
+            // The hover region keeps the settled bounds; only the panel inside moves.
+            let (offset, opacity) = self.files_peek.frame();
+            body = body.child(
+                div()
+                    .id("files-peek")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .w(px(self.files_width))
+                    .occlude()
+                    .on_hover(cx.listener(|a, hovered: &bool, window, cx| {
+                        let close = a.files_peek.hover_panel(*hovered);
+                        a.files_peek_hovered(close, window, cx);
+                    }))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(px(offset))
+                            .w(px(self.files_width))
+                            .opacity(opacity)
+                            .shadow_lg()
+                            .child(self.files(cx)),
+                    ),
+            );
+        }
         if diffz_core::timing::enabled() && self.active.is_some() {
             body = body.child(
                 canvas(
@@ -868,6 +1041,7 @@ impl Render for Workbench {
                     if state.left && should_collapse_files(x, desired, velocity_x) {
                         a.files_width = state.start_width;
                         a.files_visible = false;
+                        a.reset_files_peek();
                         a.diff_focus.focus(window, cx);
                         a.schedule_view_save(cx);
                     }
@@ -1025,6 +1199,140 @@ mod tests {
 
         assert!(cancel_resize_on_unpressed_mouse(&mut resizing, None));
         assert!(resizing.is_none());
+    }
+
+    #[::core::prelude::v1::test]
+    fn peek_opens_on_button_entry_only_while_the_panel_is_collapsed() {
+        let mut peek = FilesPeek::default();
+        assert!(!peek.hover_button(true, true));
+        assert!(!peek.open);
+
+        peek.reset();
+        assert!(!peek.hover_button(true, false));
+        assert!(peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn peek_survives_the_move_from_the_button_to_the_panel() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        assert!(!peek.hover_panel(true));
+        assert!(!peek.hover_button(false, false));
+        assert!(!peek.expire());
+        assert!(peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn leaving_both_regions_closes_the_peek_when_the_delay_expires() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        assert!(peek.hover_button(false, false));
+        assert!(peek.expire());
+        assert!(!peek.open);
+        assert!(!peek.expire());
+    }
+
+    #[::core::prelude::v1::test]
+    fn hovering_again_before_the_delay_expires_keeps_the_peek_open() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        assert!(peek.hover_button(false, false));
+        assert!(!peek.hover_panel(true));
+        assert!(!peek.expire());
+        assert!(peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_peek_enters_over_the_in_duration_and_leaves_over_the_out_duration() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        assert!(peek.advance(FILES_PEEK_IN_MS / 2.));
+        assert!(!peek.advance(FILES_PEEK_IN_MS / 2.));
+        assert_eq!(peek.visibility, 1.);
+
+        peek.hover_button(false, false);
+        peek.expire();
+        assert!(peek.advance(FILES_PEEK_OUT_MS / 2.));
+        assert!(!peek.advance(FILES_PEEK_OUT_MS / 2.));
+        assert_eq!(peek.visibility, 0.);
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_peek_frame_spans_the_slide_and_the_fade() {
+        let mut peek = FilesPeek::default();
+        assert_eq!(peek.frame(), (-FILES_PEEK_SLIDE_PX, 0.));
+
+        peek.hover_button(true, false);
+        peek.advance(FILES_PEEK_IN_MS);
+        assert_eq!(peek.frame(), (0., 1.));
+    }
+
+    #[::core::prelude::v1::test]
+    fn reversing_mid_flight_continues_from_where_the_peek_stands() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        peek.advance(FILES_PEEK_IN_MS / 2.);
+        let caught = peek.visibility;
+
+        peek.hover_button(false, false);
+        peek.expire();
+        assert_eq!(peek.visibility, caught);
+        peek.advance(FILES_PEEK_OUT_MS / 4.);
+        assert_eq!(peek.visibility, caught - 0.25);
+    }
+
+    #[::core::prelude::v1::test]
+    fn catching_the_closing_peek_reopens_it_from_its_current_progress() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        peek.advance(FILES_PEEK_IN_MS);
+        peek.hover_button(false, false);
+        peek.expire();
+        peek.advance(FILES_PEEK_OUT_MS / 2.);
+        let caught = peek.visibility;
+
+        assert!(!peek.hover_panel(true));
+        assert!(peek.open);
+        assert_eq!(peek.visibility, caught);
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_peek_stays_on_screen_until_the_exit_finishes() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        peek.advance(FILES_PEEK_IN_MS);
+        peek.hover_button(false, false);
+        peek.expire();
+        peek.advance(FILES_PEEK_OUT_MS / 2.);
+        assert!(peek.shown());
+
+        peek.advance(FILES_PEEK_OUT_MS / 2.);
+        assert!(!peek.shown());
+    }
+
+    #[::core::prelude::v1::test]
+    fn pinning_or_collapsing_the_panel_snaps_the_peek_away() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        peek.advance(FILES_PEEK_IN_MS / 2.);
+        peek.reset();
+        assert!(!peek.shown());
+        assert!(!peek.moving());
+        assert_eq!(peek.visibility, 0.);
+    }
+
+    #[::core::prelude::v1::test]
+    fn a_reset_under_the_pointer_waits_for_a_fresh_button_entry() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        peek.reset();
+        assert!(!peek.open);
+        // Nothing reaches the peek while the pointer rests on the button after a click.
+        assert!(!peek.hover_panel(false));
+        assert!(!peek.open);
+
+        assert!(!peek.hover_button(true, false));
+        assert!(peek.open);
     }
 
     #[::core::prelude::v1::test]
