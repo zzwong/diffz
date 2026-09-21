@@ -350,15 +350,25 @@ impl Workbench {
                         .gap_2()
                         .pr_2()
                         .child(
-                            Button::new("files")
-                                .cursor_pointer()
-                                .ghost()
-                                .small()
-                                .icon(IconName::PanelLeft)
-                                .accessibility_label("Toggle file tree")
-                                .tooltip(tip("Toggle file tree", Command::Files))
-                                .on_click(
-                                    cx.listener(|a, _, w, c| a.command(Command::Files, w, c)),
+                            div()
+                                .id("files-hover")
+                                .flex_shrink_0()
+                                .on_hover(cx.listener(|a, hovered: &bool, w, c| {
+                                    let close =
+                                        a.files_peek.hover_button(*hovered, a.files_visible);
+                                    a.files_peek_hovered(close, w, c);
+                                }))
+                                .child(
+                                    Button::new("files")
+                                        .cursor_pointer()
+                                        .ghost()
+                                        .small()
+                                        .icon(IconName::PanelLeft)
+                                        .accessibility_label("Toggle file tree")
+                                        .tooltip(tip("Toggle file tree", Command::Files))
+                                        .on_click(cx.listener(|a, _, w, c| {
+                                            a.command(Command::Files, w, c)
+                                        })),
                                 ),
                         )
                         .child(

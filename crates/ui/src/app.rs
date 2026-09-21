@@ -1,5 +1,6 @@
 use crate::{
     commands,
+    reader::FilesPeek,
     theme::Skin,
     viewport::{Decorations, Viewport},
 };
@@ -89,6 +90,11 @@ pub(crate) struct Workbench {
     pub panel: Panel,
     pub source_mode: SourceMode,
     pub files_visible: bool,
+    /// The collapsed file panel floating over the diff while its toggle or itself is hovered.
+    pub files_peek: FilesPeek,
+    pub files_peek_close: Option<Task<()>>,
+    /// Clock of the peek's enter or exit motion; `Some` means a frame loop is running.
+    pub files_peek_frame: Option<Instant>,
     pub inspector_visible: bool,
     pub files_resize_focus: FocusHandle,
     pub overview_resize_focus: FocusHandle,
@@ -282,6 +288,9 @@ impl Workbench {
             panel: Panel::None,
             source_mode: SourceMode::GitHub,
             files_visible: true,
+            files_peek: FilesPeek::default(),
+            files_peek_close: None,
+            files_peek_frame: None,
             inspector_visible: false,
             files_resize_focus: cx.focus_handle(),
             overview_resize_focus: cx.focus_handle(),
