@@ -25,6 +25,7 @@ pub enum Command {
     Theme,
     Themes,
     Export,
+    Keys,
     Cancel,
 }
 pub const COMMANDS: &[(Command, &str, &str)] = &[
@@ -64,6 +65,7 @@ pub const COMMANDS: &[(Command, &str, &str)] = &[
     (Command::Theme, "Toggle light/dark theme", ""),
     (Command::Themes, "Choose theme…", ""),
     (Command::Export, "Export selected context", ""),
+    (Command::Keys, "Keyboard shortcuts", "f1"),
     (Command::Cancel, "Close panel / clear selection", "escape"),
 ];
 actions!(
@@ -91,10 +93,121 @@ actions!(
         ZoomIn,
         ZoomOut,
         Themes,
+        Keys,
         Cancel,
         Quit
     ]
 );
+/// One row of the keyboard sheet.
+pub struct SheetRow {
+    pub keys: SheetKeys,
+    pub label: &'static str,
+}
+pub enum SheetKeys {
+    /// Key text comes from `COMMANDS`, so the sheet cannot drift from the bindings.
+    Run(&'static [Command]),
+    /// Keys no command owns, each written as a modifier prefix and the key after it.
+    Fixed(&'static [(&'static str, &'static str)]),
+}
+pub struct SheetGroup {
+    pub name: &'static str,
+    pub rows: &'static [SheetRow],
+}
+const fn run(keys: &'static [Command], label: &'static str) -> SheetRow {
+    SheetRow {
+        keys: SheetKeys::Run(keys),
+        label,
+    }
+}
+const fn fixed(keys: &'static [(&'static str, &'static str)], label: &'static str) -> SheetRow {
+    SheetRow {
+        keys: SheetKeys::Fixed(keys),
+        label,
+    }
+}
+pub const SHEET: &[SheetGroup] = &[
+    SheetGroup {
+        name: "Navigate",
+        rows: &[
+            run(
+                &[Command::NextFile, Command::PreviousFile],
+                "next / previous file",
+            ),
+            run(
+                &[Command::NextHunk, Command::PreviousHunk],
+                "next / previous hunk",
+            ),
+            run(&[Command::Find], "find"),
+            fixed(&[("", "↑ ↓"), ("", "← →")], "move selection"),
+            fixed(&[("shift-", "↑ ↓ ← →")], "extend selection"),
+            fixed(&[("", "PgUp"), ("", "PgDn")], "scroll a page"),
+            fixed(&[("", "Home"), ("", "End")], "line start / end"),
+            fixed(
+                &[("primary-", "Home"), ("primary-", "End")],
+                "first / last line",
+            ),
+            fixed(&[("alt-", "↑"), ("alt-", "↓")], "more context"),
+        ],
+    },
+    SheetGroup {
+        name: "Review",
+        rows: &[
+            run(&[Command::Comment], "comment"),
+            run(&[Command::CommentFile], "file comment"),
+            run(&[Command::Copy], "copy selection"),
+            run(&[Command::Inspector], "review overview"),
+            run(&[Command::Preview], "preview review"),
+            run(&[Command::Refresh], "check for new revision"),
+        ],
+    },
+    SheetGroup {
+        name: "View",
+        rows: &[
+            run(&[Command::Files], "file tree"),
+            run(&[Command::Wrap], "soft wrap"),
+            run(&[Command::Split], "split view"),
+            run(&[Command::Rich], "rich diff for prose"),
+            run(&[Command::RichInline], "rich word marks"),
+            run(
+                &[Command::ZoomIn, Command::ZoomOut],
+                "larger / smaller text",
+            ),
+        ],
+    },
+    SheetGroup {
+        name: "File tree",
+        rows: &[
+            fixed(&[("", "↑ ↓")], "move"),
+            fixed(&[("", "↵")], "open"),
+            fixed(&[("", "← →")], "fold / unfold"),
+            fixed(&[("", "Space")], "mark reviewed"),
+            fixed(&[("", "Home"), ("", "End")], "first / last row"),
+        ],
+    },
+    SheetGroup {
+        name: "App",
+        rows: &[
+            run(&[Command::Palette], "command palette"),
+            run(&[Command::Keys], "this list of keys"),
+            run(&[Command::Open], "open a source"),
+            run(&[Command::Recent], "switch recent review"),
+            fixed(&[("", "Tab")], "move focus"),
+            run(&[Command::Cancel], "close / clear selection"),
+        ],
+    },
+];
+/// Key text for a sheet row, one string per keycap.
+pub fn sheet_keys(row: &SheetRow) -> Vec<String> {
+    match row.keys {
+        SheetKeys::Run(commands) => commands.iter().copied().filter_map(shortcut).collect(),
+        SheetKeys::Fixed(keys) => keys.iter().map(|&(m, k)| fixed_key(m, k)).collect(),
+    }
+}
+/// Key text for a key no command owns: the modifier follows the platform, the
+/// rest reads as written.
+pub fn fixed_key(modifier: &str, key: &str) -> String {
+    format!("{}{key}", display_key(modifier))
+}
 /// Build the native menu. On macOS, a main menu makes the program visible to
 /// the app switcher, Dock, and standard quit shortcut.
 pub fn menus() -> Vec<Menu> {
@@ -110,6 +223,7 @@ pub fn menus() -> Vec<Menu> {
         Menu::new("View").items([
             MenuItem::action("Find in Diff", Find),
             MenuItem::action("Command Palette", Palette),
+            MenuItem::action("Keyboard Shortcuts", Keys),
             MenuItem::separator(),
             MenuItem::action("Toggle Files", Files),
             MenuItem::action("Toggle Review Overview", Inspector),
@@ -147,6 +261,9 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new(&key("primary-k"), Palette, Some("Workbench")),
         KeyBinding::new(&key("primary-r"), Refresh, Some("Workbench")),
         KeyBinding::new(&key("primary-enter"), Preview, Some("Workbench")),
+        KeyBinding::new("f1", Keys, Some("Workbench")),
+        // Shift and slash arrive as the single key "?" on every platform.
+        KeyBinding::new("?", Keys, Some("WorkbenchDiff")),
         KeyBinding::new("alt-z", Wrap, Some("WorkbenchDiff")),
         KeyBinding::new(&key("primary-alt-s"), Split, Some("WorkbenchDiff")),
         KeyBinding::new(&key("primary-shift-r"), Rich, Some("WorkbenchDiff")),
@@ -227,6 +344,58 @@ mod tests {
         let menus = super::menus();
         assert_eq!(menus[0].name.as_ref(), "diffz");
         assert!(menus.iter().all(|m| !m.items.is_empty()));
+    }
+    #[test]
+    fn every_bound_command_is_on_the_sheet_once() {
+        for (command, label, key) in COMMANDS {
+            if key.is_empty() {
+                continue;
+            }
+            let count = sheet_commands().filter(|c| c == command).count();
+            assert_eq!(count, 1, "{label} appears {count} times on the sheet");
+        }
+    }
+    #[test]
+    fn the_sheet_lists_no_unbound_command() {
+        for command in sheet_commands() {
+            assert!(super::shortcut(command).is_some(), "{command:?} has no key");
+        }
+    }
+    #[test]
+    fn sheet_key_text_comes_from_the_bindings() {
+        for row in super::SHEET.iter().flat_map(|group| group.rows) {
+            let super::SheetKeys::Run(commands) = row.keys else {
+                continue;
+            };
+            let expected: Vec<String> = commands
+                .iter()
+                .map(|&c| super::shortcut(c).expect("bound"))
+                .collect();
+            assert_eq!(super::sheet_keys(row), expected, "{}", row.label);
+        }
+    }
+    #[test]
+    fn fixed_sheet_keys_carry_the_platform_modifier() {
+        assert_eq!(super::fixed_key("", "Space"), "Space");
+        assert_eq!(
+            super::fixed_key("shift-", "↑"),
+            if cfg!(target_os = "macos") {
+                "⇧↑"
+            } else {
+                "Shift+↑"
+            }
+        );
+    }
+    fn sheet_commands() -> impl Iterator<Item = Command> {
+        super::SHEET
+            .iter()
+            .flat_map(|group| group.rows)
+            .filter_map(|row| match row.keys {
+                super::SheetKeys::Run(commands) => Some(commands),
+                super::SheetKeys::Fixed(_) => None,
+            })
+            .flatten()
+            .copied()
     }
     #[test]
     fn action_names_are_unique() {

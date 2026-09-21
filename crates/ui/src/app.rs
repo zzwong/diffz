@@ -43,6 +43,7 @@ pub(crate) enum Panel {
     Line,
     Recent,
     Themes,
+    Keys,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceMode {

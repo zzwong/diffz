@@ -127,10 +127,12 @@ approvals. Blocking change requests and multi-line comments do not work yet.
 
 ### Keyboard shortcuts
 
-macOS uses `Cmd`; Linux uses `Ctrl`.
+macOS uses `Cmd`; Linux uses `Ctrl`. `F1` opens the same list inside the app from
+anywhere, `?` from the diff or the file tree.
 
 | Action | Shortcut |
 | --- | --- |
+| Keyboard shortcuts | `?` / `F1` |
 | Command palette | `Cmd K` |
 | Open a diff source | `Cmd O` |
 | Cycle among the reviews you opened recently | `Cmd Shift O` |
@@ -142,12 +144,15 @@ macOS uses `Cmd`; Linux uses `Ctrl`.
 | Turn soft wrap on or off | `Alt Z` |
 | Turn split view on or off | `Cmd Alt S` |
 | Turn the prose rich view on or off | `Cmd Shift R` |
+| Show or hide word marks inside rich diff blocks | `Cmd Shift I` |
 | Draft a comment on selected lines, or the whole file when none are selected | `C` |
 | Draft a comment for the whole file | `Shift C` |
+| Copy the selected source | `Cmd C` |
 | Preview your review | `Cmd Enter` |
 | Look for a newer revision | `Cmd R` |
 | Larger / smaller text | `Cmd =` / `Cmd -` |
 | Close the open panel, or drop the current selection | `Esc` |
+| Move focus between the panes | `Tab` |
 
 Scrolling stops at a file's first and last line. To move on, lift your finger and
 scroll again in the same direction: a bar along that edge fills as you pull, and the
