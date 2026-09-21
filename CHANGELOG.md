@@ -9,10 +9,11 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Hovering the file-tree toggle while the file panel is collapsed floats the
-  panel over the diff, so a file can be picked without pinning the panel back
-  open. It stays while the pointer is on the toggle or the panel and closes
-  shortly after the pointer leaves both; clicking the toggle pins it as before.
+- Hovering the file-tree toggle, or resting the pointer against the window's
+  left edge, while the file panel is collapsed floats the panel over the diff,
+  so a file can be picked without pinning the panel back open. It stays while
+  the pointer is on the toggle, the edge, or the panel, and closes shortly
+  after the pointer leaves them; clicking the toggle pins it as before.
   The panel fades in as it slides the last few pixels into place and fades back
   out on the way, so catching it again with the pointer holds it where it is.
 
