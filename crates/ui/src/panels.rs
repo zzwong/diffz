@@ -716,7 +716,6 @@ impl Workbench {
                                 div()
                                     .h_flex()
                                     .gap_1()
-                                    .w(px(104.))
                                     .flex_shrink_0()
                                     .children(keys.iter().map(|key| {
                                         crate::chrome::keycap(skin.border, key.clone())
@@ -737,15 +736,16 @@ impl Workbench {
                                         .small()
                                         .w_full()
                                         .justify_start()
-                                        .child(caps)
                                         .child(
                                             div()
                                                 .flex_1()
                                                 .min_w_0()
                                                 .text_left()
+                                                .text_ellipsis()
                                                 .text_size(px(12.))
                                                 .child(row.label),
                                         )
+                                        .child(caps)
                                         .on_click(cx.listener(move |a, _, w, c| {
                                             a.return_focus
                                                 .take()
@@ -761,14 +761,15 @@ impl Workbench {
                                     .gap_1()
                                     .px_2()
                                     .py(px(3.))
-                                    .child(caps)
                                     .child(
                                         div()
                                             .flex_1()
                                             .min_w_0()
+                                            .text_ellipsis()
                                             .text_size(px(12.))
                                             .child(row.label),
                                     )
+                                    .child(caps)
                                     .into_any_element(),
                             });
                         }
