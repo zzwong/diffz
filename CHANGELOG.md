@@ -23,6 +23,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   releasing them after two idle seconds. diffz draws no vector paths, so it
   still allocates none of them and its memory footprint is unchanged.
 
+### Fixed
+
+- The rich prose view now shows the same scrollbar as the source view: a thumb
+  appears along the right edge while scrolling, reports how far through the file
+  the reader is, and can be dragged. Markdown files previously scrolled with no
+  scrollbar at all.
+
 ## [0.1.2] - 2026-09-19
 
 ### Changed

@@ -1,7 +1,11 @@
 //! A ("rich") rendered diff for prose: Markdown blocks appear whole, marked added,
 //! removed, changed, or unchanged, rather than one source line at a time.
 //! Read-only; commenting and selection live in the source view.
-use crate::{app::Workbench, theme::Skin};
+use crate::{
+    app::Workbench,
+    theme::Skin,
+    viewport::{BAR, vertical_thumb},
+};
 use diffz_core::domain::{FileId, SnapshotId};
 use diffz_core::rich::{RichBlock, RichItem, RichKind, rich_diff};
 use gpui_kit::component::{StyledExt, text::TextView};
@@ -99,6 +103,7 @@ impl Workbench {
         };
         let (items, state) = (cache.items.clone(), cache.list.clone());
         let wheel_state = state.clone();
+        let (move_state, up_state) = (state.clone(), state.clone());
         let container = div()
             .id("rich-diff")
             .flex_1()
@@ -119,6 +124,29 @@ impl Workbench {
                         cx,
                     )
                 }),
+            )
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                if !this.scrollbar_drag {
+                    return;
+                }
+                if event.pressed_button != Some(MouseButton::Left) {
+                    this.scrollbar_drag = false;
+                    move_state.scrollbar_drag_ended();
+                    return;
+                }
+                scroll_to_pointer(&move_state, event.position.y);
+                cx.notify();
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    if !this.scrollbar_drag {
+                        return;
+                    }
+                    this.scrollbar_drag = false;
+                    up_state.scrollbar_drag_ended();
+                    cx.notify();
+                }),
             );
         let pull = (
             self.boundary_scroll.pulling(),
@@ -134,6 +162,12 @@ impl Workbench {
                 )
                 .into_any_element();
         }
+        let bar_state = state.clone();
+        let thumb = self
+            .viewport
+            .as_ref()
+            .filter(|v| v.borrow().scrollbars_visible)
+            .and_then(|_| thumb_geometry(&bar_state));
         container
             .relative()
             .child(pull_bar(pull, &skin))
@@ -153,8 +187,66 @@ impl Workbench {
                 })
                 .size_full(),
             )
+            .when_some(thumb, |d, (top, height)| {
+                d.child(scrollbar(top, height, bar_state, &skin, cx))
+            })
             .into_any_element()
     }
+}
+/// Thumb top and height for the list's own scroll metrics, or none while the content
+/// fits. The list measures item heights lazily, so the travel it reports can shift as
+/// rows come into view.
+fn thumb_geometry(list: &ListState) -> Option<(f32, f32)> {
+    let view = f32::from(list.viewport_bounds().size.height);
+    let travel = f32::from(list.max_offset_for_scrollbar().y);
+    if view <= 0. || travel <= 0. {
+        return None;
+    }
+    let scrolled = f32::from(-list.scroll_px_offset_for_scrollbar().y);
+    Some(vertical_thumb(view, view + travel, scrolled))
+}
+/// The same auto-hiding thumb the source view paints, over the right edge of the list.
+/// The track is not occluding, so a wheel over it still scrolls the list beneath.
+fn scrollbar(
+    top: f32,
+    height: f32,
+    list: ListState,
+    skin: &Skin,
+    cx: &mut Context<Workbench>,
+) -> Div {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_0()
+        .w(px(BAR))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                this.scrollbar_drag = true;
+                list.scrollbar_drag_started();
+                scroll_to_pointer(&list, event.position.y);
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(px(top))
+                .left(px(2.))
+                .w(px(BAR - 4.))
+                .h(px(height))
+                .bg(skin.muted.opacity(0.5)),
+        )
+}
+/// Scroll the list to the pointer's share of the track, as the source view does.
+fn scroll_to_pointer(list: &ListState, y: Pixels) {
+    let bounds = list.viewport_bounds();
+    let height = f32::from(bounds.size.height).max(1.0);
+    let fraction = (f32::from(y - bounds.top()) / height).clamp(0.0, 1.0);
+    let travel = f32::from(list.max_offset_for_scrollbar().y);
+    list.set_offset_from_scrollbar(point(px(0.), px(-travel * fraction)));
 }
 /// A thin bar along the edge being pulled, filling as the pull nears the turn.
 fn pull_bar((edge, progress): (i8, f32), skin: &Skin) -> AnyElement {

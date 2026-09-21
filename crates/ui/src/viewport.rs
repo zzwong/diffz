@@ -17,7 +17,21 @@ use gpui_kit::*;
 use std::{collections::HashMap, ops::Range, sync::Arc};
 
 const PAD: f32 = 1.0;
-const BAR: f32 = 12.0;
+pub(crate) const BAR: f32 = 12.0;
+
+/// Top offset and height of a vertical scrollbar thumb inside a track of `view_height`,
+/// for `content_height` of content scrolled `scrolled` pixels down. Shared by the source
+/// view and the rich view so both bars read the same.
+pub(crate) fn vertical_thumb(view_height: f32, content_height: f32, scrolled: f32) -> (f32, f32) {
+    let total = content_height.max(view_height);
+    let thumb = (view_height * view_height / total.max(1.0)).clamp(24.0, view_height.max(24.0));
+    let top = if total > view_height {
+        (scrolled / (total - view_height)).clamp(0.0, 1.0) * (view_height - thumb).max(0.0)
+    } else {
+        0.0
+    };
+    (top, thumb)
+}
 #[derive(Clone)]
 pub struct MeasuredCell {
     pub cell: Cell,
@@ -619,15 +633,8 @@ impl Viewport {
                 x += w + 28.0;
             }
         }
-        let total = self.height_index.total().max(self.height);
-        let thumb_h =
-            (self.height * self.height / total.max(1.0)).clamp(24.0, self.height.max(24.0));
         let absolute = self.height_index.prefix(self.cursor.row) + self.cursor.offset;
-        let thumb_y = if total > self.height {
-            (absolute / (total - self.height)).clamp(0.0, 1.0) * (self.height - thumb_h).max(0.0)
-        } else {
-            0.0
-        };
+        let (thumb_y, thumb_h) = vertical_thumb(self.height, self.height_index.total(), absolute);
         let horizontal_track = Bounds::new(
             point(bounds.left(), bounds.bottom() - px(BAR)),
             size(px(width), px(BAR)),
@@ -1650,6 +1657,30 @@ mod first_hunk_reset_tests {
         assert!(v.anchor.is_none());
         assert!(!v.pending_anchor);
         assert_eq!(v.pending_scroll, 0.);
+    }
+}
+
+#[cfg(test)]
+mod thumb_tests {
+    use super::vertical_thumb;
+    #[test]
+    fn the_thumb_shrinks_with_the_content_and_travels_the_whole_track() {
+        assert_eq!(vertical_thumb(600., 1_200., 0.), (0., 300.));
+        assert_eq!(vertical_thumb(600., 1_200., 600.), (300., 300.));
+        assert_eq!(vertical_thumb(600., 1_200., 300.), (150., 300.));
+    }
+
+    #[test]
+    fn content_that_fits_parks_a_full_height_thumb_at_the_top() {
+        assert_eq!(vertical_thumb(600., 200., 0.), (0., 600.));
+        assert_eq!(vertical_thumb(600., 600., 900.), (0., 600.));
+    }
+
+    #[test]
+    fn a_very_long_file_keeps_a_grabbable_thumb() {
+        let (top, height) = vertical_thumb(600., 1_000_000., 1_000_000.);
+        assert_eq!(height, 24.);
+        assert_eq!(top, 576.);
     }
 }
 
