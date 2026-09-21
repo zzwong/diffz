@@ -18,6 +18,10 @@ const FILES_PEEK_OUT_MS: f32 = 120.;
 const FILES_PEEK_SLIDE_PX: f32 = 16.;
 /// A stalled frame must not carry the panel across the whole path in one step.
 const FILES_PEEK_STEP_MS: f32 = 32.;
+const FILES_PEEK_EDGE_PX: f32 = 8.;
+/// Tiled windows put another window immediately left of this edge, so the pointer
+/// crosses the zone on its way out. Only a pointer that rests there means the panel.
+const FILES_PEEK_DWELL_MS: u64 = 100;
 
 fn ease_out_cubic(t: f32) -> f32 {
     let remaining = 1. - t;
@@ -32,6 +36,8 @@ pub struct FilesPeek {
     visibility: f32,
     button_hovered: bool,
     panel_hovered: bool,
+    edge_hovered: bool,
+    edge_blocked: bool,
 }
 
 impl FilesPeek {
@@ -53,8 +59,41 @@ impl FilesPeek {
         }
         self.closing()
     }
+    /// Reports whether a dwell timer should start, and whether a close should be
+    /// scheduled. The edge opens on dwell rather than on entry, so a pointer merely
+    /// passing out of the window leaves nothing behind.
+    pub(crate) fn hover_edge(&mut self, hovered: bool) -> (bool, bool) {
+        let entered = hovered && !self.edge_hovered;
+        self.edge_hovered = hovered;
+        if !hovered {
+            self.edge_blocked = false;
+        }
+        (entered && !self.edge_blocked, self.closing())
+    }
+    /// The dwell ran out with the pointer still on the edge: true when it opened.
+    fn dwell_elapsed(&mut self, pinned: bool) -> bool {
+        if self.open || pinned || self.edge_blocked || !self.edge_hovered {
+            return false;
+        }
+        self.open = true;
+        true
+    }
+    /// The pointer left the window. Wayland sends no move with that, so every hover
+    /// flag would stay set and hold the panel open over a window the user moved on to.
+    fn pointer_left(&mut self) -> bool {
+        self.button_hovered = false;
+        self.panel_hovered = false;
+        self.edge_hovered = false;
+        self.closing()
+    }
+    /// A pointer seen away from the edge ends the block left by a collapse.
+    fn clear_edge_block(&mut self, pointer_x: f32) {
+        if pointer_x > FILES_PEEK_EDGE_PX {
+            self.edge_blocked = false;
+        }
+    }
     fn closing(&self) -> bool {
-        self.open && !self.button_hovered && !self.panel_hovered
+        self.open && !self.button_hovered && !self.panel_hovered && !self.edge_hovered
     }
     fn expire(&mut self) -> bool {
         let close = self.closing();
@@ -64,7 +103,12 @@ impl FilesPeek {
         close
     }
     fn reset(&mut self) {
-        *self = Self::default();
+        // The collapse gesture ends with the pointer against the left edge, where the
+        // zone appears under it; without the block it would hand the panel straight back.
+        *self = Self {
+            edge_blocked: true,
+            ..Self::default()
+        };
     }
     fn shown(&self) -> bool {
         self.open || self.visibility > 0.
@@ -278,7 +322,57 @@ impl Workbench {
             self.overview_width = desired.clamp(minimum, limit);
         }
     }
-    /// Called from both peek hover handlers with the "a close is due" answer.
+    /// The pointer entered or left the left-edge zone.
+    pub(crate) fn files_peek_edge(
+        &mut self,
+        hovered: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (dwell, close) = self.files_peek.hover_edge(hovered);
+        self.files_peek_dwell = dwell.then(|| {
+            cx.spawn_in(window, async move |this, cx| {
+                smol::Timer::after(std::time::Duration::from_millis(FILES_PEEK_DWELL_MS)).await;
+                let _ = this.update_in(cx, |this, window, cx| this.files_peek_dwelled(window, cx));
+            })
+        });
+        self.files_peek_hovered(close, window, cx);
+    }
+    pub(crate) fn files_peek_left(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.files_peek_dwell = None;
+        let close = self.files_peek.pointer_left();
+        self.files_peek_hovered(close, window, cx);
+    }
+    /// A pointer that left the window and came back gets no fresh hover from gpui: the
+    /// exit leaves its last position behind, so the region still counts as hovered
+    /// there. A move inside the region stands in for the entry that never arrives.
+    fn files_peek_edge_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.files_peek.edge_hovered {
+            self.files_peek_edge(true, window, cx);
+        }
+    }
+    /// See `files_peek_edge_moved`.
+    fn files_peek_panel_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.files_peek.panel_hovered {
+            let close = self.files_peek.hover_panel(true);
+            self.files_peek_hovered(close, window, cx);
+        }
+    }
+    fn files_peek_dwelled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.files_peek_dwell = None;
+        // A pointer holding a selection, a scrollbar, or a panel edge is on its way
+        // somewhere else and only passes the zone.
+        let gesturing = self.drag_start.is_some()
+            || self.resizing_panel.is_some()
+            || self.scrollbar_drag
+            || self.horizontal_drag;
+        if gesturing || !self.files_peek.dwell_elapsed(self.files_visible) {
+            return;
+        }
+        self.animate_files_peek(window, cx);
+        cx.notify();
+    }
+    /// Called from the peek hover handlers with the "a close is due" answer.
     pub(crate) fn files_peek_hovered(
         &mut self,
         close: bool,
@@ -331,6 +425,7 @@ impl Workbench {
     pub(crate) fn reset_files_peek(&mut self) {
         self.files_peek.reset();
         self.files_peek_close = None;
+        self.files_peek_dwell = None;
         self.files_peek_frame = None;
     }
     fn panel_divider(&self, left: bool, cx: &mut Context<Self>) -> AnyElement {
@@ -948,6 +1043,25 @@ impl Render for Workbench {
                     .child(self.panel_divider(false, cx)),
             );
         }
+        if !self.files_visible {
+            // Neither occluding nor clickable: a click or a selection that starts on the
+            // window edge still belongs to the diff underneath.
+            body = body.child(
+                div()
+                    .id("files-peek-edge")
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .w(px(FILES_PEEK_EDGE_PX))
+                    .on_hover(cx.listener(|a, hovered: &bool, window, cx| {
+                        a.files_peek_edge(*hovered, window, cx);
+                    }))
+                    .on_mouse_move(cx.listener(|a, _: &MouseMoveEvent, window, cx| {
+                        a.files_peek_edge_moved(window, cx);
+                    })),
+            );
+        }
         if !self.files_visible && self.files_peek.shown() {
             // The hover region keeps the settled bounds; only the panel inside moves.
             let (offset, opacity) = self.files_peek.frame();
@@ -963,6 +1077,14 @@ impl Render for Workbench {
                     .on_hover(cx.listener(|a, hovered: &bool, window, cx| {
                         let close = a.files_peek.hover_panel(*hovered);
                         a.files_peek_hovered(close, window, cx);
+                    }))
+                    .on_mouse_move(cx.listener(|a, _: &MouseMoveEvent, window, cx| {
+                        a.files_peek_panel_moved(window, cx);
+                    }))
+                    // Occluding the root takes its mouse-exit with it, so the panel
+                    // reports the pointer leaving the window itself.
+                    .on_mouse_exit(cx.listener(|a, _: &MouseExitEvent, window, cx| {
+                        a.files_peek_left(window, cx);
                     }))
                     .child(
                         div()
@@ -993,7 +1115,11 @@ impl Render for Workbench {
         let footer = self.footer(window, cx);
         let mut root = div()
             .id("workbench")
+            .on_mouse_exit(cx.listener(|a, _: &MouseExitEvent, window, cx| {
+                a.files_peek_left(window, cx);
+            }))
             .on_mouse_move(cx.listener(|a, e: &MouseMoveEvent, window, cx| {
+                a.files_peek.clear_edge_block(f32::from(e.position.x));
                 if cancel_resize_on_unpressed_mouse(&mut a.resizing_panel, e.pressed_button) {
                     cx.notify();
                     return;
@@ -1333,6 +1459,119 @@ mod tests {
 
         assert!(!peek.hover_button(true, false));
         assert!(peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn resting_on_the_left_edge_opens_the_peek_unless_the_panel_is_pinned() {
+        let mut peek = FilesPeek::default();
+        let (dwell, close) = peek.hover_edge(true);
+        assert!(dwell);
+        assert!(!close);
+        assert!(!peek.open);
+        assert!(peek.dwell_elapsed(false));
+        assert!(peek.open);
+
+        let mut pinned = FilesPeek::default();
+        pinned.hover_edge(true);
+        assert!(!pinned.dwell_elapsed(true));
+        assert!(!pinned.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn a_pointer_crossing_the_edge_leaves_before_the_dwell_is_up() {
+        let mut peek = FilesPeek::default();
+        peek.hover_edge(true);
+        let (dwell, close) = peek.hover_edge(false);
+        assert!(!dwell);
+        assert!(!close);
+        assert!(!peek.dwell_elapsed(false));
+        assert!(!peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_edge_holds_an_open_peek_the_way_the_panel_does() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        peek.hover_edge(true);
+        assert!(!peek.hover_button(false, false));
+        assert!(!peek.expire());
+        assert!(peek.open);
+
+        let (_, close) = peek.hover_edge(false);
+        assert!(close);
+        assert!(peek.expire());
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_edge_under_a_just_collapsed_panel_does_not_hand_it_back() {
+        let mut peek = FilesPeek::default();
+        peek.reset();
+        // A pointer resting where the gesture left it keeps the block.
+        peek.clear_edge_block(FILES_PEEK_EDGE_PX);
+        let (dwell, _) = peek.hover_edge(true);
+        assert!(!dwell);
+        assert!(!peek.dwell_elapsed(false));
+        assert!(!peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_edge_arms_again_once_the_pointer_is_seen_away_from_it() {
+        let mut peek = FilesPeek::default();
+        peek.reset();
+        peek.clear_edge_block(FILES_PEEK_EDGE_PX + 1.);
+
+        let (dwell, _) = peek.hover_edge(true);
+        assert!(dwell);
+        assert!(peek.dwell_elapsed(false));
+        assert!(peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn leaving_the_edge_clears_the_block_for_the_next_visit() {
+        let mut peek = FilesPeek::default();
+        peek.reset();
+        peek.hover_edge(true);
+        let (dwell, _) = peek.hover_edge(false);
+        assert!(!dwell);
+
+        let (dwell, _) = peek.hover_edge(true);
+        assert!(dwell);
+        assert!(peek.dwell_elapsed(false));
+        assert!(peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn a_pointer_that_leaves_the_window_lets_the_open_peek_go() {
+        let mut peek = FilesPeek::default();
+        peek.hover_button(true, false);
+        peek.hover_panel(true);
+
+        assert!(peek.pointer_left());
+        assert!(peek.open);
+        assert!(peek.expire());
+        assert!(!peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn a_pointer_that_leaves_the_window_never_completes_a_dwell() {
+        let mut peek = FilesPeek::default();
+        peek.hover_edge(true);
+
+        assert!(!peek.pointer_left());
+        assert!(!peek.dwell_elapsed(false));
+        assert!(!peek.open);
+    }
+
+    #[::core::prelude::v1::test]
+    fn leaving_the_window_keeps_the_block_a_collapse_left_behind() {
+        let mut peek = FilesPeek::default();
+        peek.reset();
+        peek.hover_edge(true);
+        peek.pointer_left();
+
+        let (dwell, _) = peek.hover_edge(true);
+        assert!(!dwell);
+        assert!(!peek.dwell_elapsed(false));
     }
 
     #[::core::prelude::v1::test]
