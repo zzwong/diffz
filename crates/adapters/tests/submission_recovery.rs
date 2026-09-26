@@ -1,7 +1,8 @@
 use diffz_adapters::{
     Result,
-    github::{ReviewRemote, SendOutcome},
+    github::GithubRules,
     outbox::Outbox,
+    provider::{ReviewRemote, SendOutcome},
     store::Store,
 };
 use diffz_core::{
@@ -64,6 +65,7 @@ fn setup() -> (tempfile::TempDir, Arc<Store>, Arc<Fake>, PreparedReview) {
     );
     store.put_snapshot(&s).unwrap();
     let p = PreparedReview::prepare(
+        &GithubRules,
         OperationId("op".into()),
         &s,
         vec![],
@@ -71,7 +73,7 @@ fn setup() -> (tempfile::TempDir, Arc<Store>, Arc<Fake>, PreparedReview) {
         "".into(),
     )
     .unwrap();
-    store.insert_prepared(&p).unwrap();
+    store.insert_prepared(&p, &GithubRules).unwrap();
     let f = Arc::new(Fake {
         target: t,
         rows: Mutex::new(vec![]),
@@ -82,7 +84,7 @@ fn setup() -> (tempfile::TempDir, Arc<Store>, Arc<Fake>, PreparedReview) {
 #[test]
 fn disconnect_is_unknown_and_not_retried() {
     let (_t, s, f, p) = setup();
-    let o = Outbox::new(s, f.clone());
+    let o = Outbox::new(s, Arc::new(GithubRules), f.clone());
     let e = o.publish(p.clone()).unwrap();
     assert_eq!(e.state, OutboxState::UnknownOutcome);
     assert!(o.publish(p.clone()).is_err());
@@ -94,7 +96,7 @@ fn disconnect_is_unknown_and_not_retried() {
 #[test]
 fn zero_matching_reviews_remain_unknown() {
     let (_t, s, f, p) = setup();
-    let o = Outbox::new(s, f.clone());
+    let o = Outbox::new(s, Arc::new(GithubRules), f.clone());
     o.publish(p.clone()).unwrap();
     f.rows.lock().unwrap().clear();
     assert_eq!(
@@ -105,7 +107,7 @@ fn zero_matching_reviews_remain_unknown() {
 #[test]
 fn duplicate_matches_do_not_confirm() {
     let (_t, s, f, p) = setup();
-    let o = Outbox::new(s, f.clone());
+    let o = Outbox::new(s, Arc::new(GithubRules), f.clone());
     o.publish(p.clone()).unwrap();
     let mut rows = f.rows.lock().unwrap();
     let mut other = rows[0].clone();
@@ -122,7 +124,7 @@ fn restart_inflight_becomes_unknown() {
     let (t, s, _f, p) = setup();
     let mut e = s.operation(&p.id).unwrap();
     e.state = OutboxState::InFlight;
-    s.transition(&e).unwrap();
+    s.transition(&e, &GithubRules).unwrap();
     drop(s);
     let s = Store::open(t.path()).unwrap();
     assert_eq!(

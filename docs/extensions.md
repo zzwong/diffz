@@ -89,7 +89,7 @@ Theme references are unchanged, so saved settings and `--theme` keep working.
 Namespaced references such as `omarchy:current` wait until a source exists
 that is not file-backed.
 
-Review providers get the same treatment in a second step; see
+Review providers moved behind traits in the same milestone; see
 [Review providers](#review-providers). Annotators join the registry in M4.
 
 `Token` and `Span` stay as they are. The closed `Token` enum is the contract
@@ -328,15 +328,38 @@ not part of the WIT world.
   and reconcile must survive a crash mid-post. New providers should arrive as
   reviewed pull requests with fixture tests, like `tests/gitlab.rs`.
 
-M1 adds a `ReviewProvider` trait covering address detection, snapshots,
-source lines, and an optional `ReviewRemote` writer, which already exists.
-`Services` then holds a list of providers instead of `github` and `gitlab`
-fields. `ProviderKind` is serialized in snapshots and the outbox, so it gains
-an `Other(String)` variant keyed by provider id rather than being replaced.
+Core never names a host. Everything host-specific sits in two traits,
+implemented once per provider in `diffz-adapters` (`github.rs`, `gitlab.rs`):
 
-Gitea, Bitbucket, and others are left to community contributions against that
-trait. If out-of-tree providers are ever needed, they should be executables
-speaking versioned JSON over stdio, not WASM.
+- `ReviewRules` (core, no I/O): names and Open panel text, the write-flag
+  name, supported verdicts, the reopen address, line links, checks before a
+  review is frozen, each comment's frozen position, the payload that is sent
+  and fingerprinted, and whether remote reviews carry diffz's marker.
+- `ReviewProvider` (adapters): its rules, plus `open`, `source`, and the
+  `ReviewRemote` that sends and reconciles.
+
+`Services::register(provider, writes)` adds one; `Services` keeps them in a
+list and an outbox for each provider the user let publish. The UI reaches
+rules through `WorkbenchServices::provider`, and `OpenRequest::Remote` names
+the provider by id.
+
+A remote target stores its provider as `ProviderId`, a string. GitHub and
+GitLab keep the strings their old enum variants serialized as, so stored
+snapshots and outbox entries are unchanged, and data from a provider this
+build does not know still loads: it shows, but cannot refresh or publish.
+Snapshot identity tags derive from the id (`snapshot-v1` for GitHub,
+`snapshot-<id>-v1` otherwise).
+
+A provider's payload bytes are part of the review fingerprint, so payloads
+are serialized structs, never `json!` maps, whose key order depends on
+serde_json's `preserve_order` feature. Golden tests in
+`crates/adapters/tests/provider_compat.rs` pin targets, identities, payloads
+and stored reviews, and run with and without that feature.
+
+Gitea, Bitbucket, and others are left to community contributions: one module
+implementing both traits and one `register` call. If out-of-tree providers
+are ever needed, they should be executables speaking versioned JSON over
+stdio, not WASM.
 
 ## Wasmtime
 

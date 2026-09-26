@@ -1,17 +1,20 @@
 //! glab transport for a chosen host. Reads have limits; uncertain writes stay one-shot.
 use crate::{
     Result,
-    github::{HttpResponse, ReviewRemote, SendOutcome, decode_http},
+    github::{HttpResponse, decode_http},
     process::{ProcessRequest, Runner},
+    provider::{ReviewProvider, ReviewRemote, SendOutcome},
 };
 use diffz_core::{
     domain::*,
-    patch::{ParseLimits, parse_patch},
-    provider::Cancellation,
-    review::{PreparedReview, Verdict},
+    patch::{FileChange, ParseLimits, parse_patch},
+    provider::{Cancellation, ReviewRules},
+    review::{PreparedComment, PreparedReview, ReviewError, Verdict},
     review_details::*,
+    source_link::encode,
 };
-use serde_json::{Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json, value::RawValue};
 use std::{path::PathBuf, sync::Arc};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MrAddress {
@@ -418,6 +421,188 @@ pub fn discussion_comments(ds: &[Value], overview: &mut Overview) -> Vec<ThreadC
     out
 }
 
+pub struct GitlabRules;
+
+/// Where a GitLab discussion attaches. Its field order is part of the review fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitlabPosition {
+    pub position_type: String,
+    pub base_sha: String,
+    pub start_sha: String,
+    pub head_sha: String,
+    pub old_path: String,
+    pub new_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_line: Option<u32>,
+}
+
+// Hashed into the fingerprint, so a struct in the field order diffz has always produced.
+#[derive(Serialize)]
+struct Payload<'a> {
+    head: &'a str,
+    verdict: Verdict,
+    summary: &'a str,
+    comments: &'a [PreparedComment],
+}
+
+impl ReviewRules for GitlabRules {
+    fn id(&self) -> ProviderId {
+        ProviderId::GITLAB
+    }
+    fn name(&self) -> &str {
+        "GitLab"
+    }
+    fn open_label(&self) -> &str {
+        "GitLab MR"
+    }
+    fn address_label(&self) -> &str {
+        "Merge request"
+    }
+    fn address_hint(&self) -> &str {
+        "Enter group/project!123 or a GitLab merge request URL"
+    }
+    fn address_help(&self) -> &str {
+        "Uses glab with GitLab.com or a self-managed HTTPS server."
+    }
+    fn write_flag(&self) -> &str {
+        "--allow-gitlab-writes"
+    }
+    fn preview_note(&self) -> Option<&str> {
+        Some("GitLab accepts comments and approval. Choose one source line for each inline draft.")
+    }
+    fn reopen_address(&self, t: &RemoteTarget) -> String {
+        let r = &t.repository;
+        format!(
+            "https://{}/{}/{}/-/merge_requests/{}",
+            r.host, r.owner, r.name, t.pr
+        )
+    }
+    fn line_url(&self, t: &RemoteTarget, path: &str, revision: &str, line: u32) -> String {
+        let r = &t.repository;
+        format!(
+            "https://{}/{}/{}/-/blob/{}/{}#L{line}",
+            r.host,
+            encode(&r.owner),
+            encode(&r.name),
+            encode(revision),
+            encode(path)
+        )
+    }
+    fn supports(&self, verdict: Verdict) -> bool {
+        verdict != Verdict::RequestChanges
+    }
+    fn check(
+        &self,
+        verdict: Verdict,
+        summary: &str,
+        drafts: &[Draft],
+    ) -> std::result::Result<(), ReviewError> {
+        if !self.supports(verdict) {
+            return Err(ReviewError(
+                "GitLab permits comments and approval; blocking change requests remain unsupported"
+                    .into(),
+            ));
+        }
+        let quick_action = |text: &str| text.lines().any(|l| l.trim_start().starts_with('/'));
+        if quick_action(summary) || drafts.iter().any(|d| quick_action(&d.body)) {
+            return Err(ReviewError(
+                "GitLab quick actions are disallowed here; format inline slash-prefixed text before posting"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+    fn position(
+        &self,
+        target: &RemoteTarget,
+        f: &FileChange,
+        d: &Draft,
+    ) -> std::result::Result<Option<Box<RawValue>>, ReviewError> {
+        let fail = |m: &str| ReviewError(m.into());
+        let old = f
+            .old_path
+            .as_ref()
+            .unwrap_or(f.path())
+            .utf8()
+            .map_err(ReviewError)?;
+        let new = f
+            .new_path
+            .as_ref()
+            .unwrap_or(f.path())
+            .utf8()
+            .map_err(ReviewError)?;
+        let mut position = GitlabPosition {
+            position_type: "file".into(),
+            base_sha: target.comparison_base.clone(),
+            start_sha: target.target_tip.clone(),
+            head_sha: target.head.clone(),
+            old_path: old.into(),
+            new_path: new.into(),
+            old_line: None,
+            new_line: None,
+        };
+        if !d.is_file_level() {
+            if d.start_line != d.line {
+                return Err(fail(
+                    "GitLab posting needs each draft to hold one source line for now",
+                ));
+            }
+            let row = f
+                .line(d.side, d.line)
+                .ok_or_else(|| fail("the draft holds no source line to post to GitLab"))?;
+            position.position_type = "text".into();
+            position.old_line = row.old_line;
+            position.new_line = row.new_line;
+        }
+        serde_json::value::to_raw_value(&position)
+            .map(Some)
+            .map_err(|e| ReviewError(e.to_string()))
+    }
+    fn payload(&self, p: &PreparedReview) -> Box<RawValue> {
+        serde_json::value::to_raw_value(&Payload {
+            head: &p.target.head,
+            verdict: p.verdict,
+            summary: &p.summary,
+            comments: &p.comments,
+        })
+        .expect("plain serializable review payload")
+    }
+    fn marks_reviews(&self) -> bool {
+        true
+    }
+}
+
+/// GitLab through the glab CLI. Without glab, the rules still serve links and stored reviews.
+pub struct GitlabProvider {
+    reader: Option<Arc<GitlabReader>>,
+}
+impl GitlabProvider {
+    pub fn new(reader: Option<Arc<GitlabReader>>) -> Self {
+        Self { reader }
+    }
+    fn reader(&self) -> Result<&Arc<GitlabReader>> {
+        self.reader
+            .as_ref()
+            .ok_or_else(|| "Install glab, then authenticate for this GitLab host".into())
+    }
+}
+impl ReviewProvider for GitlabProvider {
+    fn rules(&self) -> Arc<dyn ReviewRules> {
+        Arc::new(GitlabRules)
+    }
+    fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot> {
+        self.reader()?.snapshot(&MrAddress::parse(address)?, cancel)
+    }
+    fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
+        self.reader()?.source(t, path, revision)
+    }
+    fn remote(&self) -> Result<Arc<dyn ReviewRemote>> {
+        Ok(Arc::new(GitlabWriter::new(self.reader()?.clone())))
+    }
+}
+
 pub struct GitlabWriter {
     reader: Arc<GitlabReader>,
 }
@@ -548,10 +733,7 @@ impl ReviewRemote for GitlabWriter {
         Ok(result)
     }
     fn send(&self, p: &PreparedReview) -> SendOutcome {
-        if !p.verify()
-            || p.target.provider != ProviderId::GITLAB
-            || p.verdict == Verdict::RequestChanges
-        {
+        if !p.verify(&GitlabRules) || p.verdict == Verdict::RequestChanges {
             return SendOutcome::Rejected(422);
         }
         let a = MrAddress::from_target(&p.target);
@@ -569,7 +751,7 @@ impl ReviewRemote for GitlabWriter {
                     )
                 } else {
                     let pos = comment
-                        .gitlab_position
+                        .position
                         .as_ref()
                         .ok_or("Frozen GitLab position is absent")?;
                     (

@@ -2,7 +2,7 @@
 use crate::{AdapterError, Result};
 use diffz_core::{
     domain::*,
-    provider::{Opened, RecentSession, SavedView},
+    provider::{Opened, RecentSession, ReviewRules, SavedView},
     review::*,
 };
 use fs2::FileExt;
@@ -244,8 +244,12 @@ impl Store {
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?)
     }
-    pub fn insert_prepared(&self, p: &PreparedReview) -> Result<OutboxEntry> {
-        if !p.verify() {
+    pub fn insert_prepared(
+        &self,
+        p: &PreparedReview,
+        rules: &dyn ReviewRules,
+    ) -> Result<OutboxEntry> {
+        if !p.verify(rules) {
             return Err("prepared review fingerprint mismatch".into());
         }
         let e = OutboxEntry {
@@ -277,7 +281,12 @@ impl Store {
                 .query_row("SELECT data FROM outbox WHERE id=?1", [&id.0], |r| r.get(0))?;
         Ok(serde_json::from_str(&raw)?)
     }
-    pub fn transition(&self, e: &OutboxEntry) -> Result<()> {
+    pub fn transition(&self, e: &OutboxEntry, rules: &dyn ReviewRules) -> Result<()> {
+        self.write_transition(e, Some(rules))
+    }
+    /// Without `rules` the review is not re-verified, which suits only moves that keep the
+    /// stored review byte-for-byte, such as marking an interrupted send as unknown.
+    fn write_transition(&self, e: &OutboxEntry, rules: Option<&dyn ReviewRules>) -> Result<()> {
         let mut c = self.db()?;
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let raw: String = tx.query_row(
@@ -286,7 +295,9 @@ impl Store {
             |r| r.get(0),
         )?;
         let old: OutboxEntry = serde_json::from_str(&raw)?;
-        if old.prepared.fingerprint != e.prepared.fingerprint || !e.prepared.verify() {
+        if old.prepared.fingerprint != e.prepared.fingerprint
+            || rules.is_some_and(|r| !e.prepared.verify(r))
+        {
             return Err("outbox payload changed after preview".into());
         }
         if !old.state.can_transition(e.state) {
@@ -328,7 +339,7 @@ impl Store {
             if e.state == OutboxState::InFlight {
                 e.state = OutboxState::UnknownOutcome;
                 e.diagnostic=Some("the process stopped after sending became possible; reconcile before submitting again".into());
-                self.transition(&e)?;
+                self.write_transition(&e, None)?;
             }
         }
         Ok(())

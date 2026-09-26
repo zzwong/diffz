@@ -19,9 +19,11 @@ impl Workbench {
         if self.loading || text.is_empty() {
             return;
         }
-        let request = match self.source_mode {
-            SourceMode::GitHub => OpenRequest::GitHub(text),
-            SourceMode::GitLab => OpenRequest::GitLab(text),
+        let request = match self.source_mode.clone() {
+            SourceMode::Remote(provider) => OpenRequest::Remote {
+                provider,
+                address: text,
+            },
             SourceMode::Patch => OpenRequest::Patch(PathBuf::from(text)),
             SourceMode::Compare => OpenRequest::LocalGit {
                 root: PathBuf::from(text),
@@ -273,16 +275,22 @@ impl Workbench {
             }
             Panel::Open => {
                 let mut modes = div().h_flex().gap_2();
-                for (ix, (mode, label)) in [
-                    (SourceMode::GitHub, "GitHub PR"),
-                    (SourceMode::GitLab, "GitLab MR"),
-                    (SourceMode::Patch, "Patch file"),
-                    (SourceMode::Compare, "Branches"),
-                    (SourceMode::Staged, "Staged"),
-                    (SourceMode::Worktree, "Working tree"),
+                let providers = self.services.providers();
+                let remote_modes = providers.iter().map(|p| {
+                    (
+                        SourceMode::Remote(p.id()),
+                        p.open_label().to_string(),
+                        p.address_hint().to_string(),
+                    )
+                });
+                let local_modes = [
+                    (SourceMode::Patch, "Patch file", "/path/to/change.patch"),
+                    (SourceMode::Compare, "Branches", "/path/to/repository"),
+                    (SourceMode::Staged, "Staged", "/path/to/repository"),
+                    (SourceMode::Worktree, "Working tree", "/path/to/repository"),
                 ]
-                .into_iter()
-                .enumerate()
+                .map(|(mode, label, hint)| (mode, label.to_string(), hint.to_string()));
+                for (ix, (mode, label, placeholder)) in remote_modes.chain(local_modes).enumerate()
                 {
                     modes = modes.child(
                         Button::new(("mode", ix))
@@ -294,47 +302,37 @@ impl Workbench {
                             })
                             .label(label)
                             .on_click(cx.listener(move |a, _, w, c| {
-                                a.source_mode = mode;
-                                let placeholder = match mode {
-                                    SourceMode::GitLab => {
-                                        "Enter group/project!123 or a GitLab merge request URL"
-                                    }
-                                    SourceMode::GitHub => {
-                                        "Enter owner/repo#123 or a GitHub pull request URL"
-                                    }
-                                    SourceMode::Patch => "/path/to/change.patch",
-                                    _ => "/path/to/repository",
-                                };
-                                a.open_input
-                                    .update(c, |input, c| input.set_placeholder(placeholder, w, c));
+                                a.source_mode = mode.clone();
+                                a.open_input.update(c, |input, c| {
+                                    input.set_placeholder(placeholder.clone(), w, c)
+                                });
                                 a.open_input.read(c).focus_handle(c).focus(w, c);
                                 c.notify();
                             })),
                     );
                 }
-                let (label, help) = match self.source_mode {
-                    SourceMode::GitLab => (
-                        "Merge request",
-                        "Uses glab with GitLab.com or a self-managed HTTPS server.",
+                let (label, help) = match &self.source_mode {
+                    SourceMode::Remote(id) => providers
+                        .iter()
+                        .find(|p| p.id() == *id)
+                        .map_or((String::new(), String::new()), |p| {
+                            (p.address_label().to_string(), p.address_help().to_string())
+                        }),
+                    SourceMode::Patch => (
+                        "Patch file".into(),
+                        "Open a unified diff stored on this computer.".into(),
                     ),
-                    SourceMode::GitHub => (
-                        "Pull request",
-                        "Enter a PR link or use owner/repository#number.",
-                    ),
-                    SourceMode::Patch => {
-                        ("Patch file", "Open a unified diff stored on this computer.")
-                    }
                     SourceMode::Compare => (
-                        "Repository",
-                        "Compare two revisions from a local repository.",
+                        "Repository".into(),
+                        "Compare two revisions from a local repository.".into(),
                     ),
                     SourceMode::Staged => (
-                        "Repository",
-                        "Review changes currently staged for the next commit.",
+                        "Repository".into(),
+                        "Review changes currently staged for the next commit.".into(),
                     ),
                     SourceMode::Worktree => (
-                        "Repository",
-                        "Review unstaged changes together with new files.",
+                        "Repository".into(),
+                        "Review unstaged changes together with new files.".into(),
                     ),
                 };
                 card = card
@@ -488,13 +486,16 @@ impl Workbench {
                 );
             }
             Panel::Preview => {
-                let gitlab = self
+                let provider = self
                     .active
                     .as_ref()
                     .and_then(|a| a.snapshot.remote.as_ref())
-                    .is_some_and(|t| t.provider == diffz_core::domain::ProviderId::GITLAB);
-                if gitlab {
-                    card=card.child("GitLab accepts comments and approval. Choose one source line for each inline draft.");
+                    .and_then(|t| self.services.provider(&t.provider));
+                if let Some(note) = provider
+                    .as_ref()
+                    .and_then(|p| p.preview_note().map(str::to_owned))
+                {
+                    card = card.child(note);
                 }
                 card = card.child(
                     div()
@@ -522,7 +523,9 @@ impl Workbench {
                                 "{} {name}",
                                 if self.verdict == v { "●" } else { "○" }
                             ))
-                            .disabled(self.busy || (gitlab && v == Verdict::RequestChanges))
+                            .disabled(
+                                self.busy || provider.as_ref().is_some_and(|p| !p.supports(v)),
+                            )
                             .on_click(cx.listener(move |a, _, _, c| {
                                 a.verdict = v;
                                 a.prepared = None;
@@ -589,24 +592,28 @@ impl Workbench {
                                 .child(div().whitespace_normal().child(c.body.clone())),
                         );
                     }
+                    let provider = self.services.provider(&p.target.provider);
+                    let host = provider
+                        .as_ref()
+                        .map_or_else(|| p.target.provider.to_string(), |r| r.name().to_string());
                     card = card.child(
                         Button::new("publish-exact")
                             .cursor_pointer()
                             .primary()
-                            .label(
-                                if p.target.provider == diffz_core::domain::ProviderId::GITLAB {
-                                    "Send this review unchanged to GitLab"
-                                } else {
-                                    "Send this review unchanged to GitHub"
-                                },
-                            )
+                            .label(format!("Send this review unchanged to {host}"))
                             .disabled(
                                 self.busy || !self.services.writes_enabled_for(&p.target.provider),
                             )
                             .on_click(cx.listener(|a, _, _, c| a.publish(c))),
                     );
                     if !self.services.writes_enabled_for(&p.target.provider) {
-                        card=card.child(if p.target.provider==diffz_core::domain::ProviderId::GITLAB {"GitLab publication is off. Relaunch with --allow-gitlab-writes to confirm and publish."}else{"GitHub publication is off. Relaunch with --allow-github-writes to confirm and publish."});
+                        card = card.child(match &provider {
+                            Some(r) => format!(
+                                "{host} publication is off. Relaunch with {} to confirm and publish.",
+                                r.write_flag()
+                            ),
+                            None => format!("No provider named {host} is available to publish."),
+                        });
                     }
                 }
             }
