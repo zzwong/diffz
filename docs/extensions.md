@@ -192,56 +192,58 @@ grammar; its `source/` folder rebuilds the `.wasm`.
 
 ## M4: annotations
 
-Annotations are the "stretch" half: extensions add typed content to surfaces
-diffz already renders.
+Annotations are the "stretch" half: annotators add typed content to surfaces
+diffz already renders. The contract is in `crates/core/src/annotation.rs`:
 
 ```rust
-pub struct Annotation {
-    pub anchor: AnnotationAnchor,
-    pub severity: Severity,        // Note | Info | Warning | Error
-    pub presentation: Presentation, // Gutter | Inline | Underline | FileBadge
-    pub title: String,
-    pub body: Option<String>,      // markdown, rendered by the rich view
-    pub source: String,            // extension id, shown in the UI
-}
+pub enum Severity { Note, Info, Warning, Error }
 
-pub enum AnnotationAnchor {
+pub enum Anchor {
     File { path: String },
     Lines { path: String, side: Side, start: u32, end: u32 },
-    Range { path: String, side: Side, line: u32, bytes: Range<u32> },
+}
+
+pub struct Annotation {
+    pub anchor: Anchor,
+    pub severity: Severity,
+    pub title: String,
+    pub body: Option<String>,
+    pub source: String,
 }
 
 pub trait Annotator: Send + Sync {
     fn id(&self) -> &str;
-    fn annotate(&self, request: &AnnotateRequest, cancel: Cancellation)
-        -> Result<Vec<Annotation>, ServiceError>;
+    fn annotate(&self, snapshot: &Snapshot, cancel: &Cancellation)
+        -> Result<Vec<Annotation>, String>;
 }
 ```
 
-Anchors use repository paths and line numbers, not `FileId`, so they mean the
-same thing to diffz and to an external tool. The host maps them onto
-`SourcePoint` and drops any that fall outside the snapshot, counting them in a
-warning instead of failing.
+- Anchors use display paths and line numbers, not `FileId`, so they mean the
+  same thing to diffz and to an external tool. The registry drops annotations
+  whose file or lines are not in the snapshot and reports how many.
+- Annotators run on a background worker after a review opens. A newer open
+  cancels the run, and results for a snapshot that is no longer active are
+  discarded. Failures appear in the status line.
+- The built-in annotator, `diff check`, flags on added lines what
+  `git diff --check` does: conflict markers (error), trailing whitespace and a
+  space before a tab in indentation (warnings). Adjacent lines with the same
+  finding merge into one range.
 
-`AnnotateRequest` carries the snapshot title, the `RemoteTarget` if any, and
-each changed file's path, old path, status, and hunk ranges. Full file
-contents are fetched on demand through the host, because most annotators only
-need a few files.
+Surfaces:
 
-Execution follows the rule on `WorkbenchServices`: annotators run on the
-bounded worker pool, never during update or render. Results are cached by
-snapshot id and annotator version. A newer navigation generation discards
-stale results, as `NavigationClock` does for scrolling.
+- A severity-coloured bar at the left edge of each annotated line.
+- Annotations covering the selected lines, listed in the line panel above the
+  draft box; file annotations show with file comments.
+- A severity-coloured count badge per file in the file tree.
+- An **Annotations** tab in the inspector; choosing one reveals its line.
 
-Surfaces, in the order they would ship:
+Deferred:
 
-1. Gutter markers and an inline row under the anchored line in the viewport.
-2. File badges in the file tree, with counts by severity.
-3. An annotations list in the inspector, filterable by source and severity.
-
-The first annotator is a built-in, which proves the contract before any WASM
-host exists. A good candidate is surfacing `Snapshot::warnings` and patch
-report problems at the lines they refer to.
+- **Inline rows** under the anchored line. The viewport has no row kind between
+  diff lines (threads also open in a panel), so this needs a new row type
+  through measurement, height indexing and scroll anchoring.
+- **Byte-range anchors** with underlines. `DecorationRun` supports underlines,
+  but a range anchor has no producer until code extensions can emit one.
 
 ## M5: code extensions
 

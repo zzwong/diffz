@@ -1,4 +1,6 @@
 use crate::{
+    annotation::{self, Annotation, Annotator},
+    domain::Snapshot,
     extension::{self, Extension, ExtensionLanguage, ExtensionThemes, Installed},
     palette,
     syntax::Span,
@@ -37,12 +39,14 @@ pub struct Registry {
     themes: Vec<Arc<dyn ThemeSource>>,
     extensions: Vec<(Extension, Vec<Arc<ExtensionLanguage>>)>,
     problems: Vec<String>,
+    annotators: Vec<Arc<dyn Annotator>>,
 }
 
 impl Registry {
     pub fn builtin() -> Self {
         let mut registry = Self::default();
         registry.add_language(Arc::new(crate::syntax::BuiltinGrammars));
+        registry.add_annotator(Arc::new(annotation::DiffCheck));
         registry.add_theme_source(Arc::new(palette::OmarchyCurrent));
         registry.add_theme_source(Arc::new(palette::ThemeDirectories(palette::theme_dirs())));
         registry
@@ -92,6 +96,42 @@ impl Registry {
             }
         }
         out
+    }
+
+    pub fn add_annotator(&mut self, annotator: Arc<dyn Annotator>) {
+        self.annotators.push(annotator);
+    }
+
+    pub fn annotate(
+        &self,
+        snapshot: &Snapshot,
+        cancel: &crate::provider::Cancellation,
+    ) -> (Vec<Annotation>, Vec<String>) {
+        let mut found = vec![];
+        let mut problems = vec![];
+        for annotator in &self.annotators {
+            if cancel.cancelled() {
+                break;
+            }
+            match annotator.annotate(snapshot, cancel) {
+                Ok(list) => {
+                    let (total, before) = (list.len(), found.len());
+                    found.extend(
+                        list.into_iter()
+                            .filter(|a| annotation::in_snapshot(snapshot, &a.anchor)),
+                    );
+                    let dropped = total - (found.len() - before);
+                    if dropped > 0 {
+                        problems.push(format!(
+                            "{}: {dropped} annotations point outside this review",
+                            annotator.id()
+                        ));
+                    }
+                }
+                Err(e) => problems.push(format!("{}: {e}", annotator.id())),
+            }
+        }
+        (found, problems)
     }
 
     pub fn add_language(&mut self, provider: Arc<dyn LanguageProvider>) {
@@ -266,5 +306,41 @@ mod tests {
         assert_eq!(r.resolve_theme("a").unwrap().label, "one");
         assert_eq!(r.resolve_theme("b").unwrap().label, "three");
         assert_eq!(r.resolve_theme("c"), None);
+    }
+
+    struct Stray;
+    impl Annotator for Stray {
+        fn id(&self) -> &str {
+            "stray"
+        }
+        fn annotate(
+            &self,
+            s: &Snapshot,
+            _: &crate::provider::Cancellation,
+        ) -> Result<Vec<Annotation>, String> {
+            let at = |path: &str| Annotation {
+                anchor: annotation::Anchor::File { path: path.into() },
+                severity: annotation::Severity::Info,
+                title: "t".into(),
+                body: None,
+                source: "stray".into(),
+            };
+            Ok(vec![at(&s.patch.files[0].display_path()), at("elsewhere")])
+        }
+    }
+
+    #[test]
+    fn annotations_outside_the_review_are_dropped_and_counted() {
+        let patch = crate::patch::parse_patch(
+            b"diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n",
+            Default::default(),
+        )
+        .unwrap();
+        let s = Snapshot::new("t".into(), patch, None, vec![]);
+        let mut r = Registry::default();
+        r.add_annotator(Arc::new(Stray));
+        let (found, problems) = r.annotate(&s, &Default::default());
+        assert_eq!(found.len(), 1);
+        assert_eq!(problems, ["stray: 1 annotations point outside this review"]);
     }
 }

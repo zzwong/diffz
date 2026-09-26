@@ -3,6 +3,7 @@ use crate::{
     commands::Command,
 };
 use diffz_core::{
+    annotation::Anchor,
     domain::*,
     review_details::{short_timestamp, thread_roots_at, visible_markdown},
 };
@@ -59,6 +60,17 @@ impl Workbench {
             cx.notify();
             return;
         };
+        self.focus_point(point, window, cx);
+        self.thread_root = None;
+        self.status = format!(
+            "{}:{} · {}'s thread · press Enter or click the line to open it",
+            comment.path,
+            comment.line.unwrap_or(0),
+            comment.author
+        );
+        cx.notify();
+    }
+    fn focus_point(&mut self, point: SourcePoint, window: &mut Window, cx: &mut Context<Self>) {
         self.select_file(point.file.clone(), cx);
         if let Some(v) = &self.viewport {
             let mut v = v.borrow_mut();
@@ -83,15 +95,43 @@ impl Workbench {
             });
             v.active_search = None;
         }
-        self.thread_root = None;
-        self.status = format!(
-            "{}:{} · {}'s thread · press Enter or click the line to open it",
-            comment.path,
-            comment.line.unwrap_or(0),
-            comment.author
-        );
         self.diff_focus.focus(window, cx);
         self.schedule_view_save(cx);
+    }
+    pub(crate) fn jump_to_annotation(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(n) = self.annotations.get(index).cloned() else {
+            return;
+        };
+        let Some(a) = &self.active else { return };
+        let Some(file) = a
+            .snapshot
+            .patch
+            .files
+            .iter()
+            .find(|f| f.display_path() == n.anchor.path())
+            .map(|f| f.id.clone())
+        else {
+            return;
+        };
+        match n.anchor {
+            Anchor::Lines { side, start, .. } => {
+                let point = SourcePoint {
+                    snapshot: a.snapshot.id.clone(),
+                    file,
+                    side,
+                    line: start,
+                    byte_column: 0,
+                };
+                self.focus_point(point, window, cx);
+            }
+            Anchor::File { .. } => self.select_file(file, cx),
+        }
+        self.status = format!("{} · {}", n.source, n.title);
         cx.notify();
     }
     pub(crate) fn show_thread(&mut self, root: u64, window: &mut Window, cx: &mut Context<Self>) {
@@ -142,6 +182,21 @@ impl Workbench {
             .iter()
             .filter(|c| roots.contains(&c.root_id))
             .collect();
+        let notes: Vec<_> = source
+            .zip(path.as_deref())
+            .map(|(s, path)| {
+                self.annotations
+                    .iter()
+                    .filter(|n| n.anchor.path() == path)
+                    .filter(|n| match n.anchor {
+                        Anchor::File { .. } => file_comment,
+                        Anchor::Lines {
+                            side, start, end, ..
+                        } => side == s.start.side && start <= s.end.line && s.start.line <= end,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let title = source
             .map(|s| {
                 if file_comment {
@@ -228,6 +283,29 @@ impl Workbench {
                             .on_click(cx.listener(|a, _, w, c| a.command(Command::Cancel, w, c))),
                     ),
             );
+        for n in notes {
+            card = card.child(
+                div()
+                    .v_flex()
+                    .gap_1()
+                    .p_2()
+                    .rounded_md()
+                    .border_l_2()
+                    .border_color(skin.severity(n.severity))
+                    .bg(skin.base.opacity(0.4))
+                    .child(
+                        div()
+                            .h_flex()
+                            .gap_2()
+                            .text_size(px(12.))
+                            .child(div().text_color(skin.text).child(n.title.clone()))
+                            .child(div().text_color(skin.muted).child(n.source.clone())),
+                    )
+                    .when_some(n.body.clone(), |d, body| {
+                        d.child(div().text_size(px(12.)).whitespace_normal().child(body))
+                    }),
+            );
+        }
         if !comments.is_empty() {
             let mut thread = div()
                 .id("line-thread-scroll")
@@ -404,8 +482,8 @@ impl Workbench {
                     "up" => {
                         w.focus_prev(c);
                     }
-                    "left" => a.overview_tab = (a.overview_tab + 2) % 3,
-                    "right" => a.overview_tab = (a.overview_tab + 1) % 3,
+                    "left" => a.overview_tab = (a.overview_tab + 3) % 4,
+                    "right" => a.overview_tab = (a.overview_tab + 1) % 4,
                     _ => return,
                 }
                 c.stop_propagation();
@@ -435,7 +513,7 @@ impl Workbench {
                     ),
             );
         let mut tabs = div().h_flex().gap_1().px_3().pb_2();
-        for (i, label) in ["Description", "Comments", "Checks"]
+        for (i, label) in ["Description", "Comments", "Checks", "Annotations"]
             .into_iter()
             .enumerate()
         {
@@ -827,6 +905,62 @@ impl Workbench {
                                             a.comment_page += 1;
                                             c.notify();
                                         })),
+                                ),
+                        );
+                    }
+                }
+                3 => {
+                    if self.annotations.is_empty() {
+                        body = body.child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(skin.muted)
+                                .child("No annotations for this review."),
+                        );
+                    }
+                    for (index, n) in self.annotations.iter().enumerate() {
+                        let color = skin.severity(n.severity);
+                        let place = match &n.anchor {
+                            Anchor::File { path } => path.clone(),
+                            Anchor::Lines {
+                                path, start, end, ..
+                            } if start == end => format!("{path}:{start}"),
+                            Anchor::Lines {
+                                path, start, end, ..
+                            } => format!("{path}:{start}–{end}"),
+                        };
+                        body = body.child(
+                            Button::new(("annotation", index))
+                                .ghost()
+                                .small()
+                                .cursor_pointer()
+                                .justify_start()
+                                .child(
+                                    div()
+                                        .v_flex()
+                                        .items_start()
+                                        .gap_0p5()
+                                        .child(
+                                            div()
+                                                .h_flex()
+                                                .gap_2()
+                                                .child(div().size(px(8.)).rounded_full().bg(color))
+                                                .child(
+                                                    div().text_size(px(12.)).child(n.title.clone()),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(11.))
+                                                .text_color(skin.muted)
+                                                .font_family(crate::theme::code_font())
+                                                .child(format!("{place} · {}", n.source)),
+                                        ),
+                                )
+                                .on_click(
+                                    cx.listener(move |a, _, w, c| {
+                                        a.jump_to_annotation(index, w, c)
+                                    }),
                                 ),
                         );
                     }

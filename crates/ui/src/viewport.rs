@@ -150,6 +150,7 @@ pub struct Viewport {
     cache: HashMap<usize, Arc<MeasuredRow>>,
     cache_bytes: usize,
     pub hovered: Option<SourcePoint>,
+    pub annotations: HashMap<(Side, u32), diffz_core::annotation::Severity>,
     pub hover_cursor: CursorStyle,
     /// Edge being pulled to turn the file (`0` for none) and how far, 0 to 1.
     pub pull: (i8, f32),
@@ -235,6 +236,7 @@ impl Viewport {
             cache: HashMap::new(),
             cache_bytes: 0,
             hovered: None,
+            annotations: HashMap::new(),
             hover_cursor: CursorStyle::Arrow,
             pull: (0, 0.),
         }
@@ -864,6 +866,20 @@ impl Viewport {
                     s.start == s.end && s.end.side == cell.side && s.end.line == cell.cell.number
                 }) {
                     window.paint_quad(fill(cb, skin.accent.opacity(0.12)));
+                }
+                let mark = self
+                    .annotations
+                    .get(&(cell.side, cell.cell.number))
+                    .or_else(|| {
+                        p.row
+                            .unified
+                            .then_some(p.row.old_number)
+                            .flatten()
+                            .and_then(|n| self.annotations.get(&(Side::Left, n)))
+                    });
+                if let Some(severity) = mark {
+                    let bar = Bounds::new(point(x, y), size(px(3.), px(p.row.height)));
+                    window.paint_quad(fill(bar, skin.severity(*severity)));
                 }
 
                 let number = if p.row.unified {
