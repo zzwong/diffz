@@ -2,6 +2,42 @@ use diffz_core::domain::*;
 use diffz_core::patch::*;
 use diffz_core::review::*;
 use diffz_core::session::*;
+use serde_json::value::RawValue;
+
+/// Rules with no host-specific limits, for the provider-independent review checks.
+struct Plain;
+impl diffz_core::provider::ReviewRules for Plain {
+    fn id(&self) -> ProviderId {
+        ProviderId::GITHUB
+    }
+    fn name(&self) -> &str {
+        "Plain"
+    }
+    fn open_label(&self) -> &str {
+        ""
+    }
+    fn address_label(&self) -> &str {
+        ""
+    }
+    fn address_hint(&self) -> &str {
+        ""
+    }
+    fn address_help(&self) -> &str {
+        ""
+    }
+    fn write_flag(&self) -> &str {
+        ""
+    }
+    fn reopen_address(&self, _: &RemoteTarget) -> String {
+        String::new()
+    }
+    fn line_url(&self, _: &RemoteTarget, _: &str, _: &str, _: u32) -> String {
+        String::new()
+    }
+    fn payload(&self, p: &PreparedReview) -> Box<RawValue> {
+        serde_json::value::to_raw_value(&p.summary).unwrap()
+    }
+}
 fn snapshot() -> Snapshot {
     let patch = parse_patch(
         b"diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -42 +42 @@\n-old\n+new\n",
@@ -75,52 +111,12 @@ fn revision_offer_never_replaces_snapshot() {
     assert!(session.revision_offer.is_some());
 }
 #[test]
-fn review_uses_original_source_line_and_commit() {
-    let s = snapshot();
-    let d = draft(&s);
-    let p = PreparedReview::prepare(
-        OperationId("op".into()),
-        &s,
-        vec![d],
-        Verdict::Comment,
-        "summary".into(),
-    )
-    .unwrap();
-    let json = p.payload();
-    assert_eq!(json["comments"][0]["line"], 42);
-    assert_eq!(json["commit_id"], "b".repeat(40));
-}
-#[test]
-fn file_level_draft_github_payload_is_a_subject_file_comment() {
-    let s = snapshot();
-    let mut d = draft(&s);
-    d.side = Side::Right;
-    d.start_line = 0;
-    d.line = 0;
-    d.file_level = true;
-    let p = PreparedReview::prepare(
-        OperationId("fl".into()),
-        &s,
-        vec![d],
-        Verdict::Comment,
-        "summary".into(),
-    )
-    .unwrap();
-    let json = p.payload();
-    let c = &json["comments"][0];
-    assert_eq!(c["path"], "a.md");
-    assert_eq!(c["body"], "Please clarify");
-    assert_eq!(c["subject_type"], "file");
-    assert!(c.get("line").is_none());
-    assert!(c.get("side").is_none());
-    assert!(c.get("start_line").is_none());
-}
-#[test]
 fn imported_patch_cannot_publish() {
     let mut s = snapshot();
     s.remote = None;
     assert!(
         PreparedReview::prepare(
+            &Plain,
             OperationId("x".into()),
             &s,
             vec![],
@@ -136,6 +132,7 @@ fn existing_pending_review_blocks_new_submission() {
     s.remote.as_mut().unwrap().pending_review = true;
     assert!(
         PreparedReview::prepare(
+            &Plain,
             OperationId("x".into()),
             &s,
             vec![],
@@ -152,6 +149,7 @@ fn comments_must_belong_to_frozen_snapshot() {
     d.snapshot = SnapshotId("other".into());
     assert!(
         PreparedReview::prepare(
+            &Plain,
             OperationId("x".into()),
             &s,
             vec![d],
@@ -195,6 +193,7 @@ fn file_level_draft_round_trips_and_validates() {
 
     // A file-level draft passes despite line 0 not being an actual source line.
     let p = PreparedReview::prepare(
+        &Plain,
         OperationId("fl".into()),
         &s,
         vec![back],

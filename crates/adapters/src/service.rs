@@ -1,10 +1,12 @@
 //! Application service wiring. Provider access, storage, and publication meet here.
 use crate::{
     Result, fixtures,
-    github::{GithubReader, GithubWriter, PrAddress},
+    github::{GithubProvider, GithubReader},
+    gitlab::{GitlabProvider, GitlabReader},
     local_git::{LocalGit, LocalMode},
     outbox::Outbox,
     process::{read_bounded, resolve_program},
+    provider::ReviewProvider,
     store::Store,
 };
 use diffz_core::{
@@ -14,6 +16,7 @@ use diffz_core::{
     review::*,
 };
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         Arc, Condvar, Mutex,
@@ -24,11 +27,10 @@ use std::{
 
 pub struct Services {
     store: Arc<Store>,
-    github: Option<Arc<GithubReader>>,
-    gitlab: Option<Arc<crate::gitlab::GitlabReader>>,
+    providers: Vec<Arc<dyn ReviewProvider>>,
+    /// One per provider the user let publish, so each keeps a single publication gate.
+    outboxes: HashMap<ProviderId, Outbox>,
     git: Option<LocalGit>,
-    outbox: Option<Outbox>,
-    gitlab_outbox: Option<Outbox>,
     ids: AtomicU64,
     nonce: String,
     reads: (Mutex<usize>, Condvar),
@@ -48,30 +50,6 @@ impl Services {
     }
     pub fn new_with_providers(state: &Path, writes: bool, gitlab_writes: bool) -> Result<Self> {
         let store = Arc::new(Store::open(state)?);
-        let github = resolve_program("gh")
-            .ok()
-            .map(|p| Arc::new(GithubReader::new(p)));
-        let gitlab = resolve_program("glab")
-            .ok()
-            .map(|p| Arc::new(crate::gitlab::GitlabReader::new(p)));
-        let gitlab_outbox = if gitlab_writes {
-            gitlab.as_ref().map(|r| {
-                Outbox::new(
-                    store.clone(),
-                    Arc::new(crate::gitlab::GitlabWriter::new(r.clone())),
-                )
-            })
-        } else {
-            None
-        };
-        let git = resolve_program("git").ok().map(LocalGit::new);
-        let outbox = if writes {
-            github
-                .as_ref()
-                .map(|g| Outbox::new(store.clone(), Arc::new(GithubWriter::new(g.clone()))))
-        } else {
-            None
-        };
         let nonce = format!(
             "{}-{}",
             std::process::id(),
@@ -80,17 +58,40 @@ impl Services {
                 .map_err(|_| "clock is before Unix epoch")?
                 .as_nanos()
         );
-        Ok(Self {
+        let mut services = Self {
             store,
-            github,
-            gitlab,
-            gitlab_outbox,
-            git,
-            outbox,
+            providers: vec![],
+            outboxes: HashMap::new(),
+            git: resolve_program("git").ok().map(LocalGit::new),
             ids: AtomicU64::new(1),
             nonce,
             reads: (Mutex::new(0), Condvar::new()),
-        })
+        };
+        let gh = resolve_program("gh")
+            .ok()
+            .map(|p| Arc::new(GithubReader::new(p)));
+        let glab = resolve_program("glab")
+            .ok()
+            .map(|p| Arc::new(GitlabReader::new(p)));
+        services.register(Arc::new(GithubProvider::new(gh)), writes);
+        services.register(Arc::new(GitlabProvider::new(glab)), gitlab_writes);
+        Ok(services)
+    }
+    /// Add a review provider. With `writes`, reviews may publish to it once its client is
+    /// available; reads and reconciliation never need the opt-in.
+    pub fn register(&mut self, provider: Arc<dyn ReviewProvider>, writes: bool) {
+        let rules = provider.rules();
+        if writes && let Ok(remote) = provider.remote() {
+            self.outboxes
+                .insert(rules.id(), Outbox::new(self.store.clone(), rules, remote));
+        }
+        self.providers.push(provider);
+    }
+    fn provider_for(&self, id: &ProviderId) -> Result<&Arc<dyn ReviewProvider>> {
+        self.providers
+            .iter()
+            .find(|p| p.rules().id() == *id)
+            .ok_or_else(|| format!("No review provider named {id} is available").into())
     }
     fn permit(&self, cancel: &Cancellation) -> Result<Permit<'_>> {
         let mut count = self.reads.0.lock().map_err(|_| "read gate poisoned")?;
@@ -142,16 +143,9 @@ impl Services {
                     format!("patch:{path:?}"),
                 )
             }
-            OpenRequest::GitLab(value) => self
-                .gitlab
-                .as_ref()
-                .ok_or("Install glab, then authenticate for this GitLab host")?
-                .snapshot(&crate::gitlab::MrAddress::parse(&value)?, cancel)?,
-            OpenRequest::GitHub(value) => self
-                .github
-                .as_ref()
-                .ok_or("Install gh, then run gh auth login for this host")?
-                .snapshot(&PrAddress::parse(&value)?, cancel)?,
+            OpenRequest::Remote { provider, address } => {
+                self.provider_for(&provider)?.open(&address, cancel)?
+            }
             OpenRequest::LocalGit { root, base, head } => self
                 .git
                 .as_ref()
@@ -197,18 +191,10 @@ impl WorkbenchServices for Services {
         let _permit = self
             .permit(&cancel)
             .map_err(|e| ServiceError::from(e.to_string()))?;
-        let bytes = if target.provider == ProviderId::GITLAB {
-            self.gitlab
-                .as_ref()
-                .ok_or_else(|| ServiceError::from("glab unavailable"))?
-                .source(target, path, revision)
-        } else {
-            self.github
-                .as_ref()
-                .ok_or_else(|| ServiceError::from("gh unavailable"))?
-                .source(target, path, revision)
-        }
-        .map_err(|e| ServiceError::from(e.to_string()))?;
+        let bytes = self
+            .provider_for(&target.provider)
+            .and_then(|p| p.source(target, path, revision))
+            .map_err(|e| ServiceError::from(e.to_string()))?;
         if bytes.len() > 2 * 1024 * 1024 {
             return Err("Source context is over the 2 MiB cap".into());
         }
@@ -256,60 +242,47 @@ impl WorkbenchServices for Services {
         verdict: Verdict,
         summary: String,
     ) -> std::result::Result<PreparedReview, ServiceError> {
+        let snapshot = self.store.snapshot(id).map_err(ServiceError::from)?;
+        let target = snapshot.remote.as_ref().ok_or_else(|| {
+            ServiceError::from("offline source; a hosted review target is required")
+        })?;
+        let rules = self.provider_for(&target.provider)?.rules();
         let p = PreparedReview::prepare(
+            &*rules,
             OperationId(self.fresh_id()),
-            &self.store.snapshot(id).map_err(ServiceError::from)?,
+            &snapshot,
             drafts,
             verdict,
             summary,
         )
         .map_err(|e| ServiceError::from(e.to_string()))?;
-        self.store.insert_prepared(&p).map_err(ServiceError::from)?;
+        self.store
+            .insert_prepared(&p, &*rules)
+            .map_err(ServiceError::from)?;
         Ok(p)
     }
     fn publish(&self, p: PreparedReview) -> std::result::Result<OutboxEntry, ServiceError> {
-        if p.target.provider == ProviderId::GITLAB {
-            return self
-                .gitlab_outbox
-                .as_ref()
-                .ok_or_else(|| {
-                    ServiceError::from(
-                        "GitLab publication is disabled; restart with --allow-gitlab-writes",
-                    )
-                })?
-                .publish(p)
-                .map_err(Into::into);
-        }
-        self.outbox.as_ref().ok_or_else(||ServiceError::from("GitHub publication is disabled; restart with --allow-github-writes to confirm a review"))?.publish(p).map_err(Into::into)
+        let Some(outbox) = self.outboxes.get(&p.target.provider) else {
+            let rules = self.provider_for(&p.target.provider)?.rules();
+            return Err(format!(
+                "{} publication is disabled; restart with {} to confirm a review",
+                rules.name(),
+                rules.write_flag()
+            )
+            .into());
+        };
+        outbox.publish(p).map_err(Into::into)
     }
     fn outbox(&self) -> std::result::Result<Vec<OutboxEntry>, ServiceError> {
         self.store.outbox().map_err(Into::into)
     }
     fn reconcile(&self, id: OperationId) -> std::result::Result<OutboxEntry, ServiceError> {
         let entry = self.store.operation(&id).map_err(ServiceError::from)?;
-        if entry.prepared.target.provider == ProviderId::GITLAB {
-            let reader = self
-                .gitlab
-                .as_ref()
-                .ok_or_else(|| ServiceError::from("glab is required for reconciliation"))?;
-            return Outbox::new(
-                self.store.clone(),
-                Arc::new(crate::gitlab::GitlabWriter::new(reader.clone())),
-            )
-            .reconcile(&id)
-            .map_err(Into::into);
-        }
         // Reconciliation only reads, so it remains available when publication is disabled.
-        let reader = self
-            .github
-            .as_ref()
-            .ok_or_else(|| ServiceError::from("gh is needed for reconciliation reads"))?;
-        Outbox::new(
-            self.store.clone(),
-            Arc::new(GithubWriter::new(reader.clone())),
-        )
-        .reconcile(&id)
-        .map_err(Into::into)
+        let provider = self.provider_for(&entry.prepared.target.provider)?;
+        Outbox::new(self.store.clone(), provider.rules(), provider.remote()?)
+            .reconcile(&id)
+            .map_err(Into::into)
     }
     fn export(
         &self,
@@ -319,14 +292,13 @@ impl WorkbenchServices for Services {
         crate::export::write_private_json(&p, &c).map_err(Into::into)
     }
     fn writes_enabled(&self) -> bool {
-        self.outbox.is_some() || self.gitlab_outbox.is_some()
+        !self.outboxes.is_empty()
     }
     fn writes_enabled_for(&self, provider: &ProviderId) -> bool {
-        if *provider == ProviderId::GITLAB {
-            self.gitlab_outbox.is_some()
-        } else {
-            *provider == ProviderId::GITHUB && self.outbox.is_some()
-        }
+        self.outboxes.contains_key(provider)
+    }
+    fn providers(&self) -> Vec<Arc<dyn ReviewRules>> {
+        self.providers.iter().map(|p| p.rules()).collect()
     }
     fn fresh_id(&self) -> String {
         format!(

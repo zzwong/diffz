@@ -2,14 +2,17 @@
 use crate::{
     AdapterError, Result,
     process::{ProcessOutput, ProcessRequest, Runner, stderr_excerpt},
+    provider::{ReviewProvider, ReviewRemote, SendOutcome},
 };
 use diffz_core::{
     domain::*,
     patch::{ParseLimits, parse_patch},
-    provider::Cancellation,
+    provider::{Cancellation, ReviewRules},
     review::PreparedReview,
+    source_link::encode,
 };
-use serde_json::Value;
+use serde::Serialize;
+use serde_json::{Value, value::RawValue};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -659,11 +662,137 @@ fn thread(v: &Value) -> Result<ThreadComment> {
     })
 }
 
-pub enum SendOutcome {
-    Accepted(Value),
-    Rejected(u16),
-    Unknown(String),
+pub struct GithubRules;
+
+// The fingerprint hashes this payload, so it is built from structs, never `json!` maps: a
+// map's key order follows serde_json's `preserve_order` feature, which any dependency can
+// switch on. Field order matches what the desktop build has always produced.
+#[derive(Serialize)]
+struct Payload<'a> {
+    commit_id: &'a str,
+    event: &'static str,
+    body: &'a str,
+    comments: Vec<PayloadComment<'a>>,
 }
+#[derive(Serialize)]
+#[serde(untagged)]
+enum PayloadComment<'a> {
+    File {
+        path: &'a str,
+        body: &'a str,
+        subject_type: &'static str,
+    },
+    Line {
+        path: &'a str,
+        body: &'a str,
+        line: u32,
+        side: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        start_line: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        start_side: Option<&'static str>,
+    },
+}
+
+impl ReviewRules for GithubRules {
+    fn id(&self) -> ProviderId {
+        ProviderId::GITHUB
+    }
+    fn name(&self) -> &str {
+        "GitHub"
+    }
+    fn open_label(&self) -> &str {
+        "GitHub PR"
+    }
+    fn address_label(&self) -> &str {
+        "Pull request"
+    }
+    fn address_hint(&self) -> &str {
+        "Enter owner/repo#123 or a GitHub pull request URL"
+    }
+    fn address_help(&self) -> &str {
+        "Enter a PR link or use owner/repository#number."
+    }
+    fn write_flag(&self) -> &str {
+        "--allow-github-writes"
+    }
+    fn reopen_address(&self, t: &RemoteTarget) -> String {
+        let r = &t.repository;
+        format!("https://{}/{}/{}/pull/{}", r.host, r.owner, r.name, t.pr)
+    }
+    fn line_url(&self, t: &RemoteTarget, path: &str, revision: &str, line: u32) -> String {
+        let r = &t.repository;
+        format!(
+            "https://{}/{}/{}/blob/{}/{}#L{line}",
+            r.host,
+            encode(&r.owner),
+            encode(&r.name),
+            encode(revision),
+            encode(path)
+        )
+    }
+    fn payload(&self, p: &PreparedReview) -> Box<RawValue> {
+        let comments = p
+            .comments
+            .iter()
+            .map(|c| {
+                if c.file_level {
+                    return PayloadComment::File {
+                        path: &c.path,
+                        body: &c.body,
+                        subject_type: "file",
+                    };
+                }
+                let range = c.start_line < c.line;
+                PayloadComment::Line {
+                    path: &c.path,
+                    body: &c.body,
+                    line: c.line,
+                    side: c.side.api(),
+                    start_line: range.then_some(c.start_line),
+                    start_side: range.then(|| c.side.api()),
+                }
+            })
+            .collect();
+        serde_json::value::to_raw_value(&Payload {
+            commit_id: &p.target.head,
+            event: p.verdict.api(),
+            body: &p.summary,
+            comments,
+        })
+        .expect("plain serializable review payload")
+    }
+}
+
+/// GitHub through the gh CLI. Without gh, the rules still serve links and stored reviews.
+pub struct GithubProvider {
+    reader: Option<Arc<GithubReader>>,
+}
+impl GithubProvider {
+    pub fn new(reader: Option<Arc<GithubReader>>) -> Self {
+        Self { reader }
+    }
+    fn reader(&self) -> Result<&Arc<GithubReader>> {
+        self.reader
+            .as_ref()
+            .ok_or_else(|| "Install gh, then run gh auth login for this host".into())
+    }
+}
+impl ReviewProvider for GithubProvider {
+    fn rules(&self) -> Arc<dyn ReviewRules> {
+        Arc::new(GithubRules)
+    }
+    fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot> {
+        self.reader()?.snapshot(&PrAddress::parse(address)?, cancel)
+    }
+    fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
+        self.reader()?.source(t, path, revision)
+    }
+    fn remote(&self) -> Result<Arc<dyn ReviewRemote>> {
+        Ok(Arc::new(GithubWriter::new(self.reader()?.clone())))
+    }
+}
+
 /// Distinct from the read-only GithubReader on purpose; the application builds one only after a write opt-in.
 pub struct GithubWriter {
     reader: Arc<GithubReader>,
@@ -672,12 +801,6 @@ impl GithubWriter {
     pub fn new(reader: Arc<GithubReader>) -> Self {
         Self { reader }
     }
-}
-pub trait ReviewRemote: Send + Sync {
-    fn current(&self, t: &RemoteTarget) -> Result<RemoteTarget>;
-    fn reviews(&self, t: &RemoteTarget) -> Result<Vec<Value>>;
-    fn comments(&self, t: &RemoteTarget, id: u64) -> Result<Vec<Value>>;
-    fn send(&self, p: &PreparedReview) -> SendOutcome;
 }
 impl ReviewRemote for GithubWriter {
     fn current(&self, t: &RemoteTarget) -> Result<RemoteTarget> {
@@ -690,15 +813,18 @@ impl ReviewRemote for GithubWriter {
         self.reader.review_comments(t, id, Cancellation::default())
     }
     fn send(&self, p: &PreparedReview) -> SendOutcome {
-        if !p.verify() || p.target.provider != ProviderId::GITHUB {
+        if !p.verify(&GithubRules) {
             return SendOutcome::Rejected(422);
         }
+        let Ok(payload) = serde_json::from_str::<Value>(GithubRules.payload(p).get()) else {
+            return SendOutcome::Rejected(422);
+        };
         let a = PrAddress::from_target(&p.target);
         match self.reader.request(
             &a.host,
             &format!("{}/reviews", a.root()),
             "POST",
-            Some(&p.payload()),
+            Some(&payload),
             "Accept: application/vnd.github+json",
             Cancellation::default(),
         ) {

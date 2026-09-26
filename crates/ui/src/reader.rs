@@ -233,7 +233,7 @@ impl Workbench {
             return;
         };
         let Some(target) = v.snapshot.remote.clone() else {
-            self.status = "Context expansion needs a saved GitHub or GitLab review; standalone patches have no omitted source".into();
+            self.status = "Context expansion needs a saved hosted review; standalone patches have no omitted source".into();
             cx.notify();
             return;
         };
@@ -630,7 +630,7 @@ impl Workbench {
                     .active
                     .as_ref()
                     .and_then(|a| a.snapshot.remote.as_ref())
-                    .map(|r| r.open_request());
+                    .and_then(|t| Some(self.services.provider(&t.provider)?.reopen(t)));
                 let request = match (self.last_request.clone(), remote) {
                     (Some(OpenRequest::Resume(_)) | None, Some(remote)) => Some(remote),
                     (Some(request), _) => Some(request),
@@ -855,7 +855,8 @@ impl Workbench {
                 let Some(v) = &this.viewport else { return; };
                 let mut v = v.borrow_mut();
                 let Some(point) = v.line_number_hit(event.position, window) else { return; };
-                match diffz_core::source_link::source_link(&v.snapshot, &point) {
+                let rules = v.snapshot.remote.as_ref().and_then(|t| this.services.provider(&t.provider));
+                match diffz_core::source_link::source_link(&v.snapshot, &point, rules.as_deref()) {
                     Ok(link) => { cx.write_to_clipboard(ClipboardItem::new_string(link)); this.status = format!("Copied source link · {} {}", point.side.api(), point.line); },
                     Err(e) => this.status = e,
                 }

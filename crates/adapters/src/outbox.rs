@@ -1,22 +1,28 @@
 //! Publication records durable outcomes conservatively. No state permits an automatic retry.
 use crate::{
     Result,
-    github::{ReviewRemote, SendOutcome},
+    provider::{ReviewRemote, SendOutcome},
     store::Store,
 };
-use diffz_core::{domain::*, review::*};
+use diffz_core::{domain::*, provider::ReviewRules, review::*};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
 pub struct Outbox {
     store: Arc<Store>,
+    rules: Arc<dyn ReviewRules>,
     remote: Arc<dyn ReviewRemote>,
     gate: Mutex<()>,
 }
 impl Outbox {
-    pub fn new(store: Arc<Store>, remote: Arc<dyn ReviewRemote>) -> Self {
+    pub fn new(
+        store: Arc<Store>,
+        rules: Arc<dyn ReviewRules>,
+        remote: Arc<dyn ReviewRemote>,
+    ) -> Self {
         Self {
             store,
+            rules,
             remote,
             gate: Mutex::new(()),
         }
@@ -26,7 +32,7 @@ impl Outbox {
         let mut entry = self.store.operation(&p.id)?;
         if entry.state != OutboxState::Prepared
             || entry.prepared.fingerprint != p.fingerprint
-            || !p.verify()
+            || !p.verify(&*self.rules)
         {
             return Err(
                 "the operation differs from its prepared review; an uncertain send cannot be retried"
@@ -46,7 +52,7 @@ impl Outbox {
             entry.state = OutboxState::Rejected;
             entry.diagnostic =
                 Some("The PR revision, repository, account, or pending-review state no longer matches the preview.".into());
-            self.store.transition(&entry)?;
+            self.store.transition(&entry, &*self.rules)?;
             return Ok(entry);
         }
         // Preview approval excludes later draft edits. Check the saved versions again before sending.
@@ -75,7 +81,7 @@ impl Outbox {
             return Err("the PR changed just before sending; no request was made".into());
         }
         entry.state = OutboxState::InFlight;
-        self.store.transition(&entry)?;
+        self.store.transition(&entry, &*self.rules)?;
         // A failure after this point creates InFlight; on the next open, the database changes it to UnknownOutcome.
         match self.remote.send(&p) {
             SendOutcome::Rejected(code) => {
@@ -95,7 +101,9 @@ impl Outbox {
                         .remote
                         .comments(&p.target, id)
                         .ok()
-                        .is_some_and(|comments| matches_review(&p, &response, &comments)),
+                        .is_some_and(|comments| {
+                            matches_review(&p, &response, &comments, self.rules.marks_reviews())
+                        }),
                     None => false,
                 };
                 if verified {
@@ -107,7 +115,7 @@ impl Outbox {
                 }
             }
         }
-        self.store.transition(&entry)?;
+        self.store.transition(&entry, &*self.rules)?;
         Ok(entry)
     }
     pub fn reconcile(&self, id: &OperationId) -> Result<OutboxEntry> {
@@ -133,11 +141,12 @@ impl Outbox {
             } else if e.baseline_review_ids.contains(&id) {
                 continue;
             }
-            if !matches_metadata(&e.prepared, &r) {
+            let marked = self.rules.marks_reviews();
+            if !matches_metadata(&e.prepared, &r, marked) {
                 continue;
             }
             let comments = self.remote.comments(&e.prepared.target, id)?;
-            if matches_review(&e.prepared, &r, &comments) {
+            if matches_review(&e.prepared, &r, &comments, marked) {
                 matches.push(id)
             }
         }
@@ -145,7 +154,7 @@ impl Outbox {
             e.state = OutboxState::Confirmed;
             e.remote_id = Some(matches[0]);
             e.diagnostic = None;
-            self.store.transition(&e)?;
+            self.store.transition(&e, &*self.rules)?;
         }
         // With zero or several matches, keep UnknownOutcome and provide no resend route.
         Ok(e)
@@ -157,10 +166,9 @@ fn same_pr(a: &RemoteTarget, b: &RemoteTarget) -> bool {
         && a.pr == b.pr
         && a.account == b.account
 }
-fn matches_metadata(p: &PreparedReview, r: &Value) -> bool {
-    if p.target.provider == ProviderId::GITLAB
-        && r["fingerprint"].as_str() != Some(p.fingerprint.as_str())
-    {
+/// `marked`: the provider tags its reviews with diffz's fingerprint, so a match must carry it.
+fn matches_metadata(p: &PreparedReview, r: &Value, marked: bool) -> bool {
+    if marked && r["fingerprint"].as_str() != Some(p.fingerprint.as_str()) {
         return false;
     }
     r["commit_id"].as_str() == Some(p.target.head.as_str())
@@ -187,8 +195,8 @@ fn comment_key(c: &Value) -> Option<(String, String, String, u64, u64)> {
         line,
     ))
 }
-pub fn matches_review(p: &PreparedReview, r: &Value, comments: &[Value]) -> bool {
-    if !matches_metadata(p, r) || comments.len() != p.comments.len() {
+pub fn matches_review(p: &PreparedReview, r: &Value, comments: &[Value], marked: bool) -> bool {
+    if !matches_metadata(p, r, marked) || comments.len() != p.comments.len() {
         return false;
     }
     let mut expected: Vec<_> = p

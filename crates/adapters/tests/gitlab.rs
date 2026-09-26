@@ -1,10 +1,13 @@
 use diffz_adapters::{
-    gitlab::{GitlabReader, GitlabWriter, MrAddress},
+    gitlab::{GitlabPosition, GitlabReader, GitlabRules, GitlabWriter, MrAddress},
     outbox::Outbox,
     store::Store,
 };
 use diffz_core::{domain::*, provider::Cancellation, review::*};
 use std::sync::Arc;
+fn position(p: &PreparedReview) -> GitlabPosition {
+    serde_json::from_str(p.comments[0].position.as_ref().unwrap().get()).unwrap()
+}
 #[test]
 fn nested_projects_and_strict_addresses() {
     let a = MrAddress::parse("https://git.example.com/group/sub/project/-/merge_requests/12/diffs")
@@ -91,6 +94,7 @@ fn gitlab_read_publish_and_history_are_local_mocked() {
     };
     d.saved_version = store.save_draft(d.clone()).unwrap();
     let p = PreparedReview::prepare(
+        &GitlabRules,
         OperationId("op".into()),
         &s,
         vec![d],
@@ -98,16 +102,14 @@ fn gitlab_read_publish_and_history_are_local_mocked() {
         "Looks good with this note.".into(),
     )
     .unwrap();
-    assert_eq!(
-        p.comments[0].gitlab_position.as_ref().unwrap().old_line,
-        Some(1)
+    assert_eq!(position(&p).old_line, Some(1));
+    assert_eq!(position(&p).new_line, Some(1));
+    store.insert_prepared(&p, &GitlabRules).unwrap();
+    let o = Outbox::new(
+        store.clone(),
+        Arc::new(GitlabRules),
+        Arc::new(GitlabWriter::new(r)),
     );
-    assert_eq!(
-        p.comments[0].gitlab_position.as_ref().unwrap().new_line,
-        Some(1)
-    );
-    store.insert_prepared(&p).unwrap();
-    let o = Outbox::new(store.clone(), Arc::new(GitlabWriter::new(r)));
     assert_eq!(o.publish(p.clone()).unwrap().state, OutboxState::Confirmed);
     assert!(o.publish(p).is_err());
     store.hide_recent(Some(&s.id)).unwrap();
@@ -150,6 +152,7 @@ fn gitlab_file_level_draft_publishes_as_plain_note_not_discussion() {
     };
     d.saved_version = store.save_draft(d.clone()).unwrap();
     let p = PreparedReview::prepare(
+        &GitlabRules,
         OperationId("fl-op".into()),
         &s,
         vec![d],
@@ -158,8 +161,8 @@ fn gitlab_file_level_draft_publishes_as_plain_note_not_discussion() {
     )
     .unwrap();
     assert!(p.comments[0].file_level);
-    store.insert_prepared(&p).unwrap();
-    let outbox = Outbox::new(store, Arc::new(GitlabWriter::new(r)));
+    store.insert_prepared(&p, &GitlabRules).unwrap();
+    let outbox = Outbox::new(store, Arc::new(GitlabRules), Arc::new(GitlabWriter::new(r)));
     assert_eq!(
         outbox.publish(p.clone()).unwrap().state,
         OutboxState::Confirmed
@@ -203,6 +206,7 @@ fn partial_gitlab_send_remains_unknown_and_cannot_retry() {
     };
     d.saved_version = store.save_draft(d.clone()).unwrap();
     let p = PreparedReview::prepare(
+        &GitlabRules,
         OperationId("op".into()),
         &s,
         vec![d],
@@ -210,9 +214,13 @@ fn partial_gitlab_send_remains_unknown_and_cannot_retry() {
         "Summary".into(),
     )
     .unwrap();
-    store.insert_prepared(&p).unwrap();
+    store.insert_prepared(&p, &GitlabRules).unwrap();
     std::fs::write(temp.path().join("fail-summary"), "").unwrap();
-    let o = Outbox::new(store.clone(), Arc::new(GitlabWriter::new(r)));
+    let o = Outbox::new(
+        store.clone(),
+        Arc::new(GitlabRules),
+        Arc::new(GitlabWriter::new(r)),
+    );
     assert_eq!(
         o.publish(p.clone()).unwrap().state,
         OutboxState::UnknownOutcome
@@ -239,6 +247,7 @@ fn gitlab_approval_is_verified_and_changed_head_rejected() {
     let store = Arc::new(Store::open(&temp.path().join("db")).unwrap());
     store.put_snapshot(&s).unwrap();
     let p = PreparedReview::prepare(
+        &GitlabRules,
         OperationId("approval".into()),
         &s,
         vec![],
@@ -246,10 +255,15 @@ fn gitlab_approval_is_verified_and_changed_head_rejected() {
         "Approved.".into(),
     )
     .unwrap();
-    store.insert_prepared(&p).unwrap();
-    let outbox = Outbox::new(store.clone(), Arc::new(GitlabWriter::new(r)));
+    store.insert_prepared(&p, &GitlabRules).unwrap();
+    let outbox = Outbox::new(
+        store.clone(),
+        Arc::new(GitlabRules),
+        Arc::new(GitlabWriter::new(r)),
+    );
     assert_eq!(outbox.publish(p).unwrap().state, OutboxState::Confirmed);
     let p = PreparedReview::prepare(
+        &GitlabRules,
         OperationId("changed".into()),
         &s,
         vec![],
@@ -257,7 +271,7 @@ fn gitlab_approval_is_verified_and_changed_head_rejected() {
         "Later review".into(),
     )
     .unwrap();
-    store.insert_prepared(&p).unwrap();
+    store.insert_prepared(&p, &GitlabRules).unwrap();
     std::fs::write(temp.path().join("changed-head"), "").unwrap();
     assert_eq!(outbox.publish(p).unwrap().state, OutboxState::Rejected);
 }
@@ -275,6 +289,7 @@ fn accepted_gitlab_summary_with_lost_response_reconciles_without_resending() {
     let store = Arc::new(Store::open(&temp.path().join("db")).unwrap());
     store.put_snapshot(&s).unwrap();
     let p = PreparedReview::prepare(
+        &GitlabRules,
         OperationId("lost".into()),
         &s,
         vec![],
@@ -282,9 +297,9 @@ fn accepted_gitlab_summary_with_lost_response_reconciles_without_resending() {
         "Summary.".into(),
     )
     .unwrap();
-    store.insert_prepared(&p).unwrap();
+    store.insert_prepared(&p, &GitlabRules).unwrap();
     std::fs::write(temp.path().join("lost-response"), "").unwrap();
-    let outbox = Outbox::new(store, Arc::new(GitlabWriter::new(r)));
+    let outbox = Outbox::new(store, Arc::new(GitlabRules), Arc::new(GitlabWriter::new(r)));
     assert_eq!(
         outbox.publish(p.clone()).unwrap().state,
         OutboxState::UnknownOutcome

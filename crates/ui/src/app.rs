@@ -47,10 +47,9 @@ pub(crate) enum Panel {
     Themes,
     Keys,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum SourceMode {
-    GitHub,
-    GitLab,
+    Remote(ProviderId),
     Patch,
     Compare,
     Staged,
@@ -190,8 +189,16 @@ impl Workbench {
             settings.theme = Some(theme);
         }
         apply_appearance(settings.dark, None, Some(window), cx);
-        let open_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("GitHub PR URL or owner/repo#123"));
+        let first_provider = services.providers().into_iter().next();
+        let source_mode = first_provider
+            .as_ref()
+            .map_or(SourceMode::Patch, |p| SourceMode::Remote(p.id()));
+        let placeholder = first_provider
+            .as_ref()
+            .map_or("/path/to/change.patch".to_string(), |p| {
+                p.address_hint().to_string()
+            });
+        let open_input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         let base_input = cx.new(|cx| InputState::new(window, cx).default_value("main"));
         let head_input = cx.new(|cx| InputState::new(window, cx).default_value("HEAD"));
         let filter_input =
@@ -294,7 +301,7 @@ impl Workbench {
             diff_focus: cx.focus_handle().tab_stop(true),
             root_focus: cx.focus_handle(),
             panel: Panel::None,
-            source_mode: SourceMode::GitHub,
+            source_mode,
             files_visible: true,
             files_peek: FilesPeek::default(),
             files_peek_close: None,
@@ -318,7 +325,7 @@ impl Workbench {
                     "DejaVu Sans Mono".into()
                 }
             }),
-            status: "Open a GitHub PR, GitLab MR, fixture, patch, or local Git comparison.".into(),
+            status: "Open a hosted review, fixture, patch, or local Git comparison.".into(),
             palette: None,
             theme_path: None,
             theme_mtime: None,

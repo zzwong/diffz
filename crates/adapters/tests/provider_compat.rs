@@ -4,9 +4,19 @@
 //!
 //! The values are the desktop build's, where GPUI enables serde_json's `preserve_order`.
 //! They must hold with and without that feature, so run these tests both ways.
+use diffz_adapters::{github::GithubRules, gitlab::GitlabRules};
 use diffz_core::domain::*;
 use diffz_core::patch::*;
+use diffz_core::provider::ReviewRules;
 use diffz_core::review::*;
+
+fn rules(provider: &ProviderId) -> &'static dyn ReviewRules {
+    if *provider == ProviderId::GITLAB {
+        &GitlabRules
+    } else {
+        &GithubRules
+    }
+}
 
 const PATCH: &[u8] =
     b"diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1,2 +1,2 @@\n fn a() {}\n-fn b() {}\n+fn c() {}\n";
@@ -58,9 +68,10 @@ fn drafts(s: &Snapshot) -> Vec<Draft> {
 }
 
 fn prepared(provider: ProviderId, verdict: Verdict) -> PreparedReview {
-    let s = snapshot(Some(target(provider)));
+    let s = snapshot(Some(target(provider.clone())));
     let d = drafts(&s);
     PreparedReview::prepare(
+        rules(&provider),
         OperationId("op-1".into()),
         &s,
         d,
@@ -128,8 +139,8 @@ fn prepared_reviews_are_unchanged() {
     for g in &GOLDEN {
         let r = prepared(g.provider.clone(), Verdict::Approve);
         assert_eq!(r.fingerprint, g.fingerprint, "{:?}", g.provider);
-        let payload: serde_json::Value = serde_json::from_str(g.payload).unwrap();
-        assert_eq!(r.payload(), payload, "{:?}", g.provider);
+        let payload = rules(&g.provider).payload(&r);
+        assert_eq!(payload.get(), g.payload, "{:?}", g.provider);
         assert_eq!(
             serde_json::to_string(&r).unwrap(),
             g.stored,
@@ -143,7 +154,13 @@ fn prepared_reviews_are_unchanged() {
 fn stored_outbox_reviews_still_verify() {
     for g in &GOLDEN {
         let r: PreparedReview = serde_json::from_str(g.stored).unwrap();
-        assert!(r.verify(), "{:?}", g.provider);
+        assert!(r.verify(rules(&g.provider)), "{:?}", g.provider);
+        let other = if g.provider == ProviderId::GITLAB {
+            &GithubRules as &dyn ReviewRules
+        } else {
+            &GitlabRules
+        };
+        assert!(!r.verify(other), "{:?}", g.provider);
         assert_eq!(serde_json::to_string(&r).unwrap(), g.stored);
     }
 }
@@ -153,12 +170,31 @@ fn gitlab_rules_still_apply() {
     let s = snapshot(Some(target(ProviderId::GITLAB)));
     let op = || OperationId("op".into());
     assert!(
-        PreparedReview::prepare(op(), &s, vec![], Verdict::RequestChanges, "x".into()).is_err()
+        PreparedReview::prepare(
+            &GitlabRules,
+            op(),
+            &s,
+            vec![],
+            Verdict::RequestChanges,
+            "x".into()
+        )
+        .is_err()
     );
-    assert!(PreparedReview::prepare(op(), &s, vec![], Verdict::Comment, "/merge".into()).is_err());
+    assert!(
+        PreparedReview::prepare(
+            &GitlabRules,
+            op(),
+            &s,
+            vec![],
+            Verdict::Comment,
+            "/merge".into()
+        )
+        .is_err()
+    );
     let github = snapshot(Some(target(ProviderId::GITHUB)));
     assert!(
         PreparedReview::prepare(
+            &GithubRules,
             op(),
             &github,
             vec![],

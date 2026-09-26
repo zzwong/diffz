@@ -4,7 +4,10 @@ use diffz_adapters::{
     process::{read_bounded, resolve_program},
     service::{Services, default_state_dir},
 };
-use diffz_core::provider::{Cancellation, OpenRequest, WorkbenchServices};
+use diffz_core::{
+    domain::ProviderId,
+    provider::{Cancellation, OpenRequest, WorkbenchServices},
+};
 use std::{
     io::{ErrorKind, Write},
     path::PathBuf,
@@ -83,7 +86,13 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
         match arg.as_str() {
             "--fixture" => set_source(&mut source, OpenRequest::Fixture(next()?))?,
             "--patch" => set_source(&mut source, OpenRequest::Patch(PathBuf::from(next()?)))?,
-            "--pr" => set_source(&mut source, OpenRequest::GitHub(next()?))?,
+            "--pr" => set_source(
+                &mut source,
+                OpenRequest::Remote {
+                    provider: ProviderId::GITHUB,
+                    address: next()?,
+                },
+            )?,
             "--git" => set_source(
                 &mut source,
                 OpenRequest::LocalGit {
@@ -106,7 +115,13 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
             "--state-dir" => state = Some(PathBuf::from(next()?)),
             "--allow-github-writes" => writes = true,
             "--allow-gitlab-writes" => gitlab_writes = true,
-            "--mr" => set_source(&mut source, OpenRequest::GitLab(next()?))?,
+            "--mr" => set_source(
+                &mut source,
+                OpenRequest::Remote {
+                    provider: ProviderId::GITLAB,
+                    address: next()?,
+                },
+            )?,
             "--inspect" => inspect = true,
             "--font" => font = Some(next()?),
             "--theme" => theme = Some(next()?),
