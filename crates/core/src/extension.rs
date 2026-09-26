@@ -23,6 +23,14 @@ struct Manifest {
     languages: Vec<LanguageManifest>,
     #[serde(default)]
     themes: Vec<ThemeManifest>,
+    #[serde(default)]
+    annotators: Vec<AnnotatorManifest>,
+}
+
+#[derive(Deserialize)]
+struct AnnotatorManifest {
+    id: String,
+    component: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +54,7 @@ pub struct Extension {
     pub dir: PathBuf,
     pub languages: Vec<Language>,
     pub themes: Vec<PathBuf>,
+    pub annotators: Vec<(String, PathBuf)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +158,13 @@ pub fn load(dir: &Path) -> Result<Extension, String> {
         .iter()
         .map(|t| inside(&t.path))
         .collect::<Result<_, String>>()?;
+    let annotators = m
+        .annotators
+        .iter()
+        .map(|a| Ok((format!("{}/{}", m.id, a.id), inside(&a.component)?)))
+        .collect::<Result<_, String>>()?;
     Ok(Extension {
+        annotators,
         name: m.name.unwrap_or_else(|| m.id.clone()),
         version: m.version.unwrap_or_default(),
         id: m.id,

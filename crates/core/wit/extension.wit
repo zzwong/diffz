@@ -1,0 +1,63 @@
+package diffz:extension@0.1.0;
+
+interface types {
+  enum side { old, new }
+  enum severity { note, info, warning, error }
+  enum row-kind { context, added, removed }
+  enum file-status { added, deleted, modified, renamed, copied }
+
+  record row {
+    kind: row-kind,
+    old-line: option<u32>,
+    new-line: option<u32>,
+    text: string,
+  }
+
+  record hunk {
+    old-start: u32,
+    old-count: u32,
+    new-start: u32,
+    new-count: u32,
+    rows: list<row>,
+  }
+
+  record changed-file {
+    path: string,
+    old-path: option<string>,
+    status: file-status,
+    hunks: list<hunk>,
+  }
+
+  record review {
+    title: string,
+    files: list<changed-file>,
+  }
+
+  record line-range {
+    path: string,
+    side: side,
+    start: u32,
+    end: u32,
+  }
+
+  variant anchor {
+    file(string),
+    lines(line-range),
+  }
+
+  record annotation {
+    anchor: anchor,
+    severity: severity,
+    title: string,
+    body: option<string>,
+  }
+}
+
+interface annotator {
+  use types.{review, annotation};
+  annotate: func(review: review) -> result<list<annotation>, string>;
+}
+
+world extension {
+  export annotator;
+}

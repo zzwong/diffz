@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 pub mod anchor;
 pub mod annotation;
+#[cfg(feature = "wasm")]
+pub mod component;
 pub mod domain;
 pub mod export;
 pub mod extension;

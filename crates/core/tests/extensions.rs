@@ -36,9 +36,10 @@ fn copy_toy(to: &Path, manifest: impl FnOnce(String) -> String) {
 fn the_fixture_loads_with_its_language_and_theme() {
     let installed = extension::discover(&[fixtures()]);
     assert!(installed.problems.is_empty(), "{:?}", installed.problems);
-    let [ext] = installed.extensions.as_slice() else {
+    let [todo, ext] = installed.extensions.as_slice() else {
         panic!("{:?}", installed.extensions)
     };
+    assert_eq!(todo.annotators.len(), 1);
     assert_eq!((ext.id.as_str(), ext.name.as_str()), ("toy", "Toy"));
     assert_eq!(ext.languages[0].extensions, ["toy"]);
 
@@ -164,6 +165,85 @@ mod wasm {
         assert!(problems[0].starts_with("toy: toy: "), "{problems:?}");
         let lines = registry.highlight("a.toy", "let x", &AtomicUsize::new(0));
         assert!(lines.iter().all(Vec::is_empty));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn snapshot(title: &str) -> diffz_core::domain::Snapshot {
+        let patch = diffz_core::patch::parse_patch(
+            b"diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n-x\n+y\n+// TODO: z\n",
+            Default::default(),
+        )
+        .unwrap();
+        diffz_core::domain::Snapshot::new(title.into(), patch, None, vec![])
+    }
+
+    #[test]
+    fn a_component_annotator_runs_through_the_registry() {
+        let mut registry = Registry::default();
+        registry.add_extensions(extension::discover(&[fixtures()]));
+        assert_eq!(registry.check_extensions(), Vec::<String>::new());
+        let (found, problems) = registry.annotate(&snapshot("t"), &Default::default());
+        assert!(problems.is_empty(), "{problems:?}");
+        let [n] = found.as_slice() else {
+            panic!("{found:?}")
+        };
+        assert_eq!(n.source, "todo/todo");
+        assert_eq!(n.title, "TODO");
+        assert_eq!(n.body.as_deref(), Some("// TODO: z"));
+        assert!(n.anchor.covers(diffz_core::domain::Side::Right, 2));
+    }
+
+    #[test]
+    fn a_component_is_stopped_by_its_time_and_memory_limits() {
+        use diffz_core::{
+            annotation::Annotator,
+            component::{CodeAnnotator, Limits},
+        };
+        use std::time::{Duration, Instant};
+        let limits = Limits {
+            time: Duration::from_millis(200),
+            memory: 16 << 20,
+        };
+        let todo = CodeAnnotator::new(
+            "todo/todo".into(),
+            fixtures().join("todo/annotators/todo.wasm"),
+            limits,
+        );
+        let cancel = Default::default();
+        let started = Instant::now();
+        let spin = todo
+            .annotate(&snapshot("diffz-test-spin"), &cancel)
+            .unwrap_err();
+        assert_eq!(spin, "stopped after 200 ms");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(
+            todo.annotate(&snapshot("diffz-test-grow"), &cancel)
+                .is_err()
+        );
+        assert_eq!(
+            todo.annotate(&snapshot("diffz-test-fail"), &cancel)
+                .unwrap_err(),
+            "asked to fail"
+        );
+        assert_eq!(todo.annotate(&snapshot("t"), &cancel).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_corrupt_component_is_reported_by_the_check() {
+        let root = scratch("component");
+        let dir = root.join("todo");
+        fs::create_dir_all(dir.join("annotators")).unwrap();
+        fs::copy(
+            fixtures().join("todo/extension.toml"),
+            dir.join("extension.toml"),
+        )
+        .unwrap();
+        fs::write(dir.join("annotators/todo.wasm"), b"not a component").unwrap();
+        let mut registry = Registry::default();
+        registry.add_extensions(extension::discover(std::slice::from_ref(&root)));
+        let problems = registry.check_extensions();
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].starts_with("todo/todo: "), "{problems:?}");
         let _ = fs::remove_dir_all(&root);
     }
 }

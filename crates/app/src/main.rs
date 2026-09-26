@@ -236,11 +236,12 @@ fn run() -> Result<()> {
         ));
         for ext in registry.extensions() {
             report.push_str(&format!(
-                "extension {} {}: {} languages, {} themes ({})\n",
+                "extension {} {}: {} languages, {} themes, {} annotators ({})\n",
                 ext.id,
                 ext.version,
                 ext.languages.len(),
                 ext.themes.len(),
+                ext.annotators.len(),
                 ext.dir.display()
             ));
         }

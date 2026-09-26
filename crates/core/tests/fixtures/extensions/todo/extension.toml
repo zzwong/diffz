@@ -1,0 +1,8 @@
+id = "todo"
+name = "TODO finder"
+version = "0.1.0"
+diffz = "0.1"
+
+[[annotators]]
+id = "todo"
+component = "annotators/todo.wasm"

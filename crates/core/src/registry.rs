@@ -40,6 +40,8 @@ pub struct Registry {
     extensions: Vec<(Extension, Vec<Arc<ExtensionLanguage>>)>,
     problems: Vec<String>,
     annotators: Vec<Arc<dyn Annotator>>,
+    #[cfg(feature = "wasm")]
+    components: Vec<Arc<crate::component::CodeAnnotator>>,
 }
 
 impl Registry {
@@ -71,6 +73,23 @@ impl Registry {
                 self.languages.push(language.clone());
             }
             themes.extend(ext.themes.iter().cloned());
+            for (id, path) in &ext.annotators {
+                #[cfg(feature = "wasm")]
+                {
+                    let annotator = Arc::new(crate::component::CodeAnnotator::new(
+                        id.clone(),
+                        path.clone(),
+                        Default::default(),
+                    ));
+                    self.components.push(annotator.clone());
+                    self.annotators.push(annotator);
+                }
+                #[cfg(not(feature = "wasm"))]
+                self.problems.push(format!(
+                    "{id}: this diffz was built without WebAssembly support ({})",
+                    path.display()
+                ));
+            }
             self.extensions.push((ext, languages));
         }
         if !themes.is_empty() {
@@ -93,6 +112,12 @@ impl Registry {
                 if let Err(e) = provider.check() {
                     out.push(format!("{}: {}: {e}", ext.id, language.name));
                 }
+            }
+        }
+        #[cfg(feature = "wasm")]
+        for component in &self.components {
+            if let Err(e) = component.compile() {
+                out.push(format!("{}: {e}", component.id()));
             }
         }
         out
