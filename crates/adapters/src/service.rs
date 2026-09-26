@@ -28,7 +28,6 @@ use std::{
 pub struct Services {
     store: Arc<Store>,
     providers: Vec<Arc<dyn ReviewProvider>>,
-    /// One per provider the user let publish, so each keeps a single publication gate.
     outboxes: HashMap<ProviderId, Outbox>,
     git: Option<LocalGit>,
     ids: AtomicU64,
@@ -77,8 +76,6 @@ impl Services {
         services.register(Arc::new(GitlabProvider::new(glab)), gitlab_writes);
         Ok(services)
     }
-    /// Add a review provider. With `writes`, reviews may publish to it once its client is
-    /// available; reads and reconciliation never need the opt-in.
     pub fn register(&mut self, provider: Arc<dyn ReviewProvider>, writes: bool) {
         let rules = provider.rules();
         if writes && let Ok(remote) = provider.remote() {

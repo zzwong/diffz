@@ -2,7 +2,6 @@ use crate::{
     domain::{Side, Snapshot, SourcePoint},
     provider::ReviewRules,
 };
-/// Percent-encode a URL path segment, keeping `/` so nested groups and file paths stay readable.
 pub fn encode(value: &str) -> String {
     let mut out = String::new();
     for b in value.bytes() {
@@ -14,7 +13,6 @@ pub fn encode(value: &str) -> String {
     }
     out
 }
-/// A browser link to the line under `point`, at the revision the review froze for that side.
 pub fn source_link(
     snapshot: &Snapshot,
     point: &SourcePoint,

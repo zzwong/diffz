@@ -1289,7 +1289,6 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         .detach();
     }
 }
-/// Any edit to a theme's files, including the palette it extends, moves this forward.
 fn newest_mtime(files: &[PathBuf]) -> Option<SystemTime> {
     files
         .iter()

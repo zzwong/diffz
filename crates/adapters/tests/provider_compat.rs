@@ -1,9 +1,5 @@
-//! Golden values for data that outlives a build: serialized remote targets, snapshot
-//! identities, and prepared reviews in the outbox. A provider refactor must keep every
-//! one of these byte-for-byte, or saved reviews stop reopening and publishing.
-//!
-//! The values are the desktop build's, where GPUI enables serde_json's `preserve_order`.
-//! They must hold with and without that feature, so run these tests both ways.
+//! Stored bytes that must never change. Values are from the desktop build (serde_json
+//! preserve_order on); they must hold with the feature off too.
 use diffz_adapters::{github::GithubRules, gitlab::GitlabRules};
 use diffz_core::domain::*;
 use diffz_core::patch::*;

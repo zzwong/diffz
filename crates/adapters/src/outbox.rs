@@ -166,7 +166,6 @@ fn same_pr(a: &RemoteTarget, b: &RemoteTarget) -> bool {
         && a.pr == b.pr
         && a.account == b.account
 }
-/// `marked`: the provider tags its reviews with diffz's fingerprint, so a match must carry it.
 fn matches_metadata(p: &PreparedReview, r: &Value, marked: bool) -> bool {
     if marked && r["fingerprint"].as_str() != Some(p.fingerprint.as_str()) {
         return false;

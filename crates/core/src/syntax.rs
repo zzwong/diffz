@@ -40,7 +40,6 @@ impl Token {
         Token::Label,
         Token::Embedded,
     ];
-    /// The key a theme's `[syntax]` table uses for this token.
     pub fn name(self) -> &'static str {
         match self {
             Token::Keyword => "keyword",
@@ -67,7 +66,6 @@ pub struct Span {
     pub bytes: Range<usize>,
     pub token: Token,
 }
-/// The grammars compiled into diffz. Without the `syntax` feature it claims nothing.
 pub struct BuiltinGrammars;
 
 impl LanguageProvider for BuiltinGrammars {

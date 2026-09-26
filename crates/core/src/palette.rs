@@ -266,8 +266,6 @@ pub fn theme_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Omarchy's active theme, which Omarchy rewrites whenever the user switches themes.
-/// Selected as `"current"`, or `"omarchy"` for compatibility.
 pub struct OmarchyCurrent;
 
 impl OmarchyCurrent {
@@ -297,8 +295,6 @@ impl ThemeSource for OmarchyCurrent {
     }
 }
 
-/// Named themes, each a `<dir>/<name>/` folder holding `theme.toml` or `colors.toml`. An
-/// earlier dir wins when names repeat.
 pub struct ThemeDirectories(pub Vec<PathBuf>);
 
 impl ThemeSource for ThemeDirectories {
@@ -325,8 +321,6 @@ impl ThemeSource for ThemeDirectories {
     }
 }
 
-/// Every theme folder beneath `dirs` with the file it uses, preferring `theme.toml` over
-/// `colors.toml`; the first dir wins when names repeat; sorted by name.
 pub fn discover_in(dirs: &[PathBuf]) -> Vec<(String, PathBuf)> {
     let mut out: Vec<(String, PathBuf)> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -515,7 +509,6 @@ mod tests {
         theme_dir(&second, "only-second");
         // A dir holding no colors.toml is never discovered.
         fs::create_dir_all(first.join("no-theme")).unwrap();
-        // A theme.toml alone makes a theme, and wins over a colors.toml beside it.
         fs::create_dir_all(second.join("only-toml")).unwrap();
         fs::write(second.join("only-toml/theme.toml"), "mode = \"light\"\n").unwrap();
         fs::write(first.join("dup/theme.toml"), "mode = \"dark\"\n").unwrap();

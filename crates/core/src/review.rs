@@ -34,8 +34,7 @@ pub struct PreparedComment {
     pub draft: DraftId,
     pub version: u64,
     pub path: String,
-    /// Where the provider attaches this comment, frozen by [`ReviewRules::position`]. Kept as
-    /// raw JSON so its bytes survive storage exactly. The key predates other providers.
+    /// Raw JSON so its fingerprinted bytes survive storage exactly.
     #[serde(
         rename = "gitlab_position",
         default,
@@ -46,8 +45,6 @@ pub struct PreparedComment {
     pub side: Side,
     pub start_line: u32,
     pub line: u32,
-    /// A comment that covers the whole file, not a source line. Each provider's payload
-    /// decides how the host records it.
     #[serde(default)]
     pub file_level: bool,
 }
@@ -165,7 +162,6 @@ impl PreparedReview {
         .expect("plain serializable review payload");
         digest(&[b"review-v1", &payload])
     }
-    /// False as well when `rules` belong to another provider than the review's target.
     pub fn verify(&self, rules: &dyn ReviewRules) -> bool {
         rules.id() == self.target.provider && self.fingerprint == self.compute_fingerprint(rules)
     }

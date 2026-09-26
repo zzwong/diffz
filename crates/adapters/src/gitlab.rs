@@ -423,7 +423,7 @@ pub fn discussion_comments(ds: &[Value], overview: &mut Overview) -> Vec<ThreadC
 
 pub struct GitlabRules;
 
-/// Where a GitLab discussion attaches. Its field order is part of the review fingerprint.
+/// Field order is part of the review fingerprint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitlabPosition {
     pub position_type: String,
@@ -438,7 +438,7 @@ pub struct GitlabPosition {
     pub new_line: Option<u32>,
 }
 
-// Hashed into the fingerprint, so a struct in the field order diffz has always produced.
+// Fingerprinted: keep this field order.
 #[derive(Serialize)]
 struct Payload<'a> {
     head: &'a str,
@@ -574,7 +574,6 @@ impl ReviewRules for GitlabRules {
     }
 }
 
-/// GitLab through the glab CLI. Without glab, the rules still serve links and stored reviews.
 pub struct GitlabProvider {
     reader: Option<Arc<GitlabReader>>,
 }

@@ -4,7 +4,6 @@ use diffz_core::review::*;
 use diffz_core::session::*;
 use serde_json::value::RawValue;
 
-/// Rules with no host-specific limits, for the provider-independent review checks.
 struct Plain;
 impl diffz_core::provider::ReviewRules for Plain {
     fn id(&self) -> ProviderId {

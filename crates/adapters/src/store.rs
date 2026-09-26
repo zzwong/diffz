@@ -284,8 +284,7 @@ impl Store {
     pub fn transition(&self, e: &OutboxEntry, rules: &dyn ReviewRules) -> Result<()> {
         self.write_transition(e, Some(rules))
     }
-    /// Without `rules` the review is not re-verified, which suits only moves that keep the
-    /// stored review byte-for-byte, such as marking an interrupted send as unknown.
+    /// Skips re-verification; only for moves that leave the stored review byte-identical.
     fn write_transition(&self, e: &OutboxEntry, rules: Option<&dyn ReviewRules>) -> Result<()> {
         let mut c = self.db()?;
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
