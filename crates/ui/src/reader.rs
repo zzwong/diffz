@@ -582,7 +582,7 @@ impl Workbench {
                 self.save_settings(cx);
             }
             Command::Theme => {
-                if self.palette.is_some() {
+                if self.theme.is_some() {
                     // Clearing the selected theme keeps the palette's light or dark choice.
                     self.apply_theme(None, window, cx);
                     self.status = "Theme removed; built-in colours are back".into();

@@ -26,7 +26,7 @@ pub struct ThemeEntry {
     pub label: String,
     /// What settings and `--theme` store to select this theme again.
     pub reference: String,
-    /// The `colors.toml` file, watched for edits while the theme is active.
+    /// The theme's `theme.toml` or `colors.toml`.
     pub path: PathBuf,
 }
 
@@ -102,7 +102,7 @@ impl Registry {
     }
 
     /// A reference holding `'/'` or starting with `'~'` is a path to a theme folder or
-    /// its `colors.toml`, with `~` → `$HOME`. Anything else goes to the sources in order.
+    /// its `theme.toml` or `colors.toml`, with `~` → `$HOME`. Anything else goes to the sources in order.
     pub fn resolve_theme(&self, reference: &str) -> Option<ThemeEntry> {
         if reference.starts_with('~') || reference.contains('/') {
             return theme_at_path(reference);
@@ -124,7 +124,7 @@ fn theme_at_path(reference: &str) -> Option<ThemeEntry> {
         None => PathBuf::from(reference),
     };
     let file = if path.is_dir() {
-        path.join("colors.toml")
+        crate::theme::theme_file(&path)?
     } else {
         path
     };
@@ -134,7 +134,7 @@ fn theme_at_path(reference: &str) -> Option<ThemeEntry> {
     let reference_path = Path::new(reference);
     let dir = if reference_path
         .file_name()
-        .is_some_and(|n| n == "colors.toml")
+        .is_some_and(|n| n == "colors.toml" || n == "theme.toml")
     {
         reference_path.parent().unwrap_or(reference_path)
     } else {

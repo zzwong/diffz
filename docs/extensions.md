@@ -97,42 +97,45 @@ between highlighters and themes, and it is deliberately small.
 
 ## M2: theme contract
 
-`Skin` in `crates/ui/src/theme.rs` has 17 semantic colours, all derived from
-the 25 palette keys by `Skin::from_palette`. Syntax colours are fixed by
-`Skin::token`, which folds 16 tokens onto 7 skin colours.
+The contract lives in core (`crates/core/src/theme.rs`): `SkinSpec` holds the
+17 semantic colours as `Rgb`, so core stays free of GPUI types, and `Theme`
+adds the mode, an optional base palette, per-token syntax overrides, the files
+it was read from, and warnings. The UI only converts `Rgb` to `Hsla`.
 
-M2 moves the contract into core as `SkinSpec`, holding `Rgb` values so core
-stays free of GPUI types. A theme may then supply a `theme.toml` next to or
-instead of `colors.toml`:
+A theme folder may hold a `theme.toml` next to or instead of `colors.toml`,
+and the folder prefers it:
 
 ```toml
-extends = "colors.toml"   # optional; unset keys derive from this palette
-mode = "dark"
+extends = "colors.toml"   # optional; a palette relative to this file
+mode = "dark"             # optional; defaults to the palette's, else dark
 
 [skin]
-base = "#151820"
 added = "#18332a"
 added_word = "#28583c"
-border = "#303848"
 
 [syntax]
 keyword = "#88b4ff"
-string = "#81c995"
-comment = { color = "#9ba5b5", italic = true }
-
-[metrics]
-radius = 6
-density = "compact"        # compact | normal | roomy
+comment = "#9ba5b5"
 ```
 
-Rules:
+- Any key may be omitted. Skin keys fall back to the `extends` palette's
+  mapping, or to the built-in dark or light skin; syntax keys fall back to
+  their skin colour.
+- The palette also colours the widget layer; a theme without `extends` keeps
+  the built-in widget theme.
+- Unknown keys and sections are ignored with a warning in the status line, so
+  newer themes load on older builds. Malformed colours are errors.
+- An edit to `theme.toml` or to the palette it extends reloads the theme.
+- A bare `colors.toml` works unchanged, so Omarchy themes need nothing new.
 
-- Any key may be omitted. Missing skin keys come from `Skin::from_palette` on
-  the `extends` palette, or from the built-in dark or light skin.
-- Unknown keys produce a warning, not an error, so newer themes load on older
-  builds.
-- A bare `colors.toml` keeps working unchanged. Omarchy themes need nothing new.
-- Syntax entries accept a colour or a table with `color`, `italic`, `bold`.
+Deferred:
+
+- **Bold and italic tokens.** Lines are shaped once with one font and
+  highlighting only recolours them, so it can never move text. Per-token
+  weight means reshaping per span and measuring its cost first.
+- **Metrics** (`radius`, `density`). Corner radii are hard-coded at about
+  fifteen call sites and spacing lives in layout constants, so these need a
+  pass through the chrome before a theme can drive them.
 
 This is the "restyle everything" half of customization and needs no code
 execution at all.

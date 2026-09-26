@@ -2,8 +2,9 @@
 
 Palettes in Omarchy's `colors.toml` format drive diffz. They colour the
 semantic skin tokens of the diff view; they also feed the gpui-component
-widget palette. The picker panel shows every available theme, and the theme
-file in use reloads as you edit it.
+widget palette. A `theme.toml` can extend a palette and override any skin
+colour or syntax token. The picker panel shows every available theme, and the
+theme files in use reload as you edit them.
 
 ## Selecting a palette
 
@@ -12,7 +13,8 @@ Choose **Omarchy current theme** in the theme picker or launch with
 `~/.local/state/omarchy/current/theme/colors.toml`. The choice is saved;
 Omarchy colors are opt-in, not automatically selected on first launch.
 The app checks the active file's modification time every two seconds.
-A named theme or `--theme /path/to/colors.toml` works on other desktops too.
+A named theme or `--theme /path/to/theme-folder` works on other desktops too;
+the path may also name a `theme.toml` or `colors.toml` directly.
 
 ## `colors.toml` format
 
@@ -76,6 +78,39 @@ up, in any order, the canonical one wins:
 | `light_fg`  | `light_foreground`  |
 | `bright_fg` | `bright_foreground` |
 
+## `theme.toml`
+
+A theme folder may hold a `theme.toml`, which wins over a `colors.toml` in the
+same folder. It reads a subset of TOML: two top-level keys, a `[skin]` table
+and a `[syntax]` table, each entry a quoted `#rrggbb` colour.
+
+```toml
+extends = "colors.toml"   # a palette, relative to this file
+mode = "dark"             # "dark" or "light"
+
+[skin]
+added = "#18332a"
+removed_word = "#703845"
+
+[syntax]
+comment = "#7f8c98"
+string = "#a3d9a5"
+```
+
+- `extends` is optional. Its palette sets every skin colour through the
+  mapping below and colours the widgets. Without it, the skin starts from the
+  built-in dark or light colours and the widgets keep their built-in theme.
+- `mode` defaults to the palette's mode, or dark.
+- `[skin]` takes any skin token from the table below. `[syntax]` takes any of
+  `keyword`, `function`, `type`, `string`, `number`, `comment`, `property`,
+  `constant`, `operator`, `punctuation`, `variable`, `parameter`,
+  `attribute`, `namespace`, `label` and `embedded`; a token left out keeps its
+  colour from the syntax mapping below.
+- Unknown keys and sections are ignored, and the status line lists them. A
+  malformed colour is an error that names the key.
+- diffz watches the `theme.toml` and the palette it extends; saving either
+  reloads the theme.
+
 ## Skin mapping
 
 A `Palette` becomes a `Skin` for the diff view plus the chrome around it:
@@ -99,6 +134,20 @@ A `Palette` becomes a `Skin` for the diff view plus the chrome around it:
 | `removed`              | `background`.mix(`red`, 0.18)    |
 | `added_word`           | `background`.mix(`green`, 0.40)  |
 | `removed_word`         | `background`.mix(`red`, 0.40)    |
+
+## Syntax mapping
+
+Without a `[syntax]` override, each token takes a skin colour:
+
+| Syntax tokens                                            | Skin token |
+| -------------------------------------------------------- | ---------- |
+| `keyword`, `operator`                                    | `accent`   |
+| `function`                                               | `function` |
+| `type`, `namespace`, `attribute`, `label`, `property`    | `symbol`   |
+| `string`                                                 | `positive` |
+| `number`, `constant`                                     | `warning`  |
+| `comment`, `punctuation`                                 | `muted`    |
+| `variable`, `parameter`, `embedded`                      | `text`     |
 
 ## Widget mapping
 

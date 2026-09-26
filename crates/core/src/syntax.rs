@@ -21,6 +21,47 @@ pub enum Token {
     Label,
     Embedded,
 }
+impl Token {
+    pub const ALL: [Token; 16] = [
+        Token::Keyword,
+        Token::Function,
+        Token::Type,
+        Token::String,
+        Token::Number,
+        Token::Comment,
+        Token::Property,
+        Token::Constant,
+        Token::Operator,
+        Token::Punctuation,
+        Token::Variable,
+        Token::Parameter,
+        Token::Attribute,
+        Token::Namespace,
+        Token::Label,
+        Token::Embedded,
+    ];
+    /// The key a theme's `[syntax]` table uses for this token.
+    pub fn name(self) -> &'static str {
+        match self {
+            Token::Keyword => "keyword",
+            Token::Function => "function",
+            Token::Type => "type",
+            Token::String => "string",
+            Token::Number => "number",
+            Token::Comment => "comment",
+            Token::Property => "property",
+            Token::Constant => "constant",
+            Token::Operator => "operator",
+            Token::Punctuation => "punctuation",
+            Token::Variable => "variable",
+            Token::Parameter => "parameter",
+            Token::Attribute => "attribute",
+            Token::Namespace => "namespace",
+            Token::Label => "label",
+            Token::Embedded => "embedded",
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub struct Span {
     pub bytes: Range<usize>,

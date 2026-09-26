@@ -1,7 +1,8 @@
-//! Shared semantic colors for the interface and diff. This is the main place for visual tuning.
-use diffz_core::palette::{Palette, Rgb};
+//! Shared semantic colors for the interface and diff, converted from the core theme contract.
+use diffz_core::palette::{Mode, Rgb};
 use diffz_core::syntax::Token;
-use gpui_kit::{Hsla, rgb};
+use diffz_core::theme::{SkinSpec, Theme};
+use gpui_kit::Hsla;
 
 fn c(rgb: Rgb) -> Hsla {
     gpui_kit::rgb(((rgb.0 as u32) << 16) | ((rgb.1 as u32) << 8) | rgb.2 as u32).into()
@@ -28,84 +29,40 @@ pub struct Skin {
     pub function: Hsla,
     /// Color used for highlighted types, namespaces, labels, and attributes.
     pub symbol: Hsla,
+    tokens: [Hsla; Token::ALL.len()],
 }
 impl Skin {
     pub fn new(dark: bool) -> Self {
-        if dark {
-            Self {
-                base: rgb(0x151820).into(),
-                surface: rgb(0x1b1f29).into(),
-                raised: rgb(0x262d3b).into(),
-                text: rgb(0xe8eaf0).into(),
-                muted: rgb(0x9ba5b5).into(),
-                border: rgb(0x303848).into(),
-                accent: rgb(0x88b4ff).into(),
-                added: rgb(0x18332a).into(),
-                removed: rgb(0x3c242a).into(),
-                added_word: rgb(0x28583c).into(),
-                removed_word: rgb(0x703845).into(),
-                selection: rgb(0x385678).into(),
-                warning: rgb(0xf0be72).into(),
-                positive: rgb(0x81c995).into(),
-                negative: rgb(0xf28b95).into(),
-                function: rgb(0xd2a8ff).into(),
-                symbol: rgb(0x6fd3c8).into(),
-            }
-        } else {
-            Self {
-                base: rgb(0xfafbfd).into(),
-                surface: rgb(0xf0f3f7).into(),
-                raised: rgb(0xe7edf4).into(),
-                text: rgb(0x1c2633).into(),
-                muted: rgb(0x5a687a).into(),
-                border: rgb(0xcdd7e3).into(),
-                accent: rgb(0x245fbb).into(),
-                added: rgb(0xe1f1e6).into(),
-                removed: rgb(0xfae7e8).into(),
-                added_word: rgb(0xbce0c9).into(),
-                removed_word: rgb(0xf2bfc5).into(),
-                selection: rgb(0xb6d5fa).into(),
-                warning: rgb(0x8c5809).into(),
-                positive: rgb(0x237a45).into(),
-                negative: rgb(0xc73745).into(),
-                function: rgb(0x6f42c1).into(),
-                symbol: rgb(0x0f766e).into(),
-            }
-        }
+        let spec = SkinSpec::builtin(if dark { Mode::Dark } else { Mode::Light });
+        Self::build(&spec, |t| spec.token(t))
     }
-    pub fn from_palette(p: &Palette) -> Skin {
+    pub fn from_theme(theme: &Theme) -> Skin {
+        Self::build(&theme.skin, |t| theme.token(t))
+    }
+    fn build(s: &SkinSpec, token: impl Fn(Token) -> Rgb) -> Skin {
         Skin {
-            base: c(p.background),
-            surface: c(p.lighter_background),
-            raised: c(p.selection),
-            text: c(p.foreground),
-            muted: c(p.dark_foreground),
-            border: c(p.muted),
-            accent: c(p.accent),
-            added: c(p.background.mix(p.green, 0.18)),
-            removed: c(p.background.mix(p.red, 0.18)),
-            added_word: c(p.background.mix(p.green, 0.40)),
-            removed_word: c(p.background.mix(p.red, 0.40)),
-            selection: c(p.selection),
-            warning: c(p.yellow),
-            positive: c(p.green),
-            negative: c(p.red),
-            function: c(p.magenta),
-            symbol: c(p.cyan),
+            base: c(s.base),
+            surface: c(s.surface),
+            raised: c(s.raised),
+            text: c(s.text),
+            muted: c(s.muted),
+            border: c(s.border),
+            accent: c(s.accent),
+            added: c(s.added),
+            removed: c(s.removed),
+            added_word: c(s.added_word),
+            removed_word: c(s.removed_word),
+            selection: c(s.selection),
+            warning: c(s.warning),
+            positive: c(s.positive),
+            negative: c(s.negative),
+            function: c(s.function),
+            symbol: c(s.symbol),
+            tokens: Token::ALL.map(|t| c(token(t))),
         }
     }
     pub fn token(self, t: Token) -> Hsla {
-        match t {
-            Token::Keyword | Token::Operator => self.accent,
-            Token::Function => self.function,
-            Token::Type | Token::Namespace | Token::Attribute | Token::Label | Token::Property => {
-                self.symbol
-            }
-            Token::String => self.positive,
-            Token::Number | Token::Constant => self.warning,
-            Token::Comment | Token::Punctuation => self.muted,
-            Token::Variable | Token::Parameter | Token::Embedded => self.text,
-        }
+        self.tokens[t as usize]
     }
 }
 
@@ -162,5 +119,17 @@ mod tests {
         for token in [Token::Variable, Token::Parameter, Token::Embedded] {
             assert_eq!(skin.token(token), skin.text);
         }
+    }
+
+    #[test]
+    fn theme_syntax_overrides_replace_only_their_token() {
+        let theme = Theme::parse(
+            "[syntax]\ncomment = \"#ff0000\"\n",
+            std::path::Path::new("."),
+        )
+        .unwrap();
+        let skin = Skin::from_theme(&theme);
+        assert_eq!(skin.token(Token::Comment), c(Rgb(255, 0, 0)));
+        assert_eq!(skin.token(Token::Punctuation), skin.muted);
     }
 }
