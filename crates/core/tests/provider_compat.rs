@@ -1,0 +1,170 @@
+//! Golden values for data that outlives a build: serialized remote targets, snapshot
+//! identities, and prepared reviews in the outbox. A provider refactor must keep every
+//! one of these byte-for-byte, or saved reviews stop reopening and publishing.
+//!
+//! The values are the desktop build's, where GPUI enables serde_json's `preserve_order`.
+//! They must hold with and without that feature, so run these tests both ways.
+use diffz_core::domain::*;
+use diffz_core::patch::*;
+use diffz_core::review::*;
+
+const PATCH: &[u8] =
+    b"diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1,2 +1,2 @@\n fn a() {}\n-fn b() {}\n+fn c() {}\n";
+
+fn target(provider: ProviderKind) -> RemoteTarget {
+    RemoteTarget {
+        provider,
+        repository: RepositoryKey {
+            host: "example.com".into(),
+            id: 7,
+            owner: "group/sub".into(),
+            name: "proj".into(),
+        },
+        account: "alice".into(),
+        pr: 12,
+        target_tip: "a".repeat(40),
+        comparison_base: "b".repeat(40),
+        head: "c".repeat(40),
+        open: true,
+        draft: false,
+        pending_review: false,
+    }
+}
+
+fn snapshot(remote: Option<RemoteTarget>) -> Snapshot {
+    Snapshot::new(
+        "golden".into(),
+        parse_patch(PATCH, ParseLimits::default()).unwrap(),
+        remote,
+        vec![],
+    )
+}
+
+fn drafts(s: &Snapshot) -> Vec<Draft> {
+    let draft = |id: &str, line: u32, file_level: bool| Draft {
+        id: DraftId(id.into()),
+        snapshot: s.id.clone(),
+        file: s.patch.files[0].id.clone(),
+        side: Side::Right,
+        start_line: line,
+        line,
+        file_level,
+        body: format!("note {id}"),
+        version: 2,
+        saved_version: 2,
+        published: false,
+    };
+    vec![draft("line", 2, false), draft("file", 0, true)]
+}
+
+fn prepared(provider: ProviderKind, verdict: Verdict) -> PreparedReview {
+    let s = snapshot(Some(target(provider)));
+    let d = drafts(&s);
+    PreparedReview::prepare(
+        OperationId("op-1".into()),
+        &s,
+        d,
+        verdict,
+        "Looks good".into(),
+    )
+    .unwrap()
+}
+
+struct Golden {
+    provider: ProviderKind,
+    target: &'static str,
+    snapshot: &'static str,
+    fingerprint: &'static str,
+    payload: &'static str,
+    stored: &'static str,
+}
+
+const GOLDEN: [Golden; 2] = [
+    Golden {
+        provider: ProviderKind::GitHub,
+        target: r#"{"repository":{"host":"example.com","id":7,"owner":"group/sub","name":"proj"},"account":"alice","pr":12,"target_tip":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison_base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"cccccccccccccccccccccccccccccccccccccccc","open":true,"draft":false,"pending_review":false}"#,
+        snapshot: "10496732008ca98a86a7d8da037e3a6e870132a7c199889b6aa359f633981b09",
+        fingerprint: "77999414d767359bcbe2a892a7a3b19175bf61c405dff58a7b86073f8f312d51",
+        payload: r#"{"commit_id":"cccccccccccccccccccccccccccccccccccccccc","event":"APPROVE","body":"Looks good","comments":[{"path":"src/a.rs","body":"note line","line":2,"side":"RIGHT"},{"path":"src/a.rs","body":"note file","subject_type":"file"}]}"#,
+        stored: r#"{"id":"op-1","snapshot":"10496732008ca98a86a7d8da037e3a6e870132a7c199889b6aa359f633981b09","target":{"repository":{"host":"example.com","id":7,"owner":"group/sub","name":"proj"},"account":"alice","pr":12,"target_tip":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison_base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"cccccccccccccccccccccccccccccccccccccccc","open":true,"draft":false,"pending_review":false},"verdict":"Approve","summary":"Looks good","comments":[{"draft":"line","version":2,"path":"src/a.rs","body":"note line","side":"Right","start_line":2,"line":2,"file_level":false},{"draft":"file","version":2,"path":"src/a.rs","body":"note file","side":"Right","start_line":0,"line":0,"file_level":true}],"fingerprint":"77999414d767359bcbe2a892a7a3b19175bf61c405dff58a7b86073f8f312d51"}"#,
+    },
+    Golden {
+        provider: ProviderKind::GitLab,
+        target: r#"{"provider":"GitLab","repository":{"host":"example.com","id":7,"owner":"group/sub","name":"proj"},"account":"alice","pr":12,"target_tip":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison_base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"cccccccccccccccccccccccccccccccccccccccc","open":true,"draft":false,"pending_review":false}"#,
+        snapshot: "a6222cb117ce23ab6143bdd25d3e090d5d3b977060a9d0e2514eded2e8a2a5b3",
+        fingerprint: "74fcd95c12b41bce8cba95a048f4f52a1e8ef5611e5b0aec434047c21d84a474",
+        payload: r#"{"head":"cccccccccccccccccccccccccccccccccccccccc","verdict":"Approve","summary":"Looks good","comments":[{"draft":"line","version":2,"path":"src/a.rs","gitlab_position":{"position_type":"text","base_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"cccccccccccccccccccccccccccccccccccccccc","old_path":"src/a.rs","new_path":"src/a.rs","new_line":2},"body":"note line","side":"Right","start_line":2,"line":2,"file_level":false},{"draft":"file","version":2,"path":"src/a.rs","gitlab_position":{"position_type":"file","base_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"cccccccccccccccccccccccccccccccccccccccc","old_path":"src/a.rs","new_path":"src/a.rs"},"body":"note file","side":"Right","start_line":0,"line":0,"file_level":true}]}"#,
+        stored: r#"{"id":"op-1","snapshot":"a6222cb117ce23ab6143bdd25d3e090d5d3b977060a9d0e2514eded2e8a2a5b3","target":{"provider":"GitLab","repository":{"host":"example.com","id":7,"owner":"group/sub","name":"proj"},"account":"alice","pr":12,"target_tip":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison_base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"cccccccccccccccccccccccccccccccccccccccc","open":true,"draft":false,"pending_review":false},"verdict":"Approve","summary":"Looks good","comments":[{"draft":"line","version":2,"path":"src/a.rs","gitlab_position":{"position_type":"text","base_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"cccccccccccccccccccccccccccccccccccccccc","old_path":"src/a.rs","new_path":"src/a.rs","new_line":2},"body":"note line","side":"Right","start_line":2,"line":2,"file_level":false},{"draft":"file","version":2,"path":"src/a.rs","gitlab_position":{"position_type":"file","base_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_sha":"cccccccccccccccccccccccccccccccccccccccc","old_path":"src/a.rs","new_path":"src/a.rs"},"body":"note file","side":"Right","start_line":0,"line":0,"file_level":true}],"fingerprint":"74fcd95c12b41bce8cba95a048f4f52a1e8ef5611e5b0aec434047c21d84a474"}"#,
+    },
+];
+
+#[test]
+fn remote_targets_serialize_unchanged() {
+    for g in &GOLDEN {
+        assert_eq!(
+            serde_json::to_string(&target(g.provider)).unwrap(),
+            g.target
+        );
+        let back: RemoteTarget = serde_json::from_str(g.target).unwrap();
+        assert_eq!(back, target(g.provider));
+    }
+}
+
+#[test]
+fn snapshot_identities_are_unchanged() {
+    for g in &GOLDEN {
+        let s = snapshot(Some(target(g.provider)));
+        assert_eq!(s.id.0, g.snapshot, "{:?}", g.provider);
+        assert!(s.verify_identity());
+    }
+    assert_eq!(
+        snapshot(None).id.0,
+        "da739d0505758c0f829ab48a153b2cb75485b0e07f9442e702dcbc8544622ac7"
+    );
+}
+
+#[test]
+fn prepared_reviews_are_unchanged() {
+    for g in &GOLDEN {
+        let r = prepared(g.provider, Verdict::Approve);
+        assert_eq!(r.fingerprint, g.fingerprint, "{:?}", g.provider);
+        let payload: serde_json::Value = serde_json::from_str(g.payload).unwrap();
+        assert_eq!(r.payload(), payload, "{:?}", g.provider);
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            g.stored,
+            "{:?}",
+            g.provider
+        );
+    }
+}
+
+#[test]
+fn stored_outbox_reviews_still_verify() {
+    for g in &GOLDEN {
+        let r: PreparedReview = serde_json::from_str(g.stored).unwrap();
+        assert!(r.verify(), "{:?}", g.provider);
+        assert_eq!(serde_json::to_string(&r).unwrap(), g.stored);
+    }
+}
+
+#[test]
+fn gitlab_rules_still_apply() {
+    let s = snapshot(Some(target(ProviderKind::GitLab)));
+    let op = || OperationId("op".into());
+    assert!(
+        PreparedReview::prepare(op(), &s, vec![], Verdict::RequestChanges, "x".into()).is_err()
+    );
+    assert!(PreparedReview::prepare(op(), &s, vec![], Verdict::Comment, "/merge".into()).is_err());
+    let github = snapshot(Some(target(ProviderKind::GitHub)));
+    assert!(
+        PreparedReview::prepare(
+            op(),
+            &github,
+            vec![],
+            Verdict::RequestChanges,
+            "/merge".into()
+        )
+        .is_ok()
+    );
+}

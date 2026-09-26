@@ -99,12 +99,12 @@ fn gitlab_read_publish_and_history_are_local_mocked() {
     )
     .unwrap();
     assert_eq!(
-        p.comments[0].gitlab_position.as_ref().unwrap()["old_line"],
-        1
+        p.comments[0].gitlab_position.as_ref().unwrap().old_line,
+        Some(1)
     );
     assert_eq!(
-        p.comments[0].gitlab_position.as_ref().unwrap()["new_line"],
-        1
+        p.comments[0].gitlab_position.as_ref().unwrap().new_line,
+        Some(1)
     );
     store.insert_prepared(&p).unwrap();
     let o = Outbox::new(store.clone(), Arc::new(GitlabWriter::new(r)));
