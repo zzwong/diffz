@@ -622,7 +622,7 @@ fn target(
         );
     }
     Ok(RemoteTarget {
-        provider: diffz_core::domain::ProviderKind::GitHub,
+        provider: diffz_core::domain::ProviderId::GITHUB,
         repository: RepositoryKey {
             host: a.host.clone(),
             id: number(m, "/base/repo/id")?,
@@ -690,7 +690,7 @@ impl ReviewRemote for GithubWriter {
         self.reader.review_comments(t, id, Cancellation::default())
     }
     fn send(&self, p: &PreparedReview) -> SendOutcome {
-        if !p.verify() || p.target.provider != ProviderKind::GitHub {
+        if !p.verify() || p.target.provider != ProviderId::GITHUB {
             return SendOutcome::Rejected(422);
         }
         let a = PrAddress::from_target(&p.target);

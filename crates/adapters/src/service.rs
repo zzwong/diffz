@@ -197,17 +197,16 @@ impl WorkbenchServices for Services {
         let _permit = self
             .permit(&cancel)
             .map_err(|e| ServiceError::from(e.to_string()))?;
-        let bytes = match target.provider {
-            ProviderKind::GitHub => self
-                .github
-                .as_ref()
-                .ok_or_else(|| ServiceError::from("gh unavailable"))?
-                .source(target, path, revision),
-            ProviderKind::GitLab => self
-                .gitlab
+        let bytes = if target.provider == ProviderId::GITLAB {
+            self.gitlab
                 .as_ref()
                 .ok_or_else(|| ServiceError::from("glab unavailable"))?
-                .source(target, path, revision),
+                .source(target, path, revision)
+        } else {
+            self.github
+                .as_ref()
+                .ok_or_else(|| ServiceError::from("gh unavailable"))?
+                .source(target, path, revision)
         }
         .map_err(|e| ServiceError::from(e.to_string()))?;
         if bytes.len() > 2 * 1024 * 1024 {
@@ -269,7 +268,7 @@ impl WorkbenchServices for Services {
         Ok(p)
     }
     fn publish(&self, p: PreparedReview) -> std::result::Result<OutboxEntry, ServiceError> {
-        if p.target.provider == ProviderKind::GitLab {
+        if p.target.provider == ProviderId::GITLAB {
             return self
                 .gitlab_outbox
                 .as_ref()
@@ -288,7 +287,7 @@ impl WorkbenchServices for Services {
     }
     fn reconcile(&self, id: OperationId) -> std::result::Result<OutboxEntry, ServiceError> {
         let entry = self.store.operation(&id).map_err(ServiceError::from)?;
-        if entry.prepared.target.provider == ProviderKind::GitLab {
+        if entry.prepared.target.provider == ProviderId::GITLAB {
             let reader = self
                 .gitlab
                 .as_ref()
@@ -322,10 +321,11 @@ impl WorkbenchServices for Services {
     fn writes_enabled(&self) -> bool {
         self.outbox.is_some() || self.gitlab_outbox.is_some()
     }
-    fn writes_enabled_for(&self, provider: ProviderKind) -> bool {
-        match provider {
-            ProviderKind::GitHub => self.outbox.is_some(),
-            ProviderKind::GitLab => self.gitlab_outbox.is_some(),
+    fn writes_enabled_for(&self, provider: &ProviderId) -> bool {
+        if *provider == ProviderId::GITLAB {
+            self.gitlab_outbox.is_some()
+        } else {
+            *provider == ProviderId::GITHUB && self.outbox.is_some()
         }
     }
     fn fresh_id(&self) -> String {

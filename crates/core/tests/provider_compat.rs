@@ -11,7 +11,7 @@ use diffz_core::review::*;
 const PATCH: &[u8] =
     b"diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1,2 +1,2 @@\n fn a() {}\n-fn b() {}\n+fn c() {}\n";
 
-fn target(provider: ProviderKind) -> RemoteTarget {
+fn target(provider: ProviderId) -> RemoteTarget {
     RemoteTarget {
         provider,
         repository: RepositoryKey {
@@ -57,7 +57,7 @@ fn drafts(s: &Snapshot) -> Vec<Draft> {
     vec![draft("line", 2, false), draft("file", 0, true)]
 }
 
-fn prepared(provider: ProviderKind, verdict: Verdict) -> PreparedReview {
+fn prepared(provider: ProviderId, verdict: Verdict) -> PreparedReview {
     let s = snapshot(Some(target(provider)));
     let d = drafts(&s);
     PreparedReview::prepare(
@@ -71,7 +71,7 @@ fn prepared(provider: ProviderKind, verdict: Verdict) -> PreparedReview {
 }
 
 struct Golden {
-    provider: ProviderKind,
+    provider: ProviderId,
     target: &'static str,
     snapshot: &'static str,
     fingerprint: &'static str,
@@ -81,7 +81,7 @@ struct Golden {
 
 const GOLDEN: [Golden; 2] = [
     Golden {
-        provider: ProviderKind::GitHub,
+        provider: ProviderId::GITHUB,
         target: r#"{"repository":{"host":"example.com","id":7,"owner":"group/sub","name":"proj"},"account":"alice","pr":12,"target_tip":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison_base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"cccccccccccccccccccccccccccccccccccccccc","open":true,"draft":false,"pending_review":false}"#,
         snapshot: "10496732008ca98a86a7d8da037e3a6e870132a7c199889b6aa359f633981b09",
         fingerprint: "77999414d767359bcbe2a892a7a3b19175bf61c405dff58a7b86073f8f312d51",
@@ -89,7 +89,7 @@ const GOLDEN: [Golden; 2] = [
         stored: r#"{"id":"op-1","snapshot":"10496732008ca98a86a7d8da037e3a6e870132a7c199889b6aa359f633981b09","target":{"repository":{"host":"example.com","id":7,"owner":"group/sub","name":"proj"},"account":"alice","pr":12,"target_tip":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison_base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"cccccccccccccccccccccccccccccccccccccccc","open":true,"draft":false,"pending_review":false},"verdict":"Approve","summary":"Looks good","comments":[{"draft":"line","version":2,"path":"src/a.rs","body":"note line","side":"Right","start_line":2,"line":2,"file_level":false},{"draft":"file","version":2,"path":"src/a.rs","body":"note file","side":"Right","start_line":0,"line":0,"file_level":true}],"fingerprint":"77999414d767359bcbe2a892a7a3b19175bf61c405dff58a7b86073f8f312d51"}"#,
     },
     Golden {
-        provider: ProviderKind::GitLab,
+        provider: ProviderId::GITLAB,
         target: r#"{"provider":"GitLab","repository":{"host":"example.com","id":7,"owner":"group/sub","name":"proj"},"account":"alice","pr":12,"target_tip":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","comparison_base":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","head":"cccccccccccccccccccccccccccccccccccccccc","open":true,"draft":false,"pending_review":false}"#,
         snapshot: "a6222cb117ce23ab6143bdd25d3e090d5d3b977060a9d0e2514eded2e8a2a5b3",
         fingerprint: "74fcd95c12b41bce8cba95a048f4f52a1e8ef5611e5b0aec434047c21d84a474",
@@ -102,18 +102,18 @@ const GOLDEN: [Golden; 2] = [
 fn remote_targets_serialize_unchanged() {
     for g in &GOLDEN {
         assert_eq!(
-            serde_json::to_string(&target(g.provider)).unwrap(),
+            serde_json::to_string(&target(g.provider.clone())).unwrap(),
             g.target
         );
         let back: RemoteTarget = serde_json::from_str(g.target).unwrap();
-        assert_eq!(back, target(g.provider));
+        assert_eq!(back, target(g.provider.clone()));
     }
 }
 
 #[test]
 fn snapshot_identities_are_unchanged() {
     for g in &GOLDEN {
-        let s = snapshot(Some(target(g.provider)));
+        let s = snapshot(Some(target(g.provider.clone())));
         assert_eq!(s.id.0, g.snapshot, "{:?}", g.provider);
         assert!(s.verify_identity());
     }
@@ -126,7 +126,7 @@ fn snapshot_identities_are_unchanged() {
 #[test]
 fn prepared_reviews_are_unchanged() {
     for g in &GOLDEN {
-        let r = prepared(g.provider, Verdict::Approve);
+        let r = prepared(g.provider.clone(), Verdict::Approve);
         assert_eq!(r.fingerprint, g.fingerprint, "{:?}", g.provider);
         let payload: serde_json::Value = serde_json::from_str(g.payload).unwrap();
         assert_eq!(r.payload(), payload, "{:?}", g.provider);
@@ -150,13 +150,13 @@ fn stored_outbox_reviews_still_verify() {
 
 #[test]
 fn gitlab_rules_still_apply() {
-    let s = snapshot(Some(target(ProviderKind::GitLab)));
+    let s = snapshot(Some(target(ProviderId::GITLAB)));
     let op = || OperationId("op".into());
     assert!(
         PreparedReview::prepare(op(), &s, vec![], Verdict::RequestChanges, "x".into()).is_err()
     );
     assert!(PreparedReview::prepare(op(), &s, vec![], Verdict::Comment, "/merge".into()).is_err());
-    let github = snapshot(Some(target(ProviderKind::GitHub)));
+    let github = snapshot(Some(target(ProviderId::GITHUB)));
     assert!(
         PreparedReview::prepare(
             op(),
@@ -167,4 +167,23 @@ fn gitlab_rules_still_apply() {
         )
         .is_ok()
     );
+}
+
+#[test]
+fn unregistered_providers_round_trip() {
+    let explicit = GOLDEN[0]
+        .target
+        .replacen('{', r#"{"provider":"GitHub","#, 1);
+    let back: RemoteTarget = serde_json::from_str(&explicit).unwrap();
+    assert_eq!(back.provider, ProviderId::GITHUB);
+
+    let gitea = ProviderId::new("Gitea");
+    let json = serde_json::to_string(&target(gitea.clone())).unwrap();
+    assert!(json.starts_with(r#"{"provider":"Gitea","#));
+    let back: RemoteTarget = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.provider, gitea);
+    let s = snapshot(Some(target(gitea)));
+    assert!(s.verify_identity());
+    assert_ne!(s.id.0, GOLDEN[0].snapshot);
+    assert_ne!(s.id.0, GOLDEN[1].snapshot);
 }

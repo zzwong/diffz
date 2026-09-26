@@ -68,7 +68,7 @@ fn gitlab_read_publish_and_history_are_local_mocked() {
     let r = reader(temp.path());
     let a = MrAddress::parse("team/sub/repo!7").unwrap();
     let s = r.snapshot(&a, Cancellation::default()).unwrap();
-    assert_eq!(s.remote.as_ref().unwrap().provider, ProviderKind::GitLab);
+    assert_eq!(s.remote.as_ref().unwrap().provider, ProviderId::GITLAB);
     assert_eq!(s.comments.len(), 2);
     assert_eq!(s.overview.checks.len(), 2);
     assert_eq!(s.overview.conversation.len(), 1);

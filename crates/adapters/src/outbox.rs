@@ -158,7 +158,7 @@ fn same_pr(a: &RemoteTarget, b: &RemoteTarget) -> bool {
         && a.account == b.account
 }
 fn matches_metadata(p: &PreparedReview, r: &Value) -> bool {
-    if p.target.provider == ProviderKind::GitLab
+    if p.target.provider == ProviderId::GITLAB
         && r["fingerprint"].as_str() != Some(p.fingerprint.as_str())
     {
         return false;

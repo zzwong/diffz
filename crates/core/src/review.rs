@@ -120,12 +120,12 @@ impl PreparedReview {
             .remote
             .clone()
             .ok_or_else(|| fail("offline source; a GitHub review target is required"))?;
-        if target.provider == ProviderKind::GitLab && verdict == Verdict::RequestChanges {
+        if target.provider == ProviderId::GITLAB && verdict == Verdict::RequestChanges {
             return Err(fail(
                 "GitLab permits comments and approval; blocking change requests remain unsupported",
             ));
         }
-        if target.provider == ProviderKind::GitLab
+        if target.provider == ProviderId::GITLAB
             && (summary.lines().any(|l| l.trim_start().starts_with('/'))
                 || drafts
                     .iter()
@@ -184,7 +184,7 @@ impl PreparedReview {
                 ));
             }
             let path = f.path().utf8().map_err(ReviewError)?.to_owned();
-            let gitlab_position = if target.provider == ProviderKind::GitLab {
+            let gitlab_position = if target.provider == ProviderId::GITLAB {
                 let old = f
                     .old_path
                     .as_ref()
@@ -255,7 +255,7 @@ impl PreparedReview {
         serde_json::to_value(self.payload_repr()).expect("plain serializable review payload")
     }
     fn payload_repr(&self) -> Payload<'_> {
-        if self.target.provider == ProviderKind::GitLab {
+        if self.target.provider == ProviderId::GITLAB {
             return Payload::GitLab {
                 head: &self.target.head,
                 verdict: self.verdict,

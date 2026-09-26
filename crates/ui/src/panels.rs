@@ -492,7 +492,7 @@ impl Workbench {
                     .active
                     .as_ref()
                     .and_then(|a| a.snapshot.remote.as_ref())
-                    .is_some_and(|t| t.provider == diffz_core::domain::ProviderKind::GitLab);
+                    .is_some_and(|t| t.provider == diffz_core::domain::ProviderId::GITLAB);
                 if gitlab {
                     card=card.child("GitLab accepts comments and approval. Choose one source line for each inline draft.");
                 }
@@ -594,19 +594,19 @@ impl Workbench {
                             .cursor_pointer()
                             .primary()
                             .label(
-                                if p.target.provider == diffz_core::domain::ProviderKind::GitLab {
+                                if p.target.provider == diffz_core::domain::ProviderId::GITLAB {
                                     "Send this review unchanged to GitLab"
                                 } else {
                                     "Send this review unchanged to GitHub"
                                 },
                             )
                             .disabled(
-                                self.busy || !self.services.writes_enabled_for(p.target.provider),
+                                self.busy || !self.services.writes_enabled_for(&p.target.provider),
                             )
                             .on_click(cx.listener(|a, _, _, c| a.publish(c))),
                     );
-                    if !self.services.writes_enabled_for(p.target.provider) {
-                        card=card.child(if p.target.provider==diffz_core::domain::ProviderKind::GitLab {"GitLab publication is off. Relaunch with --allow-gitlab-writes to confirm and publish."}else{"GitHub publication is off. Relaunch with --allow-github-writes to confirm and publish."});
+                    if !self.services.writes_enabled_for(&p.target.provider) {
+                        card=card.child(if p.target.provider==diffz_core::domain::ProviderId::GITLAB {"GitLab publication is off. Relaunch with --allow-gitlab-writes to confirm and publish."}else{"GitHub publication is off. Relaunch with --allow-github-writes to confirm and publish."});
                     }
                 }
             }

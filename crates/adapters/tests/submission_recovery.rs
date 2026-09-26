@@ -36,7 +36,7 @@ fn setup() -> (tempfile::TempDir, Arc<Store>, Arc<Fake>, PreparedReview) {
     let temp = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::open(temp.path()).unwrap());
     let t = RemoteTarget {
-        provider: diffz_core::domain::ProviderKind::GitHub,
+        provider: diffz_core::domain::ProviderId::GITHUB,
         repository: RepositoryKey {
             host: "github.com".into(),
             id: 1,
