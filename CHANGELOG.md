@@ -7,8 +7,17 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-26
+
 ### Added
 
+- Extensions can provide WebAssembly tree-sitter grammars, highlight queries,
+  themes, and sandboxed component annotators. `diffz --doctor` checks extension
+  manifests and compiles their grammars and components.
+- A `theme.toml` can override the app's skin colours and syntax tokens while
+  extending an existing palette. Existing `colors.toml` themes still work.
+- Built-in checks flag conflict markers and whitespace errors. Annotations
+  appear in the gutter, file tree, line panel, and review overview.
 - Hovering the file-tree toggle, or resting the pointer against the window's
   left edge, while the file panel is collapsed floats the panel over the diff,
   so a file can be picked without pinning the panel back open. It stays while
@@ -24,6 +33,12 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Review providers, languages, themes, and annotators use registries and typed
+  contracts. Existing GitHub and GitLab review data and payloads remain
+  compatible across builds.
+- Stored snapshots are compressed and limited to the 50 most recently used,
+  while snapshots needed by pending drafts or outbox entries are retained.
+- GitHub pull request parts are fetched concurrently when opening a review.
 - The status line keeps its room in the footer. Instead of a fixed strip of up
   to twelve key hints, which clipped mid-word and pushed the status text, the
   outbox, and the theme buttons off screen below about 1150 pixels, the footer
@@ -37,6 +52,7 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A launch that cannot create a native window now exits with a failure status.
 - The rich prose view now shows the same scrollbar as the source view: a thumb
   appears along the right edge while scrolling, reports how far through the file
   the reader is, and can be dragged. Markdown files previously scrolled with no
