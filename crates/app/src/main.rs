@@ -227,6 +227,30 @@ fn run() -> Result<()> {
                     .unwrap_or_else(|e| format!("missing ({e})"))
             ));
         }
+        let registry = diffz_core::registry::Registry::installed();
+        report.push_str(&format!(
+            "extension contract: {}.{} wasm_feature={}\n",
+            diffz_core::extension::CONTRACT.0,
+            diffz_core::extension::CONTRACT.1,
+            cfg!(feature = "wasm")
+        ));
+        for ext in registry.extensions() {
+            report.push_str(&format!(
+                "extension {} {}: {} languages, {} themes ({})\n",
+                ext.id,
+                ext.version,
+                ext.languages.len(),
+                ext.themes.len(),
+                ext.dir.display()
+            ));
+        }
+        for problem in registry
+            .problems()
+            .iter()
+            .chain(&registry.check_extensions())
+        {
+            report.push_str(&format!("extension problem: {problem}\n"));
+        }
         report.push_str("This report implies no native runtime and no credential capability.");
         return print(&report);
     }
@@ -263,12 +287,18 @@ fn run() -> Result<()> {
         return print(&serde_json::to_string_pretty(&opened.snapshot)?);
     }
     #[cfg(feature = "desktop")]
+    let registry = diffz_core::registry::Registry::installed();
+    #[cfg(feature = "desktop")]
+    for problem in registry.problems() {
+        eprintln!("diffz: extension skipped: {problem}");
+    }
+    #[cfg(feature = "desktop")]
     {
         if diffz_ui::launch(
             services,
             diffz_ui::LaunchOptions {
                 initial: options.request,
-                registry: std::sync::Arc::new(diffz_core::registry::Registry::builtin()),
+                registry: std::sync::Arc::new(registry),
                 font_family: desktop_font(options.font)?,
                 theme: options.theme,
             },

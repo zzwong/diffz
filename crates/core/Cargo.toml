@@ -19,6 +19,7 @@ serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 unicode-segmentation = { workspace = true }
+toml = { workspace = true }
 
 [features]
 default = []
@@ -44,12 +45,14 @@ syntax = [
     "dep:tree-sitter-heex",
     "dep:tree-sitter-gleam",
 ]
+# Builds wasmtime, which needs cmake.
+wasm = ["syntax", "tree-sitter/wasm"]
 
 [dependencies.tree-sitter]
-version = "0.25"
+version = "0.27"
 optional = true
 [dependencies.tree-sitter-highlight]
-version = "0.25"
+version = "0.27"
 optional = true
 [dependencies.tree-sitter-rust]
 version = "0.24"

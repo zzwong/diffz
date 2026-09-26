@@ -67,6 +67,8 @@ pub struct Span {
     pub token: Token,
 }
 pub struct BuiltinGrammars;
+#[cfg(feature = "wasm")]
+pub use enabled::WasmGrammar;
 
 impl LanguageProvider for BuiltinGrammars {
     fn claim(&self, path: &str) -> Option<(&str, u8)> {
@@ -396,9 +398,17 @@ mod enabled {
 
     pub fn run(path: &str, source: &str, cancel: &AtomicUsize) -> Option<Vec<Vec<Span>>> {
         let config = language_for_path(path)?.config();
-        let mut highlighter = Highlighter::new();
+        spans(&mut Highlighter::new(), config, source, cancel)
+    }
+
+    fn spans(
+        highlighter: &mut Highlighter,
+        config: &HighlightConfiguration,
+        source: &str,
+        cancel: &AtomicUsize,
+    ) -> Option<Vec<Vec<Span>>> {
         let events = highlighter
-            .highlight(config, source.as_bytes(), Some(cancel), |_| None)
+            .highlight(config, source.as_bytes(), None, Some(cancel), |_| None)
             .ok()?;
         let bytes = source.as_bytes();
         let newlines: Vec<usize> = bytes
@@ -463,6 +473,86 @@ mod enabled {
             cursor = bounds[line + 1].0;
             line += 1;
         }
+    }
+
+    #[cfg(feature = "wasm")]
+    pub struct WasmGrammar {
+        name: String,
+        wasm: std::path::PathBuf,
+        queries: std::path::PathBuf,
+        config: OnceLock<Result<HighlightConfiguration, String>>,
+    }
+
+    #[cfg(feature = "wasm")]
+    impl WasmGrammar {
+        pub fn new(name: String, wasm: std::path::PathBuf, queries: std::path::PathBuf) -> Self {
+            Self {
+                name,
+                wasm,
+                queries,
+                config: OnceLock::new(),
+            }
+        }
+
+        pub fn compile(&self) -> Result<&HighlightConfiguration, String> {
+            self.config
+                .get_or_init(|| {
+                    let bytes = std::fs::read(&self.wasm)
+                        .map_err(|e| format!("cannot read {}: {e}", self.wasm.display()))?;
+                    let language = new_store()?
+                        .load_language(&self.name, &bytes)
+                        .map_err(|e| format!("{}: {e:?}", self.wasm.display()))?;
+                    let query = |file: &str, required: bool| {
+                        let path = self.queries.join(file);
+                        match std::fs::read_to_string(&path) {
+                            Ok(text) => Ok(text),
+                            Err(_) if !required => Ok(String::new()),
+                            Err(e) => Err(format!("cannot read {}: {e}", path.display())),
+                        }
+                    };
+                    let mut config = HighlightConfiguration::new(
+                        language,
+                        &self.name,
+                        &query("highlights.scm", true)?,
+                        &query("injections.scm", false)?,
+                        &query("locals.scm", false)?,
+                    )
+                    .map_err(|e| format!("{}: {e}", self.queries.display()))?;
+                    config.configure(recognized_names());
+                    Ok(config)
+                })
+                .as_ref()
+                .map_err(Clone::clone)
+        }
+
+        pub fn highlight(&self, source: &str, cancel: &AtomicUsize) -> Option<Vec<Vec<Span>>> {
+            let config = self.compile().ok()?;
+            let pooled = HIGHLIGHTERS.lock().ok()?.pop();
+            let mut highlighter = match pooled {
+                Some(h) => h,
+                None => {
+                    let mut h = Highlighter::new();
+                    h.parser().set_wasm_store(new_store().ok()?).ok()?;
+                    h
+                }
+            };
+            let lines = spans(&mut highlighter, config, source, cancel);
+            if let Ok(mut pool) = HIGHLIGHTERS.lock() {
+                pool.push(highlighter);
+            }
+            lines
+        }
+    }
+
+    // A store costs about 18 ms to create and highlighting runs per hunk side, so reuse them.
+    #[cfg(feature = "wasm")]
+    static HIGHLIGHTERS: std::sync::Mutex<Vec<Highlighter>> = std::sync::Mutex::new(Vec::new());
+
+    #[cfg(feature = "wasm")]
+    fn new_store() -> Result<tree_sitter::WasmStore, String> {
+        static ENGINE: OnceLock<tree_sitter::wasmtime::Engine> = OnceLock::new();
+        let engine = ENGINE.get_or_init(tree_sitter::wasmtime::Engine::default);
+        tree_sitter::WasmStore::new(engine).map_err(|e| format!("{e:?}"))
     }
 }
 #[cfg(all(test, feature = "syntax"))]

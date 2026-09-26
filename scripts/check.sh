@@ -10,6 +10,7 @@ cargo test --locked -p diffz-core
 cargo test --locked -p diffz-adapters
 cargo test --locked -p diffz --no-default-features
 cargo test --locked -p diffz-core --features syntax
+cargo test --locked -p diffz-core --features wasm
 cargo clippy --locked -p diffz-core -p diffz-adapters -p diffz --no-default-features --all-targets -- -D warnings
 if [[ "$mode" == native ]]; then
   cargo test --locked --workspace --all-features

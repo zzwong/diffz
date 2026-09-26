@@ -73,8 +73,10 @@ for distribution dependencies and Fedora, Arch Linux, and Omarchy packages.
 Windows is not supported.
 
 You need a Rust toolchain installed through [rustup](https://rustup.rs); it
-reads the pinned version from `rust-toolchain.toml` on its own. Install `gh` or
-`glab` too if you plan to look at pull requests or merge requests.
+reads the pinned version from `rust-toolchain.toml` on its own. You also need
+CMake, which builds the WebAssembly runtime for extension grammars, or build with
+`--no-default-features --features desktop,syntax` to leave extension grammars out.
+Install `gh` or `glab` too if you plan to look at pull requests or merge requests.
 
 ```sh
 git clone https://github.com/zzwong/diffz

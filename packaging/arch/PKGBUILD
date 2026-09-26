@@ -9,7 +9,7 @@ license=('MIT')
 depends=('gcc-libs' 'glibc' 'fontconfig' 'libxcb' 'libxkbcommon'
          'libxkbcommon-x11' 'libx11' 'libxcursor' 'libxi' 'wayland'
          'vulkan-icd-loader' 'openssl' 'zstd' 'hicolor-icon-theme' 'ttf-dejavu')
-makedepends=('rust>=1.98' 'desktop-file-utils' 'appstream')
+makedepends=('rust>=1.98' 'cmake' 'desktop-file-utils' 'appstream')
 checkdepends=('git')
 optdepends=('xdg-utils: open review links in a browser'
             'git: compare local repositories'

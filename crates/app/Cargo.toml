@@ -21,9 +21,10 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 
 [features]
-default = ["desktop", "syntax"]
+default = ["desktop", "syntax", "wasm"]
 desktop = ["dep:diffz-ui"]
 syntax = ["diffz-core/syntax", "diffz-ui?/syntax"]
+wasm = ["syntax", "diffz-core/wasm"]
 
 [[bin]]
 name = "diffz"

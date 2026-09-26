@@ -1,4 +1,8 @@
-use crate::{palette, syntax::Span};
+use crate::{
+    extension::{self, Extension, ExtensionLanguage, ExtensionThemes, Installed},
+    palette,
+    syntax::Span,
+};
 use std::{
     env,
     path::{Path, PathBuf},
@@ -31,6 +35,8 @@ pub trait ThemeSource: Send + Sync {
 pub struct Registry {
     languages: Vec<Arc<dyn LanguageProvider>>,
     themes: Vec<Arc<dyn ThemeSource>>,
+    extensions: Vec<(Extension, Vec<Arc<ExtensionLanguage>>)>,
+    problems: Vec<String>,
 }
 
 impl Registry {
@@ -40,6 +46,52 @@ impl Registry {
         registry.add_theme_source(Arc::new(palette::OmarchyCurrent));
         registry.add_theme_source(Arc::new(palette::ThemeDirectories(palette::theme_dirs())));
         registry
+    }
+
+    pub fn installed() -> Self {
+        let mut registry = Self::builtin();
+        registry.add_extensions(extension::discover(&extension::extension_dirs()));
+        registry
+    }
+
+    pub fn add_extensions(&mut self, installed: Installed) {
+        self.problems.extend(installed.problems);
+        let mut themes = vec![];
+        for ext in installed.extensions {
+            let languages: Vec<_> = ext
+                .languages
+                .iter()
+                .map(|l| Arc::new(ExtensionLanguage::new(l)))
+                .collect();
+            for language in &languages {
+                self.languages.push(language.clone());
+            }
+            themes.extend(ext.themes.iter().cloned());
+            self.extensions.push((ext, languages));
+        }
+        if !themes.is_empty() {
+            self.add_theme_source(Arc::new(ExtensionThemes(themes)));
+        }
+    }
+
+    pub fn extensions(&self) -> impl Iterator<Item = &Extension> {
+        self.extensions.iter().map(|(ext, _)| ext)
+    }
+
+    pub fn problems(&self) -> &[String] {
+        &self.problems
+    }
+
+    pub fn check_extensions(&self) -> Vec<String> {
+        let mut out = vec![];
+        for (ext, languages) in &self.extensions {
+            for (language, provider) in ext.languages.iter().zip(languages) {
+                if let Err(e) = provider.check() {
+                    out.push(format!("{}: {}: {e}", ext.id, language.name));
+                }
+            }
+        }
+        out
     }
 
     pub fn add_language(&mut self, provider: Arc<dyn LanguageProvider>) {
