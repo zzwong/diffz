@@ -1,6 +1,6 @@
 # Build from the authenticated checkout with scripts/package-arch.sh.
 pkgname=diffz
-pkgver=0.1.2
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Desktop diff and patch viewer'
 arch=('x86_64')
@@ -17,9 +17,9 @@ optdepends=('xdg-utils: open review links in a browser'
             'glab: load GitLab merge requests'
             'vulkan-driver: GPU rendering (choose the driver for your hardware)')
 # A fixed application source snapshot is exported from this checkout.
-_commit=11cb3a4dc065e1c5135b23ddbe725bc75373e6e4
+_commit=dd4a002cb8bc740321f0d6c77feb70638d0fdde7
 source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('4bd6bb9e632d9760552b571994cba10156f8da00d62c3a9d70fb4cb76bf16fde')
+sha256sums=('623e1db9c8b0cec12359a2c0e7c7c6489714165708477b43a60e6e1a8b1df65c')
 # Cargo.toml owns LTO and strips symbols, so makepkg's debug option would only
 # compile debuginfo that is discarded; retain makepkg's other build policies.
 options=('!lto' '!debug')
