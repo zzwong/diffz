@@ -82,7 +82,7 @@ impl Workbench {
                         return;
                     }
                     let filter = this.filter_input.read(cx).focus_handle(cx);
-                    if this.tree_focus.contains_focused(window, cx)
+                    if this.browser.focus.contains_focused(window, cx)
                         || filter.contains_focused(window, cx)
                     {
                         this.diff_focus.focus(window, cx);

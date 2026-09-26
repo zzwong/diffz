@@ -151,7 +151,7 @@ impl Workbench {
             cx.stop_propagation();
             return;
         }
-        if self.tree_focus.is_focused(window) {
+        if self.browser.focus.is_focused(window) {
             // The filter input sits inside the tree's key context, so a bound `?`
             // there would swallow the character while a filter is being typed.
             if key == "?" {
@@ -161,34 +161,35 @@ impl Workbench {
             }
             match key {
                 "down" => {
-                    self.tree_cursor =
-                        (self.tree_cursor + 1).min(self.tree_rows.len().saturating_sub(1))
+                    self.browser.cursor =
+                        (self.browser.cursor + 1).min(self.browser.rows.len().saturating_sub(1))
                 }
-                "up" => self.tree_cursor = self.tree_cursor.saturating_sub(1),
-                "home" => self.tree_cursor = 0,
-                "end" => self.tree_cursor = self.tree_rows.len().saturating_sub(1),
-                "enter" => self.activate_tree(self.tree_cursor, window, cx, true),
+                "up" => self.browser.cursor = self.browser.cursor.saturating_sub(1),
+                "home" => self.browser.cursor = 0,
+                "end" => self.browser.cursor = self.browser.rows.len().saturating_sub(1),
+                "enter" => self.activate_tree(self.browser.cursor, window, cx, true),
                 "right" | "left" => {
-                    if let Some(row) = self.tree_rows.get(self.tree_cursor).cloned() {
+                    if let Some(row) = self.browser.rows.get(self.browser.cursor).cloned() {
                         if row.file.is_none() && row.expanded == (key == "left") {
-                            self.activate_tree(self.tree_cursor, window, cx, false);
+                            self.activate_tree(self.browser.cursor, window, cx, false);
                         } else if key == "left" && row.depth > 0 {
-                            if let Some(i) = (0..self.tree_cursor)
+                            if let Some(i) = (0..self.browser.cursor)
                                 .rev()
-                                .find(|&i| self.tree_rows[i].depth < row.depth)
+                                .find(|&i| self.browser.rows[i].depth < row.depth)
                             {
-                                self.tree_cursor = i;
+                                self.browser.cursor = i;
                             }
                         } else if key == "right" {
-                            self.tree_cursor =
-                                (self.tree_cursor + 1).min(self.tree_rows.len().saturating_sub(1));
+                            self.browser.cursor = (self.browser.cursor + 1)
+                                .min(self.browser.rows.len().saturating_sub(1));
                         }
                     }
                 }
                 "space" => {
                     if let Some(id) = self
-                        .tree_rows
-                        .get(self.tree_cursor)
+                        .browser
+                        .rows
+                        .get(self.browser.cursor)
                         .and_then(|r| r.file.clone())
                     {
                         self.select_file(id, cx);
@@ -197,7 +198,7 @@ impl Workbench {
                 }
                 _ => return,
             }
-            self.file_list.scroll_to_reveal_item(self.tree_cursor);
+            self.browser.list.scroll_to_reveal_item(self.browser.cursor);
             cx.stop_propagation();
             cx.notify();
             return;

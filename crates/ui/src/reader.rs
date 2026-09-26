@@ -77,23 +77,24 @@ impl Workbench {
     pub(crate) fn turn_file(&mut self, direction: i8, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.viewport.as_ref().map(|v| v.borrow().file.clone());
         let Some(at) = self
+            .browser
             .visible_files
             .iter()
             .position(|id| Some(id) == current.as_ref())
         else {
             return;
         };
-        let next = adjacent_file_index(at, self.visible_files.len(), direction > 0);
+        let next = adjacent_file_index(at, self.browser.visible_files.len(), direction > 0);
         let Some(next) = next else {
             self.status = "End of the changed-file list".into();
             return;
         };
-        self.select_file(self.visible_files[next].clone(), cx);
+        self.select_file(self.browser.visible_files[next].clone(), cx);
         if let Some(v) = &self.viewport {
             v.borrow_mut().jump_edge(direction < 0);
         }
         self.diff_focus.focus(window, cx);
-        self.status = format!("File {} of {}", next + 1, self.visible_files.len());
+        self.status = format!("File {} of {}", next + 1, self.browser.visible_files.len());
     }
     /// Supply the wheel movement and whether the view is at a content boundary
     /// before deciding whether edge scrolling should begin.
@@ -222,10 +223,7 @@ impl Workbench {
                 .map(|d| (d.side, d.line))
                 .collect();
         }
-        v.borrow_mut().pull = (
-            self.boundary_scroll.pulling(),
-            self.boundary_scroll.progress(),
-        );
+        v.borrow_mut().pull = self.gesture.pull();
         let measure = v.clone();
         let paint = v.clone();
         let skin = self.skin();

@@ -14,6 +14,50 @@ const CLIENT_INERTIA: bool = !cfg!(target_os = "macos");
 /// separate, deliberate gesture at a file edge.
 const FRESH_GAP: Duration = Duration::from_millis(350);
 
+pub(crate) struct GestureState {
+    boundary: diffz_core::scroll::BoundaryScroll,
+    last_wheel: Option<Instant>,
+    kinetic: diffz_core::scroll::Kinetic,
+    active: bool,
+    lift_task: Option<Task<()>>,
+    coast_ticking: bool,
+    epoch: Instant,
+}
+
+impl Default for GestureState {
+    fn default() -> Self {
+        Self {
+            boundary: Default::default(),
+            last_wheel: None,
+            kinetic: Default::default(),
+            active: false,
+            lift_task: None,
+            coast_ticking: false,
+            epoch: Instant::now(),
+        }
+    }
+}
+
+impl GestureState {
+    pub(crate) fn pull(&self) -> (i8, f32) {
+        (self.boundary.pulling(), self.boundary.progress())
+    }
+
+    pub(crate) fn reset_boundary(&mut self) {
+        self.boundary = Default::default();
+    }
+
+    fn now_ms(&self) -> f64 {
+        self.epoch.elapsed().as_secs_f64() * 1000.
+    }
+
+    pub(crate) fn cancel(&mut self) {
+        self.kinetic.cancel();
+        self.active = false;
+        self.lift_task = None;
+    }
+}
+
 /// The view a wheel event or coast step applies to.
 pub(crate) enum ScrollTarget {
     Source,
@@ -21,9 +65,6 @@ pub(crate) enum ScrollTarget {
 }
 
 impl Workbench {
-    fn now_ms(&self) -> f64 {
-        self.gesture_epoch.elapsed().as_secs_f64() * 1000.
-    }
     /// Both views route their `on_scroll_wheel` here.
     pub(crate) fn wheel(
         &mut self,
@@ -49,7 +90,7 @@ impl Workbench {
             ScrollDelta::Lines(p) => (p.x * font * 1.4, p.y * font * 1.4, false),
         };
         let now = Instant::now();
-        let now_ms = self.now_ms();
+        let now_ms = self.gesture.now_ms();
         // libinput reports a zero delta when the finger leaves the pad, and the compositor
         // forwards it just before `axis_stop`; GPUI drops the stop but passes the zero.
         let lifted = matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled)
@@ -61,20 +102,21 @@ impl Workbench {
         // A new gesture: the platform says so, or the previous one ended a while ago. The
         // gap matters on macOS too, where the system's own momentum events follow `Ended`.
         let fresh = event.touch_phase == TouchPhase::Started
-            || (!self.gesture_active
+            || (!self.gesture.active
                 && self
+                    .gesture
                     .last_wheel
                     .is_none_or(|last| now.duration_since(last) > FRESH_GAP));
-        self.last_wheel = Some(now);
-        self.gesture_active = true;
+        self.gesture.last_wheel = Some(now);
+        self.gesture.active = true;
         if precise && CLIENT_INERTIA {
-            self.kinetic.finger(now_ms, -y);
+            self.gesture.kinetic.finger(now_ms, -y);
         } else {
-            self.kinetic.cancel();
+            self.gesture.kinetic.cancel();
         }
         self.show_scrollbars(cx);
         // The lift may never be reported (X11, other compositors); a silence decides it.
-        self.gesture_task = Some(cx.spawn_in(window, async move |this, cx| {
+        self.gesture.lift_task = Some(cx.spawn_in(window, async move |this, cx| {
             smol::Timer::after(Duration::from_millis(LIFT_GAP_MS as u64)).await;
             let _ = this.update_in(cx, |this, window, cx| this.finger_lifted(window, cx));
         }));
@@ -91,9 +133,9 @@ impl Workbench {
                     Workbench::edge_of(-y, start, end)
                 }
             };
-            turn = self.boundary_scroll.update(edge, -y, fresh);
+            turn = self.gesture.boundary.update(edge, -y, fresh);
             if edge != 0 {
-                self.status = edge_status(edge, self.boundary_scroll.progress()).into();
+                self.status = edge_status(edge, self.gesture.boundary.progress()).into();
             }
         }
         match target {
@@ -108,7 +150,7 @@ impl Workbench {
             ScrollTarget::Rich(_) => {}
         }
         if let Some(direction) = turn {
-            self.kinetic.cancel();
+            self.gesture.kinetic.cancel();
             self.turn_file(direction, window, cx);
         }
         cx.stop_propagation();
@@ -117,46 +159,46 @@ impl Workbench {
     /// The gesture ended: start coasting when the release was fast, drop any pull in
     /// progress, and persist the position.
     fn finger_lifted(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.gesture_task = None;
-        if !self.gesture_active {
+        self.gesture.lift_task = None;
+        if !self.gesture.active {
             return;
         }
-        self.gesture_active = false;
-        self.boundary_scroll.release();
-        let now_ms = self.now_ms();
-        if CLIENT_INERTIA && self.kinetic.lift(now_ms) {
+        self.gesture.active = false;
+        self.gesture.boundary.release();
+        let now_ms = self.gesture.now_ms();
+        if CLIENT_INERTIA && self.gesture.kinetic.lift(now_ms) {
             if diffz_core::timing::scroll_trace() {
                 eprintln!("diffz-scroll coast t={}", diffz_core::timing::trace_us());
             }
             self.start_coast(window, cx);
         } else {
-            self.kinetic.cancel();
+            self.gesture.kinetic.cancel();
             self.scroll_settled(cx);
         }
         cx.notify();
     }
     /// Advance the coast once per frame until it stops or meets an edge.
     fn start_coast(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.coast_ticking {
+        if self.gesture.coast_ticking {
             return;
         }
-        self.coast_ticking = true;
+        self.gesture.coast_ticking = true;
         cx.on_next_frame(window, |this, window, cx| this.coast_tick(window, cx));
     }
     fn coast_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let now_ms = self.now_ms();
-        if let Some(step) = self.kinetic.tick(now_ms)
+        let now_ms = self.gesture.now_ms();
+        if let Some(step) = self.gesture.kinetic.tick(now_ms)
             && step != 0.
             && !self.apply_coast_step(step)
         {
             // The coast met an edge: stop there and let the next gesture pull.
-            self.kinetic.cancel();
-            self.boundary_scroll.arm(if step > 0. { 1 } else { -1 });
+            self.gesture.kinetic.cancel();
+            self.gesture.boundary.arm(if step > 0. { 1 } else { -1 });
         }
-        if self.kinetic.coasting() {
+        if self.gesture.kinetic.coasting() {
             cx.on_next_frame(window, |this, window, cx| this.coast_tick(window, cx));
         } else {
-            self.coast_ticking = false;
+            self.gesture.coast_ticking = false;
             self.scroll_settled(cx);
         }
         cx.notify();
@@ -194,7 +236,7 @@ impl Workbench {
                 smol::Timer::after(Duration::from_millis(700)).await;
                 let done = this
                     .update(cx, |this, cx| {
-                        if this.scrollbar_drag || this.horizontal_drag || this.gesture_active {
+                        if this.scrollbar_drag || this.horizontal_drag || this.gesture.active {
                             return false;
                         }
                         if let Some(v) = &this.viewport {
@@ -223,9 +265,7 @@ impl Workbench {
     }
     /// Stop any coast and forget the gesture, e.g. when the file changes under it.
     pub(crate) fn cancel_scroll_gesture(&mut self) {
-        self.kinetic.cancel();
-        self.gesture_active = false;
-        self.gesture_task = None;
+        self.gesture.cancel();
     }
 }
 

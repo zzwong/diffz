@@ -127,30 +127,30 @@ impl Workbench {
         cx: &mut Context<Self>,
         focus_source: bool,
     ) {
-        let Some(row) = self.tree_rows.get(index).cloned() else {
+        let Some(row) = self.browser.rows.get(index).cloned() else {
             return;
         };
-        self.tree_cursor = index;
+        self.browser.cursor = index;
         if let Some(id) = row.file {
             self.select_file(id, cx);
             if focus_source {
                 self.diff_focus.focus(window, cx);
             }
         } else {
-            if !self.collapsed_dirs.remove(&row.path) {
-                self.collapsed_dirs.insert(row.path);
+            if !self.browser.collapsed.remove(&row.path) {
+                self.browser.collapsed.insert(row.path);
             }
             self.filter_files(cx);
-            self.tree_focus.focus(window, cx);
+            self.browser.focus.focus(window, cx);
         }
         cx.notify();
     }
     pub(crate) fn files(&self, cx: &mut Context<Self>) -> AnyElement {
-        let rows = self.tree_rows.clone();
+        let rows = self.browser.rows.clone();
         let selected = self.viewport.as_ref().map(|v| v.borrow().file.clone());
         let entity = cx.entity();
         let skin = self.skin();
-        let cursor = self.tree_cursor;
+        let cursor = self.browser.cursor;
         let snapshot = self.active.as_ref().map(|a| a.snapshot.clone());
         let viewed = self
             .active
@@ -171,11 +171,16 @@ impl Workbench {
                 .or_insert((0, n.severity));
             *slot = (slot.0 + 1, slot.1.max(n.severity));
         }
-        let visible_ids: Vec<String> = self.visible_files.iter().map(|id| id.0.clone()).collect();
+        let visible_ids: Vec<String> = self
+            .browser
+            .visible_files
+            .iter()
+            .map(|id| id.0.clone())
+            .collect();
         let (done, total) = diffz_core::review_details::reviewed_progress(&viewed, &visible_ids);
         div()
             .id("file-tree")
-            .track_focus(&self.tree_focus)
+            .track_focus(&self.browser.focus)
             .tab_stop(true)
             .key_context("WorkbenchTree")
             .aria_label(
@@ -231,7 +236,7 @@ impl Workbench {
                     .child(Input::new(&self.filter_input).small()),
             )
             .child(
-                list(self.file_list.clone(), move |index, _, _| {
+                list(self.browser.list.clone(), move |index, _, _| {
                     let Some(row) = rows.get(index) else {
                         return div().into_any_element();
                     };
@@ -848,7 +853,7 @@ impl Workbench {
         } else {
             footer_hints(HintContext {
                 source_open: self.active.is_some(),
-                tree_focused: self.tree_focus.is_focused(window),
+                tree_focused: self.browser.focus.is_focused(window),
                 find_focused: self.find_visible
                     && (self.find_input.read(cx).focus_handle(cx).is_focused(window)
                         || self.find_next_focus.contains_focused(window, cx)),
