@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 pub mod anchor;
+pub mod annotation;
 pub mod domain;
 pub mod export;
 pub mod extension;

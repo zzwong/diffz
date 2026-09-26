@@ -159,6 +159,8 @@ pub(crate) struct Workbench {
     pub open_generation: u64,
     pub open_cancel: Cancellation,
     highlight_cancel: Arc<std::sync::atomic::AtomicUsize>,
+    pub annotations: Arc<Vec<diffz_core::annotation::Annotation>>,
+    annotate_cancel: Cancellation,
     pub save_tasks: HashMap<DraftId, Task<()>>,
     pub view_task: Option<Task<()>>,
     pub tree_rows: Arc<Vec<diffz_core::file_tree::TreeRow>>,
@@ -366,6 +368,8 @@ impl Workbench {
             open_generation: 0,
             open_cancel: Cancellation::default(),
             highlight_cancel: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            annotations: Arc::default(),
+            annotate_cancel: Cancellation::default(),
             save_tasks: HashMap::new(),
             view_task: None,
             tree_rows: Arc::new(vec![]),
@@ -471,10 +475,12 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         self.panel = Panel::None;
         self.search_hits.clear();
         self.drag_start = None;
+        self.annotations = Arc::default();
         self.filter_files(cx);
         if let Some(id) = selected {
             self.select_file(id, cx)
         }
+        self.annotate(cx);
         self.status =
             "Snapshot loaded. The source holds still until another revision is accepted on purpose."
                 .into();
@@ -542,9 +548,64 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             anchor,
         ))));
         self.drag_start = None;
+        self.mark_annotations();
         self.schedule_view_save(cx);
         self.highlight(id, cx);
         cx.notify();
+    }
+    fn annotate(&mut self, cx: &mut Context<Self>) {
+        self.annotate_cancel.cancel();
+        self.annotate_cancel = Cancellation::default();
+        let cancel = self.annotate_cancel.clone();
+        let Some(a) = &self.active else { return };
+        let snapshot = a.snapshot.clone();
+        let registry = self.registry.clone();
+        cx.spawn(async move |this, cx| {
+            let id = snapshot.id.clone();
+            let job_cancel = cancel.clone();
+            let (found, problems) = cx
+                .background_spawn(async move { registry.annotate(&snapshot, &job_cancel) })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if cancel.cancelled() || app.active.as_ref().is_none_or(|a| a.snapshot.id != id) {
+                    return;
+                }
+                app.annotations = Arc::new(found);
+                app.mark_annotations();
+                if !problems.is_empty() {
+                    app.status = format!("Annotations: {}", problems.join("; "));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    fn mark_annotations(&mut self) {
+        let (Some(a), Some(v)) = (&self.active, &self.viewport) else {
+            return;
+        };
+        let mut v = v.borrow_mut();
+        let path = a
+            .snapshot
+            .file(&v.file)
+            .map(|f| f.display_path())
+            .unwrap_or_default();
+        v.annotations.clear();
+        for n in self.annotations.iter() {
+            if let diffz_core::annotation::Anchor::Lines {
+                path: p,
+                side,
+                start,
+                end,
+            } = &n.anchor
+                && *p == path
+            {
+                for line in *start..=*end {
+                    let slot = v.annotations.entry((*side, line)).or_insert(n.severity);
+                    *slot = (*slot).max(n.severity);
+                }
+            }
+        }
     }
     /// Settings are small and global, so each write lands at once.
     pub fn save_settings(&mut self, cx: &mut Context<Self>) {

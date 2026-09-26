@@ -161,6 +161,16 @@ impl Workbench {
             .as_ref()
             .map(|s| diffz_core::review_details::thread_counts(&s.comments))
             .unwrap_or_default();
+        let mut marks: std::collections::HashMap<
+            String,
+            (usize, diffz_core::annotation::Severity),
+        > = Default::default();
+        for n in self.annotations.iter() {
+            let slot = marks
+                .entry(n.anchor.path().to_string())
+                .or_insert((0, n.severity));
+            *slot = (slot.0 + 1, slot.1.max(n.severity));
+        }
         let visible_ids: Vec<String> = self.visible_files.iter().map(|id| id.0.clone()).collect();
         let (done, total) = diffz_core::review_details::reviewed_progress(&viewed, &visible_ids);
         div()
@@ -245,6 +255,11 @@ impl Workbench {
                         .and_then(|id| snapshot.as_ref()?.file(id))
                         .map(|f| counts.get(&f.display_path()).copied().unwrap_or(0))
                         .unwrap_or(0);
+                    let mark = row
+                        .file
+                        .as_ref()
+                        .and_then(|id| snapshot.as_ref()?.file(id))
+                        .and_then(|f| marks.get(&f.display_path()).copied());
                     let icon = if row.file.is_some() {
                         div()
                             .h_flex()
@@ -324,6 +339,18 @@ impl Workbench {
                                             .text_size(px(10.))
                                             .child(Icon::new(AppIcon::MessageSquare).size(px(9.)))
                                             .child(format!("{comment_count}")),
+                                    )
+                                })
+                                .when_some(mark, |b, (count, severity)| {
+                                    let color = skin.severity(severity);
+                                    b.child(
+                                        div()
+                                            .px_1()
+                                            .rounded_sm()
+                                            .bg(color.opacity(0.14))
+                                            .text_color(color)
+                                            .text_size(px(10.))
+                                            .child(format!("{count}")),
                                     )
                                 })
                                 .when_some(stats, |b, (adds, dels, kind)| {

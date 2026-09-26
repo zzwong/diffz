@@ -1,4 +1,5 @@
 //! Shared semantic colors for the interface and diff.
+use diffz_core::annotation::Severity;
 use diffz_core::palette::{Mode, Rgb};
 use diffz_core::syntax::Token;
 use diffz_core::theme::{SkinSpec, Theme};
@@ -63,6 +64,14 @@ impl Skin {
     }
     pub fn token(self, t: Token) -> Hsla {
         self.tokens[t as usize]
+    }
+    pub fn severity(self, s: Severity) -> Hsla {
+        match s {
+            Severity::Error => self.negative,
+            Severity::Warning => self.warning,
+            Severity::Info => self.accent,
+            Severity::Note => self.muted,
+        }
     }
 }
 
