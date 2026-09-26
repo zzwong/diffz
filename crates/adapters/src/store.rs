@@ -14,6 +14,12 @@ use std::{
     time::Duration,
 };
 
+fn compress(bytes: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Write;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
+    encoder.write_all(bytes)?;
+    Ok(encoder.finish()?)
+}
 const KEEP_RECENT: usize = 50;
 pub struct Store {
     conn: Mutex<Connection>,
@@ -113,17 +119,26 @@ impl Store {
             return Err("snapshot identity and its source data do not agree".into());
         }
         // Encoding a large patch must not hold up settings and other readers of the store.
-        let data = serde_json::to_string(s)?;
+        let data = compress(serde_json::to_string(s)?.as_bytes())?;
         self.db()?.execute("INSERT INTO snapshots(id,title,data) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET title=excluded.title,data=excluded.data,updated_at=unixepoch()",params![s.id.0,s.title,data])?;
         Ok(())
     }
     pub fn snapshot(&self, id: &SnapshotId) -> Result<Snapshot> {
-        let raw: String =
+        let raw: rusqlite::types::Value =
             self.db()?
                 .query_row("SELECT data FROM snapshots WHERE id=?1", [&id.0], |r| {
                     r.get(0)
                 })?;
-        let s: Snapshot = serde_json::from_str(&raw)?;
+        let s: Snapshot = match raw {
+            rusqlite::types::Value::Text(json) => serde_json::from_str(&json)?,
+            rusqlite::types::Value::Blob(packed) => {
+                use std::io::Read;
+                let mut json = Vec::with_capacity(packed.len() * 8);
+                flate2::read::ZlibDecoder::new(packed.as_slice()).read_to_end(&mut json)?;
+                serde_json::from_slice(&json)?
+            }
+            _ => return Err("saved snapshot has an unknown encoding".into()),
+        };
         if !s.verify_identity() {
             return Err("saved snapshot integrity check failed".into());
         }

@@ -1606,6 +1606,7 @@ name = "diffz-adapters"
 version = "0.1.2"
 dependencies = [
  "diffz-core",
+ "flate2",
  "fs2",
  "libc",
  "rusqlite",
