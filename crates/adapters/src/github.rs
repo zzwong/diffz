@@ -385,24 +385,38 @@ impl GithubReader {
             ..Default::default()
         };
         let repo = format!("repos/{}/{}", a.owner, a.repo);
-        for (kind, endpoint, field) in [
-            (
-                "Check",
-                format!("{repo}/commits/{head}/check-runs"),
-                "check_runs",
-            ),
-            (
-                "Workflow",
-                format!("{repo}/actions/runs?head_sha={head}"),
-                "workflow_runs",
-            ),
-            (
-                "Status",
-                format!("{repo}/commits/{head}/status"),
-                "statuses",
-            ),
-        ] {
-            match self.named_pages(&a.host, &endpoint, field, cancel.clone()) {
+        let issue_comments = format!("{repo}/issues/{}/comments", a.number);
+        let (checks, conversation) = std::thread::scope(|s| {
+            let conversation = s.spawn(|| self.pages(&a.host, &issue_comments, cancel.clone()));
+            let checks: Vec<_> = [
+                (
+                    "Check",
+                    format!("{repo}/commits/{head}/check-runs"),
+                    "check_runs",
+                ),
+                (
+                    "Workflow",
+                    format!("{repo}/actions/runs?head_sha={head}"),
+                    "workflow_runs",
+                ),
+                (
+                    "Status",
+                    format!("{repo}/commits/{head}/status"),
+                    "statuses",
+                ),
+            ]
+            .map(|(kind, endpoint, field)| {
+                let cancel = cancel.clone();
+                let rows = s.spawn(move || self.named_pages(&a.host, &endpoint, field, cancel));
+                (kind, rows)
+            })
+            .into_iter()
+            .map(|(kind, rows)| (kind, joined(rows)))
+            .collect();
+            (checks, joined(conversation))
+        });
+        for (kind, rows) in checks {
+            match rows {
                 Ok(rows) => overview
                     .checks
                     .extend(rows.iter().map(|v| check_row(v, kind))),
@@ -411,11 +425,7 @@ impl GithubReader {
                     .push(format!("{kind} metadata unavailable: {e}")),
             }
         }
-        match self.pages(
-            &a.host,
-            &format!("{repo}/issues/{}/comments", a.number),
-            cancel,
-        ) {
+        match conversation {
             Ok(rows) => {
                 overview.conversation = rows
                     .iter()
@@ -436,31 +446,65 @@ impl GithubReader {
         overview
     }
     pub fn snapshot(&self, a: &PrAddress, cancel: Cancellation) -> Result<Snapshot> {
-        let account = self.account(&a.host, cancel.clone())?;
+        let (account, first) = std::thread::scope(|s| {
+            let account = s.spawn(|| self.account(&a.host, cancel.clone()));
+            let before = self.metadata(a, cancel.clone());
+            (joined(account), before)
+        });
+        let account = account?;
+        let mut first = Some(first?);
         for _ in 0..3 {
-            let before = self.metadata(a, cancel.clone())?;
+            let before = match first.take() {
+                Some(m) => m,
+                None => self.metadata(a, cancel.clone())?,
+            };
             let base = oid(&before, "/base/sha")?;
             let head = oid(&before, "/head/sha")?;
-            let compare = self.get_json(
-                &a.host,
-                &format!("repos/{}/{}/compare/{base}...{head}", a.owner, a.repo),
-                cancel.clone(),
-            )?;
+            let (compare, files, raw, comments, reviews, mut overview) = std::thread::scope(|s| {
+                let compare = s.spawn(|| {
+                    self.get_json(
+                        &a.host,
+                        &format!("repos/{}/{}/compare/{base}...{head}", a.owner, a.repo),
+                        cancel.clone(),
+                    )
+                });
+                let files =
+                    s.spawn(|| self.pages(&a.host, &format!("{}/files", a.root()), cancel.clone()));
+                let raw = s.spawn(|| {
+                    self.request(
+                        &a.host,
+                        &a.root(),
+                        "GET",
+                        None,
+                        "Accept: application/vnd.github.diff",
+                        cancel.clone(),
+                    )
+                });
+                let comments = s.spawn(|| {
+                    self.pages(&a.host, &format!("{}/comments", a.root()), cancel.clone())
+                });
+                let reviews = s.spawn(|| {
+                    self.pages(&a.host, &format!("{}/reviews", a.root()), cancel.clone())
+                });
+                let overview = self.overview(a, &before, &head, cancel.clone());
+                (
+                    joined(compare),
+                    joined(files),
+                    joined(raw),
+                    joined(comments),
+                    joined(reviews),
+                    overview,
+                )
+            });
+            let compare = compare?;
             let mut remote = target(
                 a,
                 &before,
                 account.clone(),
                 oid(&compare, "/merge_base_commit/sha")?,
             )?;
-            let files = self.pages(&a.host, &format!("{}/files", a.root()), cancel.clone())?;
-            let raw = self.request(
-                &a.host,
-                &a.root(),
-                "GET",
-                None,
-                "Accept: application/vnd.github.diff",
-                cancel.clone(),
-            )?;
+            let files = files?;
+            let raw = raw?;
             let from_files = raw.status == 406;
             let body = match raw.status {
                 200 => raw.body,
@@ -475,13 +519,16 @@ impl GithubReader {
             };
             let patch = parse_patch(&body, ParseLimits::default())?;
             drop(body);
-            let comments =
-                self.pages(&a.host, &format!("{}/comments", a.root()), cancel.clone())?;
-            let reviews = self.reviews(&remote, cancel.clone())?;
+            let comments = comments?;
+            let reviews = reviews?;
             remote.pending_review = reviews
                 .iter()
                 .any(|r| r["state"] == "PENDING" && r["user"]["login"] == account);
-            let after = self.metadata(a, cancel.clone())?;
+            let (after, still) = std::thread::scope(|s| {
+                let still = s.spawn(|| self.account(&a.host, cancel.clone()));
+                (self.metadata(a, cancel.clone()), joined(still))
+            });
+            let after = after?;
             if base != oid(&after, "/base/sha")?
                 || head != oid(&after, "/head/sha")?
                 || before["base"]["repo"]["id"] != after["base"]["repo"]["id"]
@@ -491,7 +538,7 @@ impl GithubReader {
             remote.open = after["state"] == "open";
             remote.draft = after["draft"] == true;
             // Which account was used is frozen into the review identity too.
-            if self.account(&a.host, cancel.clone())? != account {
+            if still? != account {
                 return Err("the GitHub account changed while the snapshot was captured".into());
             }
             let mut s = Snapshot::new(
@@ -515,7 +562,9 @@ impl GithubReader {
                     "GitHub serves no unified diff past 300 files. This review then comes via the per-file endpoint, and GitHub had already omitted the text for {omitted} of those files."
                 ));
             }
-            s.overview = self.overview(a, &after, &head, cancel.clone());
+            overview.description = after["body"].as_str().map(str::to_owned);
+            overview.author = after["user"]["login"].as_str().map(str::to_owned);
+            s.overview = overview;
             s.overview.decision = diffz_core::review_details::review_decision(
                 reviews
                     .iter()
@@ -532,9 +581,6 @@ impl GithubReader {
                         created_at: v["submitted_at"].as_str().map(Into::into),
                     })
                 }));
-            if self.account(&a.host, cancel.clone())? != account {
-                return Err("the GitHub account changed while the overview was captured".into());
-            }
             let expected = number(&after, "/changed_files")? as usize;
             if expected != files.len() || expected != s.patch.files.len() {
                 s.warnings.push(format!(
@@ -929,6 +975,12 @@ fn quote_path(prefix: &str, path: &str) -> String {
     s.push('"');
     s
 }
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, Result<T>>) -> Result<T> {
+    handle
+        .join()
+        .unwrap_or_else(|_| Err("a GitHub read stopped unexpectedly".into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
