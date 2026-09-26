@@ -5,6 +5,7 @@ mod source;
 pub(crate) use self::appearance::apply_appearance;
 use crate::{
     commands,
+    file_browser::FileBrowserState,
     reader::FilesPeek,
     theme::Skin,
     viewport::{Decorations, Viewport},
@@ -131,18 +132,7 @@ pub(crate) struct Workbench {
     pub overview_focus: FocusHandle,
     pub overview_tab: usize,
     pub comment_page: usize,
-    pub boundary_scroll: diffz_core::scroll::BoundaryScroll,
-    pub last_wheel: Option<std::time::Instant>,
-    /// Inertia after a touchpad gesture; see `scrolling.rs`.
-    pub kinetic: diffz_core::scroll::Kinetic,
-    /// A finger is on the pad (or a wheel gesture is in progress).
-    pub gesture_active: bool,
-    /// Decides that the finger lifted when the platform never says so.
-    pub gesture_task: Option<Task<()>>,
-    /// A coast is being advanced frame by frame.
-    pub coast_ticking: bool,
-    /// Zero point for the millisecond clock the scroll state machines use.
-    pub gesture_epoch: std::time::Instant,
+    pub gesture: crate::scrolling::GestureState,
     pub export_context: Option<ContextExport>,
     pub outbox: Vec<OutboxEntry>,
     pub recent: Vec<RecentSession>,
@@ -161,18 +151,13 @@ pub(crate) struct Workbench {
     annotate_cancel: Cancellation,
     pub save_tasks: HashMap<DraftId, Task<()>>,
     pub view_task: Option<Task<()>>,
-    pub tree_rows: Arc<Vec<diffz_core::file_tree::TreeRow>>,
-    pub collapsed_dirs: std::collections::HashSet<String>,
-    pub tree_cursor: usize,
-    pub tree_focus: FocusHandle,
+    pub browser: FileBrowserState,
     pub panel_focus: FocusHandle,
     pub return_focus: Option<FocusHandle>,
     pub scrollbar_hide_task: Option<Task<()>>,
     pub palette_index: usize,
     pub theme_index: usize,
     pub palette_scroll: ScrollHandle,
-    pub file_list: ListState,
-    pub visible_files: Vec<FileId>,
     _subscriptions: Vec<Subscription>,
 }
 impl Workbench {
@@ -345,13 +330,7 @@ impl Workbench {
             overview_focus: cx.focus_handle(),
             overview_tab: 0,
             comment_page: 0,
-            boundary_scroll: Default::default(),
-            last_wheel: None,
-            kinetic: Default::default(),
-            gesture_active: false,
-            gesture_task: None,
-            coast_ticking: false,
-            gesture_epoch: std::time::Instant::now(),
+            gesture: Default::default(),
             export_context: None,
             outbox: vec![],
             recent: vec![],
@@ -370,18 +349,13 @@ impl Workbench {
             annotate_cancel: Cancellation::default(),
             save_tasks: HashMap::new(),
             view_task: None,
-            tree_rows: Arc::new(vec![]),
-            collapsed_dirs: Default::default(),
-            tree_cursor: 0,
-            tree_focus: cx.focus_handle().tab_stop(true),
+            browser: FileBrowserState::new(cx.focus_handle().tab_stop(true)),
             panel_focus: cx.focus_handle().tab_stop(false),
             return_focus: None,
             scrollbar_hide_task: None,
             palette_index: 0,
             theme_index: 0,
             palette_scroll: ScrollHandle::new(),
-            file_list: ListState::new(0, ListAlignment::Top, px(200.)),
-            visible_files: vec![],
             _subscriptions: subscriptions,
         };
         if let Some(reference) = this.settings.theme.clone() {

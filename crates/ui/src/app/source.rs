@@ -91,15 +91,7 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
                 .map(|f| (f.id.clone(), f.display_path()))
                 .collect()
         });
-        let tree = diffz_core::file_tree::FileTree::new(entries);
-        self.visible_files = tree
-            .rows(&Default::default(), &query)
-            .into_iter()
-            .filter_map(|row| row.file)
-            .collect();
-        self.tree_rows = Arc::new(tree.rows(&self.collapsed_dirs, &query));
-        self.tree_cursor = self.tree_cursor.min(self.tree_rows.len().saturating_sub(1));
-        self.file_list = ListState::new(self.tree_rows.len(), ListAlignment::Top, px(180.));
+        self.browser.rebuild(entries, &query);
     }
     pub fn remember_anchor(&mut self) {
         if let (Some(a), Some(v)) = (&mut self.active, &self.viewport) {
@@ -110,7 +102,7 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         }
     }
     pub fn select_file(&mut self, id: FileId, cx: &mut Context<Self>) {
-        self.boundary_scroll = Default::default();
+        self.gesture.reset_boundary();
         self.cancel_scroll_gesture();
         self.remember_anchor();
         let Some(a) = &mut self.active else { return };

@@ -148,10 +148,7 @@ impl Workbench {
                     cx.notify();
                 }),
             );
-        let pull = (
-            self.boundary_scroll.pulling(),
-            self.boundary_scroll.progress(),
-        );
+        let pull = self.gesture.pull();
         if items.is_empty() {
             return container
                 .p_4()
