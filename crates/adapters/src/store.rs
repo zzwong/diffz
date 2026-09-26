@@ -14,6 +14,7 @@ use std::{
     time::Duration,
 };
 
+const KEEP_RECENT: usize = 50;
 pub struct Store {
     conn: Mutex<Connection>,
     _lock: File,
@@ -69,7 +70,38 @@ impl Store {
             directory: dir.to_path_buf(),
         };
         s.recover_inflight()?;
+        s.prune(KEEP_RECENT)?;
         Ok(s)
+    }
+    pub fn prune(&self, keep: usize) -> Result<usize> {
+        let mut c = self.db()?;
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute_batch("DROP TABLE IF EXISTS temp.doomed")?;
+        tx.execute(
+            "CREATE TEMP TABLE doomed AS SELECT id FROM snapshots s
+             WHERE id NOT IN (SELECT id FROM snapshots ORDER BY updated_at DESC, rowid DESC LIMIT ?1)
+             AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.snapshot_id = s.id AND d.published = 0)
+             AND id NOT IN (SELECT json_extract(data, '$.prepared.snapshot') FROM outbox
+                            WHERE state IN ('prepared', 'in_flight', 'unknown'))",
+            [keep as i64],
+        )?;
+        tx.execute_batch(
+            "DELETE FROM drafts WHERE snapshot_id IN temp.doomed;
+             DELETE FROM views WHERE snapshot_id IN temp.doomed;
+             DELETE FROM hidden_recents WHERE snapshot_id IN temp.doomed;",
+        )?;
+        let removed = tx.execute("DELETE FROM snapshots WHERE id IN temp.doomed", [])?;
+        tx.execute_batch("DROP TABLE temp.doomed")?;
+        tx.commit()?;
+        let free: i64 = c.query_row(
+            "SELECT freelist_count * page_size FROM pragma_freelist_count, pragma_page_size",
+            [],
+            |r| r.get(0),
+        )?;
+        if free > 4 << 20 {
+            c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")?;
+        }
+        Ok(removed)
     }
     fn db(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
         self.conn
