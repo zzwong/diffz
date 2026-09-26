@@ -21,7 +21,7 @@ jobs:
       - name: Install build and packaging dependencies
         run: |
           dnf install -y \
-            gcc gcc-c++ make pkg-config \
+            gcc gcc-c++ make cmake pkg-config \
             openssl-devel fontconfig-devel \
             libX11-devel libXcursor-devel libXi-devel libxcb-devel \
             libxkbcommon-devel libxkbcommon-x11-devel wayland-devel \

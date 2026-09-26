@@ -1,0 +1,13 @@
+id = "toy"
+name = "Toy"
+version = "0.1.0"
+diffz = "0.1"
+
+[[languages]]
+name = "toy"
+grammar = "grammars/toy.wasm"
+queries = "queries/toy"
+extensions = ["toy"]
+
+[[themes]]
+path = "themes/toy-dark"

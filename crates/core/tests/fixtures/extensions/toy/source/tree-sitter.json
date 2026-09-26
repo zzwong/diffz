@@ -1,0 +1,4 @@
+{
+  "grammars": [{ "name": "toy", "scope": "source.toy", "path": ".", "file-types": ["toy"] }],
+  "metadata": { "version": "0.1.0", "license": "MIT", "description": "diffz test grammar" }
+}

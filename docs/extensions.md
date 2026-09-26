@@ -142,22 +142,22 @@ execution at all.
 
 ## M3: data extensions
 
-An extension is a directory under `~/.config/diffz/extensions/<id>/`:
+An extension is a folder under `$XDG_CONFIG_HOME/diffz/extensions/<folder>/`
+(default `~/.config/diffz/extensions`) with an `extension.toml`:
 
 ```
 zig/
   extension.toml
   grammars/zig.wasm
-  queries/zig/highlights.scm
-  queries/zig/injections.scm
-  themes/zig-dark/theme.toml
+  queries/zig/highlights.scm      # required; injections.scm and locals.scm optional
+  themes/zig-dark/theme.toml      # or colors.toml
 ```
 
 ```toml
-id = "zig"
+id = "zig"                 # letters, digits, - and _; unique across extensions
 name = "Zig"
 version = "0.1.0"
-diffz = "0.2"              # contract version this extension targets
+diffz = "0.1"              # contract version the extension targets
 
 [[languages]]
 name = "zig"
@@ -169,14 +169,26 @@ extensions = ["zig", "zon"]
 path = "themes/zig-dark"
 ```
 
-Grammars load through tree-sitter's `wasm` feature, so a grammar is data and
-runs inside tree-sitter's own sandbox. Query capture names map onto `Token` by
-the same `recognized_names` table the built-ins use. Captures with no mapping
-stay unhighlighted.
+- Grammars are WebAssembly built with `tree-sitter build --wasm`, loaded
+  through tree-sitter's `wasm` feature and run inside wasmtime's sandbox. Each
+  compiles on first use; highlighters and their WASM stores are pooled.
+- Query captures map onto `Token` through the same table as the built-in
+  grammars; unmapped captures stay plain.
+- An extension language outranks a built-in grammar for the same file
+  extension, so an extension can replace a bundled grammar.
+- Extension themes are listed by folder name after the user's theme
+  directories, which win when names collide.
+- Paths in a manifest must stay inside the extension folder.
+- An extension is skipped, with a reason, when its manifest does not parse, its
+  id repeats, or its `diffz` version has another major or a newer minor than
+  this build. `diffz --doctor` lists extensions and problems and compiles every
+  grammar; skipped extensions are also printed to stderr at startup.
+- The `wasm` cargo feature, on by default, needs CMake to build wasmtime.
+  Without it, extension themes still load and extension grammars are reported
+  as unsupported.
 
-Each manifest becomes one `LanguageProvider` and one `ThemeSource` in the
-registry. An extension's grammar outranks a built-in for the same extension,
-so users can replace a bundled grammar.
+`crates/core/tests/fixtures/extensions/toy` is a complete example with a tiny
+grammar; its `source/` folder rebuilds the `.wasm`.
 
 ## M4: annotations
 

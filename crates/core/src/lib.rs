@@ -2,6 +2,7 @@
 pub mod anchor;
 pub mod domain;
 pub mod export;
+pub mod extension;
 pub mod inline;
 pub mod layout;
 pub mod palette;

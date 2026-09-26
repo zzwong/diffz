@@ -18,7 +18,7 @@ cargo build --locked --release -p diffz
 ### Fedora
 
 ```sh
-sudo dnf install gcc gcc-c++ pkgconf-pkg-config fontconfig-devel wayland-devel \
+sudo dnf install gcc gcc-c++ cmake pkgconf-pkg-config fontconfig-devel wayland-devel \
   libxkbcommon-devel libxkbcommon-x11-devel libX11-devel libXcursor-devel \
   libXi-devel libxcb-devel openssl-devel zstd-devel vulkan-loader-devel \
   mesa-vulkan-drivers fontconfig dejavu-sans-mono-fonts
