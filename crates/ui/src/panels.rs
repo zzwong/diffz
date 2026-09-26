@@ -223,7 +223,7 @@ impl Workbench {
                     card = card.child(
                         div()
                             .text_color(skin.muted)
-                            .child("No Omarchy themes here. Drop a colors.toml theme into one of the theme directories."),
+                            .child("No themes here. Drop a folder holding theme.toml or colors.toml into one of the theme directories."),
                     );
                 }
                 for (ix, entry) in self.themes.iter().enumerate() {
@@ -244,18 +244,18 @@ impl Workbench {
                         .when(highlighted, |b| {
                             b.border_1().border_color(skin.accent.opacity(0.55))
                         });
-                    if let Some(p) = &entry.palette {
+                    if let Some(t) = &entry.theme {
                         row = row.child(
                             h_flex()
                                 .gap_2()
-                                .child(swatch(p.background))
-                                .child(swatch(p.accent))
-                                .child(swatch(p.green))
-                                .child(swatch(p.red)),
+                                .child(swatch(t.skin.base))
+                                .child(swatch(t.skin.accent))
+                                .child(swatch(t.skin.positive))
+                                .child(swatch(t.skin.negative)),
                         );
                     }
-                    let tag = match &entry.palette {
-                        Some(p) if p.mode == Mode::Dark => "dark",
+                    let tag = match &entry.theme {
+                        Some(t) if t.mode == Mode::Dark => "dark",
                         Some(_) => "light",
                         None => "unreadable",
                     };

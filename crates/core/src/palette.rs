@@ -272,9 +272,9 @@ pub struct OmarchyCurrent;
 
 impl OmarchyCurrent {
     fn entry() -> Option<ThemeEntry> {
-        let path = PathBuf::from(env::var_os("HOME")?)
-            .join(".local/state/omarchy/current/theme/colors.toml");
-        path.is_file().then(|| ThemeEntry {
+        let dir = PathBuf::from(env::var_os("HOME")?).join(".local/state/omarchy/current/theme");
+        let path = crate::theme::theme_file(&dir)?;
+        Some(ThemeEntry {
             label: "Omarchy current theme".into(),
             reference: "current".into(),
             path,
@@ -297,7 +297,8 @@ impl ThemeSource for OmarchyCurrent {
     }
 }
 
-/// Named themes, each `<dir>/<name>/colors.toml`. An earlier dir wins when names repeat.
+/// Named themes, each a `<dir>/<name>/` folder holding `theme.toml` or `colors.toml`. An
+/// earlier dir wins when names repeat.
 pub struct ThemeDirectories(pub Vec<PathBuf>);
 
 impl ThemeSource for ThemeDirectories {
@@ -315,8 +316,7 @@ impl ThemeSource for ThemeDirectories {
         let path = self
             .0
             .iter()
-            .map(|dir| dir.join(reference).join("colors.toml"))
-            .find(|candidate| candidate.is_file())?;
+            .find_map(|dir| crate::theme::theme_file(&dir.join(reference)))?;
         Some(ThemeEntry {
             label: reference.into(),
             reference: reference.into(),
@@ -325,8 +325,8 @@ impl ThemeSource for ThemeDirectories {
     }
 }
 
-/// Every `<dir>/<name>/colors.toml` beneath `dirs`; the first dir wins when
-/// names repeat; sorted by name.
+/// Every theme folder beneath `dirs` with the file it uses, preferring `theme.toml` over
+/// `colors.toml`; the first dir wins when names repeat; sorted by name.
 pub fn discover_in(dirs: &[PathBuf]) -> Vec<(String, PathBuf)> {
     let mut out: Vec<(String, PathBuf)> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -335,15 +335,15 @@ pub fn discover_in(dirs: &[PathBuf]) -> Vec<(String, PathBuf)> {
             continue;
         };
         for entry in entries.flatten() {
-            let path = entry.path();
-            let colors = path.join("colors.toml");
+            let Some(file) = crate::theme::theme_file(&entry.path()) else {
+                continue;
+            };
             let Some(name) = entry.file_name().to_str().map(String::from) else {
                 continue;
             };
-            if !colors.is_file() || !seen.insert(name.clone()) {
-                continue; // lacks colors.toml, or a directory seen earlier already claimed that name
+            if seen.insert(name.clone()) {
+                out.push((name, file));
             }
-            out.push((name, colors));
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -515,6 +515,10 @@ mod tests {
         theme_dir(&second, "only-second");
         // A dir holding no colors.toml is never discovered.
         fs::create_dir_all(first.join("no-theme")).unwrap();
+        // A theme.toml alone makes a theme, and wins over a colors.toml beside it.
+        fs::create_dir_all(second.join("only-toml")).unwrap();
+        fs::write(second.join("only-toml/theme.toml"), "mode = \"light\"\n").unwrap();
+        fs::write(first.join("dup/theme.toml"), "mode = \"dark\"\n").unwrap();
         // A nested dir pointed at by path.
         let nested = root.join("refs").join("nested");
         theme_dir(&root.join("refs"), "nested");
@@ -535,7 +539,7 @@ mod tests {
         assert_eq!(
             discover_in(&dirs),
             vec![
-                ("dup".to_string(), first.join("dup/colors.toml")),
+                ("dup".to_string(), first.join("dup/theme.toml")),
                 (
                     "only-first".to_string(),
                     first.join("only-first/colors.toml")
@@ -544,11 +548,12 @@ mod tests {
                     "only-second".to_string(),
                     second.join("only-second/colors.toml")
                 ),
+                ("only-toml".to_string(), second.join("only-toml/theme.toml")),
             ]
         );
 
         // Name lookup: the first match that exists.
-        assert_eq!(named("dup"), Some(first.join("dup/colors.toml")));
+        assert_eq!(named("dup"), Some(first.join("dup/theme.toml")));
         assert_eq!(
             named("only-second"),
             Some(second.join("only-second/colors.toml"))

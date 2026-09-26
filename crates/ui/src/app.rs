@@ -12,6 +12,7 @@ use diffz_core::{
     provider::*,
     registry::Registry,
     review::*,
+    theme::Theme as AppTheme,
 };
 use gpui_kit::component::{
     Root, Theme, ThemeConfig, ThemeConfigColors, ThemeMode, ThemeRegistry,
@@ -64,7 +65,7 @@ pub(crate) struct Active {
 pub(crate) struct ThemeEntry {
     pub name: String,
     pub reference: String,
-    pub palette: Option<Palette>,
+    pub theme: Option<AppTheme>,
 }
 pub(crate) struct PanelResizeState {
     pub(crate) left: bool,
@@ -114,7 +115,7 @@ pub(crate) struct Workbench {
     pub rich_cache: Option<crate::rich_view::RichCache>,
     pub font_family: String,
     pub status: String,
-    pub palette: Option<Palette>,
+    pub theme: Option<AppTheme>,
     pub theme_path: Option<PathBuf>,
     pub theme_mtime: Option<SystemTime>,
     pub themes: Vec<ThemeEntry>,
@@ -326,7 +327,7 @@ impl Workbench {
                 }
             }),
             status: "Open a hosted review, fixture, patch, or local Git comparison.".into(),
-            palette: None,
+            theme: None,
             theme_path: None,
             theme_mtime: None,
             themes: vec![],
@@ -392,9 +393,9 @@ impl Workbench {
         this
     }
     pub(crate) fn skin(&self) -> Skin {
-        self.palette
+        self.theme
             .as_ref()
-            .map(Skin::from_palette)
+            .map(Skin::from_theme)
             .unwrap_or_else(|| Skin::new(self.dark))
     }
     pub fn unsaved(&self) -> bool {
@@ -1016,7 +1017,7 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             .themes()
             .into_iter()
             .map(|entry| ThemeEntry {
-                palette: Palette::load(&entry.path).ok(),
+                theme: AppTheme::load(&entry.path).ok(),
                 name: entry.label,
                 reference: entry.reference,
             })
@@ -1046,7 +1047,7 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         cx: &mut Context<Self>,
     ) {
         let Some(reference) = reference else {
-            self.palette = None;
+            self.theme = None;
             self.theme_path = None;
             self.theme_mtime = None;
             self.settings.theme = None;
@@ -1064,40 +1065,51 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             cx.notify();
             return;
         };
-        let palette = match Palette::load(&path) {
-            Ok(p) => p,
+        let theme = match AppTheme::load(&path) {
+            Ok(t) => t,
             Err(e) => {
                 self.status = format!("Theme {reference}: {e}");
                 cx.notify();
                 return;
             }
         };
-        self.dark = palette.mode == Mode::Dark;
-        self.settings.dark = self.dark;
         self.settings.theme = Some(reference.to_string());
-        self.theme_mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
         self.theme_path = Some(path);
+        self.status = theme_status("Theme", &label, &theme);
+        self.install_theme(&label, theme, window, cx);
+        self.start_theme_watch(window, cx);
+        cx.notify();
+    }
+    fn install_theme(
+        &mut self,
+        label: &str,
+        theme: AppTheme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dark = theme.mode == Mode::Dark;
+        self.settings.dark = self.dark;
+        self.theme_mtime = newest_mtime(&theme.files);
         apply_appearance(
             self.dark,
-            Some((label.as_str(), &palette)),
+            theme.palette.as_ref().map(|p| (label, p)),
             Some(window),
             cx,
         );
-        self.palette = Some(palette);
+        self.theme = Some(theme);
         self.rich_cache = None;
         self.save_settings(cx);
-        self.status = format!("Theme: {label}");
-        self.start_theme_watch(window, cx);
-        cx.notify();
     }
     fn start_theme_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.theme_task = Some(cx.spawn_in(window, async move |this, cx| {
             loop {
                 smol::Timer::after(Duration::from_secs(2)).await;
-                let Ok(Some(path)) = this.read_with(cx, |a, _| a.theme_path.clone()) else {
+                let Ok(Some(files)) =
+                    this.read_with(cx, |a, _| a.theme.as_ref().map(|t| t.files.clone()))
+                else {
                     break;
                 };
-                let mtime = fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+                let mtime = newest_mtime(&files);
                 let changed = this
                     .update(cx, |a, _| {
                         if mtime.is_some() && mtime != a.theme_mtime {
@@ -1124,15 +1136,10 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             .registry
             .resolve_theme(&reference)
             .map_or(reference, |entry| entry.label);
-        match Palette::load(&path) {
-            Ok(p) => {
-                self.dark = p.mode == Mode::Dark;
-                self.settings.dark = self.dark;
-                apply_appearance(self.dark, Some((label.as_str(), &p)), Some(window), cx);
-                self.palette = Some(p);
-                self.rich_cache = None;
-                self.save_settings(cx);
-                self.status = format!("Theme reloaded: {label}");
+        match AppTheme::load(&path) {
+            Ok(theme) => {
+                self.status = theme_status("Theme reloaded", &label, &theme);
+                self.install_theme(&label, theme, window, cx);
             }
             Err(e) => {
                 self.status = format!("Theme {label}: {e}");
@@ -1280,6 +1287,20 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             });
         })
         .detach();
+    }
+}
+/// Any edit to a theme's files, including the palette it extends, moves this forward.
+fn newest_mtime(files: &[PathBuf]) -> Option<SystemTime> {
+    files
+        .iter()
+        .filter_map(|f| fs::metadata(f).ok()?.modified().ok())
+        .max()
+}
+fn theme_status(verb: &str, label: &str, theme: &AppTheme) -> String {
+    if theme.warnings.is_empty() {
+        format!("{verb}: {label}")
+    } else {
+        format!("{verb}: {label} · ignored {}", theme.warnings.join(", "))
     }
 }
 fn highlight_file(

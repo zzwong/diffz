@@ -13,6 +13,7 @@ pub mod review;
 pub mod rich;
 pub mod session;
 pub mod syntax;
+pub mod theme;
 pub mod timing;
 
 pub mod height_index;
