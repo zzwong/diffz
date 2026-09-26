@@ -10,6 +10,7 @@ use diffz_core::{
     palette::{Mode, Palette, Rgb},
     presentation,
     provider::*,
+    registry::Registry,
     review::*,
 };
 use gpui_kit::component::{
@@ -21,7 +22,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     rc::Rc,
     sync::Arc,
     time::{Duration, Instant, SystemTime},
@@ -29,6 +30,7 @@ use std::{
 
 pub struct LaunchOptions {
     pub initial: OpenRequest,
+    pub registry: Arc<Registry>,
     pub font_family: Option<String>,
     pub theme: Option<String>,
 }
@@ -75,6 +77,7 @@ pub(crate) struct PanelResizeState {
 }
 pub(crate) struct Workbench {
     pub services: Arc<dyn WorkbenchServices>,
+    pub registry: Arc<Registry>,
     pub active: Option<Active>,
     pub viewport: Option<Rc<RefCell<Viewport>>>,
     pub open_input: Entity<InputState>,
@@ -175,6 +178,7 @@ pub(crate) struct Workbench {
 impl Workbench {
     pub fn new(
         services: Arc<dyn WorkbenchServices>,
+        registry: Arc<Registry>,
         font_family: Option<String>,
         theme: Option<String>,
         window: &mut Window,
@@ -275,6 +279,7 @@ impl Workbench {
         }).unwrap_or(true));
         let mut this = Self {
             services,
+            registry,
             active: None,
             viewport: None,
             open_input,
@@ -999,21 +1004,16 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         self.return_focus = window.focused(cx);
         self.panel = Panel::Themes;
         self.panel_focus.focus(window, cx);
-        self.themes.clear();
-        if let Some(path) = diffz_core::palette::resolve("current") {
-            self.themes.push(ThemeEntry {
-                name: "Omarchy current theme".into(),
-                reference: "current".into(),
-                palette: Palette::load(&path).ok(),
-            });
-        }
-        for (name, path) in diffz_core::palette::discover() {
-            self.themes.push(ThemeEntry {
-                name: name.clone(),
-                reference: name,
-                palette: Palette::load(&path).ok(),
-            });
-        }
+        self.themes = self
+            .registry
+            .themes()
+            .into_iter()
+            .map(|entry| ThemeEntry {
+                palette: Palette::load(&entry.path).ok(),
+                name: entry.label,
+                reference: entry.reference,
+            })
+            .collect();
         self.theme_index = self
             .settings
             .theme
@@ -1050,7 +1050,9 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             cx.notify();
             return;
         };
-        let Some(path) = diffz_core::palette::resolve(reference) else {
+        let Some(diffz_core::registry::ThemeEntry { label, path, .. }) =
+            self.registry.resolve_theme(reference)
+        else {
             self.status = format!("Theme not found: {reference}");
             cx.notify();
             return;
@@ -1063,7 +1065,6 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
                 return;
             }
         };
-        let label = theme_label(reference);
         self.dark = palette.mode == Mode::Dark;
         self.settings.dark = self.dark;
         self.settings.theme = Some(reference.to_string());
@@ -1112,7 +1113,10 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             return;
         };
         let reference = self.settings.theme.clone().unwrap_or_default();
-        let label = theme_label(&reference);
+        let label = self
+            .registry
+            .resolve_theme(&reference)
+            .map_or(reference, |entry| entry.label);
         match Palette::load(&path) {
             Ok(p) => {
                 self.dark = p.mode == Mode::Dark;
@@ -1246,11 +1250,14 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         let Some(a) = &self.active else { return };
         let snapshot = a.snapshot.clone();
         let id = snapshot.id.clone();
+        let registry = self.registry.clone();
         cx.spawn(async move |this, cx| {
             let job_file = file.clone();
             let job_cancel = cancel.clone();
             let spans = cx
-                .background_spawn(async move { highlight_file(&snapshot, &job_file, &job_cancel) })
+                .background_spawn(async move {
+                    highlight_file(&registry, &snapshot, &job_file, &job_cancel)
+                })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) != 0 {
@@ -1268,27 +1275,8 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         .detach();
     }
 }
-fn theme_label(reference: &str) -> String {
-    if reference == "current" || reference == "omarchy" {
-        return "Omarchy current theme".into();
-    }
-    if reference.contains('/') || reference.starts_with('~') {
-        let path = Path::new(reference);
-        let dir = if path.file_name().is_some_and(|n| n == "colors.toml") {
-            path.parent().unwrap_or(path)
-        } else {
-            path
-        };
-        return dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(String::from)
-            .unwrap_or_else(|| reference.to_string());
-    }
-    reference.to_string()
-}
-
 fn highlight_file(
+    registry: &Registry,
     snapshot: &Snapshot,
     id: &FileId,
     cancel: &std::sync::atomic::AtomicUsize,
@@ -1298,7 +1286,7 @@ fn highlight_file(
         return out;
     };
     let path = file.display_path();
-    if diffz_core::syntax::language_name(&path).is_none() {
+    if registry.language_name(&path).is_none() {
         return out;
     }
     for h in &file.hunks {
@@ -1314,7 +1302,7 @@ fn highlight_file(
                 continue;
             }
             let source = rows.iter().map(|r| &*r.text).collect::<Vec<_>>().join("\n");
-            let spans = diffz_core::syntax::highlight(&path, &source, cancel);
+            let spans = registry.highlight(&path, &source, cancel);
             for (row, line_spans) in rows.into_iter().zip(spans) {
                 if !line_spans.is_empty()
                     && let Some(n) = row.number(side)
@@ -1461,7 +1449,14 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                     diffz_core::timing::mark("window");
                     window.set_window_title("diffz");
                     let view = cx.new(|cx| {
-                        Workbench::new(services, options.font_family, options.theme, window, cx)
+                        Workbench::new(
+                            services,
+                            options.registry,
+                            options.font_family,
+                            options.theme,
+                            window,
+                            cx,
+                        )
                     });
                     view.update(cx, |app, cx| {
                         app.open_pending(
@@ -1512,6 +1507,7 @@ mod performance_tests {
         let s = snapshot("a.txt", "+plain text\n+another line\n", 2);
         assert!(
             highlight_file(
+                &Registry::builtin(),
                 &s,
                 &s.patch.files[0].id,
                 &std::sync::atomic::AtomicUsize::new(0)
@@ -1525,6 +1521,7 @@ mod performance_tests {
         let s = snapshot("a.rs", "+fn main() {}\n", 1);
         assert!(
             highlight_file(
+                &Registry::builtin(),
                 &s,
                 &s.patch.files[0].id,
                 &std::sync::atomic::AtomicUsize::new(1)
@@ -1538,6 +1535,7 @@ mod performance_tests {
     fn highlighted_files_keep_only_nonempty_spans() {
         let s = snapshot("a.rs", "+fn main() {}\n+\n", 2);
         let decorations = highlight_file(
+            &Registry::builtin(),
             &s,
             &s.patch.files[0].id,
             &std::sync::atomic::AtomicUsize::new(0),
