@@ -1,6 +1,7 @@
-# Extensions: design draft
+# Extensions
 
-Status: draft, not implemented.
+Status: M1 to M5 are implemented. Deferred items are listed under each
+milestone.
 
 Diffz should be extensible at its core. Languages, themes, and anything that
 adds information to a review should arrive through typed contracts, and the
@@ -247,59 +248,13 @@ Deferred:
 
 ## M5: code extensions
 
-Code runs as WASM components under wasmtime, against a versioned WIT world.
-WIT gives the strongly typed boundary: bindings are generated for the host in
-Rust and for guests in Rust, Go, JS, Python, and others.
+Code runs as WebAssembly components under wasmtime, against the WIT world in
+`crates/core/wit/extension.wit`. WIT is the strongly typed boundary: the host
+binds it with `wasmtime::component::bindgen!`, and guests in Rust, Go, JS,
+Python and others generate bindings from the same file.
 
 ```wit
 package diffz:extension@0.1.0;
-
-interface types {
-  enum side { old, new }
-  enum severity { note, info, warning, error }
-  enum presentation { gutter, inline, underline, file-badge }
-
-  record line-range { start: u32, end: u32 }
-
-  variant anchor {
-    file(string),
-    lines(tuple<string, side, line-range>),
-    range(tuple<string, side, u32, tuple<u32, u32>>),
-  }
-
-  record annotation {
-    anchor: anchor,
-    severity: severity,
-    presentation: presentation,
-    title: string,
-    body: option<string>,
-  }
-
-  enum file-status { added, modified, deleted, renamed }
-
-  record hunk { old-start: u32, old-count: u32, new-start: u32, new-count: u32 }
-
-  record changed-file {
-    path: string,
-    old-path: option<string>,
-    status: file-status,
-    hunks: list<hunk>,
-  }
-
-  record review {
-    title: string,
-    base: option<string>,
-    head: option<string>,
-    files: list<changed-file>,
-  }
-}
-
-interface host {
-  use types.{side};
-  source: func(path: string, side: side) -> result<string, string>;
-  setting: func(key: string) -> option<string>;
-  log: func(message: string);
-}
 
 interface annotator {
   use types.{review, annotation};
@@ -307,24 +262,47 @@ interface annotator {
 }
 
 world extension {
-  import host;
   export annotator;
 }
 ```
 
+`types` mirrors the core contract: a `review` is the title plus every changed
+file's path, old path, status and hunks with their rows (kind, old and new
+line numbers, text), and an `annotation` is the M4 anchor, severity, title and
+optional body. Annotators declare themselves in the manifest:
+
+```toml
+[[annotators]]
+id = "todo"
+component = "annotators/todo.wasm"
+```
+
+and run as `<extension id>/<annotator id>` beside the built-in ones.
+
 Sandboxing and limits:
 
-- No filesystem, network, or process access by default. The manifest declares
-  any capability it wants, and diffz asks once per extension version.
-- Each call runs with epoch interruption and a wall-clock budget, two seconds
-  to start with. A timed-out call yields no annotations and a status message.
-- Memory is capped per instance.
+- World 0.1 imports nothing: no WASI, so no filesystem, network, clock or
+  process access. The whole review arrives as data.
+- Every call gets a fresh store with a 64 MB memory cap and a two-second
+  wall-clock budget enforced by epoch interruption. A call that traps, runs
+  out of time or memory, or returns an error yields no annotations, and the
+  reason reaches the status line.
+- Components compile on first use, off the UI thread. `diffz --doctor`
+  compiles every one and reports failures.
 
-Commands and declarative panels come after annotators, in the same world:
-commands export a list of `{id, title, default-key}` and a `run` function
-whose result is annotations or a panel; panels are a small tree of list,
-tree, markdown, table, and button nodes. They wait until annotations have
-shown what the contract needs.
+`crates/core/tests/fixtures/extensions/todo` is a complete example: a Rust
+guest that flags `TODO` on added lines. Rebuild it from `source/` with
+`cargo build --release --target wasm32-unknown-unknown`, then
+`wasm-tools component new <module>.wasm -o annotators/todo.wasm`.
+
+Deferred:
+
+- **Host imports and capabilities.** Reading whole files, settings, or running
+  a linter needs imports and a manifest capability the user grants once per
+  extension version.
+- **Commands and declarative panels** in the same world: commands export
+  `{id, title, default-key}` and a `run` function returning annotations or a
+  panel built from list, tree, markdown, table and button nodes.
 
 ## Versioning
 
@@ -423,5 +401,5 @@ Consequences:
 
 - Linters usually need to run a process. A `process` capability is the
   obvious answer, but it weakens the sandbox to "whatever the user trusts".
-- Whether 9 MB and 16 MB of resident memory are acceptable for users who
-  never install an extension, or wasm support ships as an optional feature.
+- Whether the binary growth from wasmtime, about 9 MB, is acceptable for users
+  who never install an extension, or `wasm` should become opt-in.

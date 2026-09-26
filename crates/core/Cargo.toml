@@ -46,7 +46,13 @@ syntax = [
     "dep:tree-sitter-gleam",
 ]
 # Builds wasmtime, which needs cmake.
-wasm = ["syntax", "tree-sitter/wasm"]
+wasm = ["syntax", "tree-sitter/wasm", "dep:wasmtime"]
+
+[dependencies.wasmtime]
+version = "48"
+optional = true
+default-features = false
+features = ["component-model", "cranelift", "runtime", "std"]
 
 [dependencies.tree-sitter]
 version = "0.27"
