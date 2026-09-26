@@ -1,7 +1,7 @@
 //! Review payloads are fixed, and the outbox lifecycle rejects unsafe states.
 use crate::domain::*;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
@@ -34,7 +34,7 @@ pub struct PreparedComment {
     pub version: u64,
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gitlab_position: Option<Value>,
+    pub gitlab_position: Option<GitlabPosition>,
     pub body: String,
     pub side: Side,
     pub start_line: u32,
@@ -44,6 +44,58 @@ pub struct PreparedComment {
     /// on GitLab it becomes a plain note on the MR, not a positioned discussion.
     #[serde(default)]
     pub file_level: bool,
+}
+/// Where a GitLab discussion attaches. Field order is part of the review fingerprint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitlabPosition {
+    pub position_type: String,
+    pub base_sha: String,
+    pub start_sha: String,
+    pub head_sha: String,
+    pub old_path: String,
+    pub new_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_line: Option<u32>,
+}
+// The fingerprint hashes these payloads, so they are structs, never `json!` maps: a map's
+// key order follows serde_json's `preserve_order` feature, which any dependency can switch
+// on. Field order matches the order the desktop build has always produced.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Payload<'a> {
+    GitHub {
+        commit_id: &'a str,
+        event: &'static str,
+        body: &'a str,
+        comments: Vec<GithubComment<'a>>,
+    },
+    GitLab {
+        head: &'a str,
+        verdict: Verdict,
+        summary: &'a str,
+        comments: &'a [PreparedComment],
+    },
+}
+#[derive(Serialize)]
+#[serde(untagged)]
+enum GithubComment<'a> {
+    File {
+        path: &'a str,
+        body: &'a str,
+        subject_type: &'static str,
+    },
+    Line {
+        path: &'a str,
+        body: &'a str,
+        line: u32,
+        side: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        start_line: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        start_side: Option<&'static str>,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreparedReview {
@@ -145,10 +197,18 @@ impl PreparedReview {
                     .unwrap_or(f.path())
                     .utf8()
                     .map_err(ReviewError)?;
+                let position = |position_type: &str| GitlabPosition {
+                    position_type: position_type.into(),
+                    base_sha: target.comparison_base.clone(),
+                    start_sha: target.target_tip.clone(),
+                    head_sha: target.head.clone(),
+                    old_path: old.into(),
+                    new_path: new.into(),
+                    old_line: None,
+                    new_line: None,
+                };
                 if d.is_file_level() {
-                    Some(
-                        json!({"position_type":"file","base_sha":target.comparison_base,"start_sha":target.target_tip,"head_sha":target.head,"old_path":old,"new_path":new}),
-                    )
+                    Some(position("file"))
                 } else {
                     if d.start_line != d.line {
                         return Err(fail(
@@ -158,14 +218,11 @@ impl PreparedReview {
                     let row = f
                         .line(d.side, d.line)
                         .ok_or_else(|| fail("the draft holds no source line to post to GitLab"))?;
-                    let mut position = json!({"position_type":"text","base_sha":target.comparison_base,"start_sha":target.target_tip,"head_sha":target.head,"old_path":old,"new_path":new});
-                    if let Some(n) = row.old_line {
-                        position["old_line"] = json!(n);
-                    }
-                    if let Some(n) = row.new_line {
-                        position["new_line"] = json!(n);
-                    }
-                    Some(position)
+                    Some(GitlabPosition {
+                        old_line: row.old_line,
+                        new_line: row.new_line,
+                        ..position("text")
+                    })
                 }
             } else {
                 None
@@ -195,32 +252,52 @@ impl PreparedReview {
         Ok(p)
     }
     pub fn payload(&self) -> Value {
+        serde_json::to_value(self.payload_repr()).expect("plain serializable review payload")
+    }
+    fn payload_repr(&self) -> Payload<'_> {
         if self.target.provider == ProviderKind::GitLab {
-            return json!({"head":self.target.head,"verdict":self.verdict,"summary":self.summary,"comments":self.comments});
+            return Payload::GitLab {
+                head: &self.target.head,
+                verdict: self.verdict,
+                summary: &self.summary,
+                comments: &self.comments,
+            };
         }
-        let comments: Vec<Value> = self
+        let comments = self
             .comments
             .iter()
             .map(|c| {
                 if c.file_level {
-                    return json!({"path":c.path,"body":c.body,"subject_type":"file"});
+                    return GithubComment::File {
+                        path: &c.path,
+                        body: &c.body,
+                        subject_type: "file",
+                    };
                 }
-                let mut j = json!({"path":c.path,"body":c.body,"line":c.line,"side":c.side.api()});
-                if c.start_line < c.line {
-                    j["start_line"] = json!(c.start_line);
-                    j["start_side"] = json!(c.side.api())
+                let range = c.start_line < c.line;
+                GithubComment::Line {
+                    path: &c.path,
+                    body: &c.body,
+                    line: c.line,
+                    side: c.side.api(),
+                    start_line: range.then_some(c.start_line),
+                    start_side: range.then(|| c.side.api()),
                 }
-                j
             })
             .collect();
-        json!({"commit_id":self.target.head,"event":self.verdict.api(),"body":self.summary,"comments":comments})
+        Payload::GitHub {
+            commit_id: &self.target.head,
+            event: self.verdict.api(),
+            body: &self.summary,
+            comments,
+        }
     }
     pub fn compute_fingerprint(&self) -> String {
         let payload = serde_json::to_vec(&(
             self.id.clone(),
             self.snapshot.clone(),
             self.target.clone(),
-            self.payload(),
+            self.payload_repr(),
             self.comments
                 .iter()
                 .map(|c| (&c.draft, c.version))
