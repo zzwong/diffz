@@ -107,3 +107,23 @@ fn opening_the_store_prunes_beyond_the_recent_window() {
     assert!(store.snapshot(&snapshot(10).id).is_ok());
     assert!(store.snapshot(&snapshot(59).id).is_ok());
 }
+
+#[test]
+fn snapshots_are_stored_compressed_and_legacy_text_rows_still_load() {
+    let temp = tempfile::tempdir().unwrap();
+    let s = snapshot(0);
+    Store::open(temp.path()).unwrap().put_snapshot(&s).unwrap();
+    let db = rusqlite::Connection::open(temp.path().join("review.sqlite3")).unwrap();
+    let kind: String = db
+        .query_row("SELECT typeof(data) FROM snapshots", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kind, "blob");
+    db.execute(
+        "UPDATE snapshots SET data=?1",
+        [serde_json::to_string(&s).unwrap()],
+    )
+    .unwrap();
+    drop(db);
+    let loaded = Store::open(temp.path()).unwrap().snapshot(&s.id).unwrap();
+    assert_eq!(loaded.id, s.id);
+}
