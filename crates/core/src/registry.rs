@@ -1,5 +1,3 @@
-//! Extension points. Built-in languages and themes register here through the same
-//! traits that extensions will implement.
 use crate::{palette, syntax::Span};
 use std::{
     env,
@@ -10,30 +8,22 @@ use std::{
     },
 };
 
-/// Larger sources stay unhighlighted so one file cannot stall the highlight worker.
 const HIGHLIGHT_LIMIT: usize = 256 * 1024;
 
 pub trait LanguageProvider: Send + Sync {
-    /// The language name for `path` and a priority. The highest priority wins; ties
-    /// go to the provider registered first.
     fn claim(&self, path: &str) -> Option<(&str, u8)>;
-    /// One span list per line of `source`. `None` leaves the source unhighlighted.
     fn highlight(&self, path: &str, source: &str, cancel: &AtomicUsize) -> Option<Vec<Vec<Span>>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeEntry {
     pub label: String,
-    /// What settings and `--theme` store to select this theme again.
     pub reference: String,
-    /// The theme's `theme.toml` or `colors.toml`.
     pub path: PathBuf,
 }
 
 pub trait ThemeSource: Send + Sync {
-    /// Themes for the picker, in display order.
     fn list(&self) -> Vec<ThemeEntry>;
-    /// `Some` only when the theme's file exists.
     fn resolve(&self, reference: &str) -> Option<ThemeEntry>;
 }
 
@@ -72,12 +62,10 @@ impl Registry {
         best.map(|(provider, name, _)| (provider, name))
     }
 
-    /// The language name for `path`, or None when no provider claims it. Status text uses this result.
     pub fn language_name(&self, path: &str) -> Option<&str> {
         self.language(path).map(|(_, name)| name)
     }
 
-    /// One span list per line of `source`, all empty when nothing highlights it.
     pub fn highlight(&self, path: &str, source: &str, cancel: &AtomicUsize) -> Vec<Vec<Span>> {
         let count = source.bytes().filter(|b| *b == b'\n').count() + 1;
         if source.len() > HIGHLIGHT_LIMIT || cancel.load(Ordering::Relaxed) != 0 {
@@ -88,7 +76,6 @@ impl Registry {
             .unwrap_or_else(|| vec![vec![]; count])
     }
 
-    /// Every source's themes in registration order. The first source to list a reference keeps it.
     pub fn themes(&self) -> Vec<ThemeEntry> {
         let mut out: Vec<ThemeEntry> = Vec::new();
         for source in &self.themes {
@@ -101,8 +88,6 @@ impl Registry {
         out
     }
 
-    /// A reference holding `'/'` or starting with `'~'` is a path to a theme folder or
-    /// its `theme.toml` or `colors.toml`, with `~` → `$HOME`. Anything else goes to the sources in order.
     pub fn resolve_theme(&self, reference: &str) -> Option<ThemeEntry> {
         if reference.starts_with('~') || reference.contains('/') {
             return theme_at_path(reference);

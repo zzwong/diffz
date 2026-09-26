@@ -347,9 +347,6 @@ pub struct RepositoryKey {
     pub owner: String,
     pub name: String,
 }
-/// Names the review provider that owns a remote target. Stored snapshots and outbox
-/// entries hold it as a plain string, so a provider that is no longer registered still
-/// deserializes; only its reads and publication become unavailable.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ProviderId(Cow<'static, str>);
@@ -365,8 +362,7 @@ impl ProviderId {
     pub fn is_github(&self) -> bool {
         *self == Self::GITHUB
     }
-    /// Domain separation for snapshot identities. GitHub keeps the original tag, so
-    /// identities computed before providers were pluggable stay valid.
+    /// GitHub keeps the original tag so existing snapshot ids stay valid.
     fn identity_tag(&self) -> Vec<u8> {
         if self.is_github() {
             b"snapshot-v1".to_vec()

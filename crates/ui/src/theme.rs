@@ -1,4 +1,4 @@
-//! Shared semantic colors for the interface and diff, converted from the core theme contract.
+//! Shared semantic colors for the interface and diff.
 use diffz_core::palette::{Mode, Rgb};
 use diffz_core::syntax::Token;
 use diffz_core::theme::{SkinSpec, Theme};

@@ -664,9 +664,7 @@ fn thread(v: &Value) -> Result<ThreadComment> {
 
 pub struct GithubRules;
 
-// The fingerprint hashes this payload, so it is built from structs, never `json!` maps: a
-// map's key order follows serde_json's `preserve_order` feature, which any dependency can
-// switch on. Field order matches what the desktop build has always produced.
+// Fingerprinted: structs, not json! maps (key order follows preserve_order), in this field order.
 #[derive(Serialize)]
 struct Payload<'a> {
     commit_id: &'a str,
@@ -764,7 +762,6 @@ impl ReviewRules for GithubRules {
     }
 }
 
-/// GitHub through the gh CLI. Without gh, the rules still serve links and stored reviews.
 pub struct GithubProvider {
     reader: Option<Arc<GithubReader>>,
 }

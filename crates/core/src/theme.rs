@@ -1,6 +1,3 @@
-//! The theme contract. A theme is an optional base palette plus overrides for any skin
-//! colour and any syntax token, read from `theme.toml`. A bare `colors.toml` is a theme
-//! with no overrides.
 use crate::{
     palette::{Mode, Palette, Rgb},
     syntax::Token,
@@ -12,7 +9,6 @@ use std::{
 
 macro_rules! skin_spec {
     ($($field:ident),* $(,)?) => {
-        /// The semantic colours diffz paints with, before the UI converts them.
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct SkinSpec {
             $(pub $field: Rgb,)*
@@ -115,7 +111,6 @@ impl SkinSpec {
         }
     }
 
-    /// The skin colour each token takes unless the theme overrides it.
     pub fn token(&self, t: Token) -> Rgb {
         match t {
             Token::Keyword | Token::Operator => self.accent,
@@ -134,13 +129,10 @@ impl SkinSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
     pub mode: Mode,
-    /// Also colours the widget layer. Without one, widgets keep their built-in theme.
     pub palette: Option<Palette>,
     pub skin: SkinSpec,
     syntax: [Option<Rgb>; Token::ALL.len()],
-    /// Every file the theme was read from; an edit to any of them reloads it.
     pub files: Vec<PathBuf>,
-    /// Keys and sections that were ignored. A newer theme still loads on an older diffz.
     pub warnings: Vec<String>,
 }
 
@@ -160,8 +152,6 @@ impl Theme {
         self.syntax[t as usize].unwrap_or_else(|| self.skin.token(t))
     }
 
-    /// `path` is a `theme.toml`, a `colors.toml`, or a folder holding either; a folder
-    /// prefers `theme.toml`.
     pub fn load(path: &Path) -> Result<Theme, String> {
         let file = if path.is_dir() {
             theme_file(path).ok_or_else(|| format!("no theme in {}", path.display()))?
@@ -179,9 +169,6 @@ impl Theme {
         Ok(theme)
     }
 
-    /// Parse a `theme.toml`. It reads a subset of TOML: top-level `extends` and `mode`, the
-    /// `[skin]` and `[syntax]` tables, and `key = "#rrggbb"` entries. `extends` names a
-    /// `colors.toml` relative to `dir`.
     pub fn parse(text: &str, dir: &Path) -> Result<Theme, String> {
         let mut section = String::new();
         let mut extends = None;
@@ -275,7 +262,6 @@ impl Theme {
     }
 }
 
-/// The theme file inside `dir`: `theme.toml` when present, else `colors.toml`.
 pub fn theme_file(dir: &Path) -> Option<PathBuf> {
     ["theme.toml", "colors.toml"]
         .into_iter()
@@ -283,7 +269,6 @@ pub fn theme_file(dir: &Path) -> Option<PathBuf> {
         .find(|file| file.is_file())
 }
 
-/// The text between the first pair of double quotes, or the trimmed value when unquoted.
 fn quoted(rest: &str) -> &str {
     let rest = rest.trim();
     match rest.split_once('"') {

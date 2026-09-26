@@ -24,7 +24,6 @@ impl Cancellation {
 pub enum OpenRequest {
     Fixture(String),
     Patch(PathBuf),
-    /// A review on a hosted provider, in any address form that provider's `open` accepts.
     Remote {
         provider: ProviderId,
         address: String,
@@ -38,33 +37,22 @@ pub enum OpenRequest {
     LocalWorktree(PathBuf),
     Resume(SnapshotId),
 }
-/// Everything diffz knows about one review host that needs no I/O. Implementations live
-/// beside the host's client in diffz-adapters; the UI and the review model reach them
-/// through [`WorkbenchServices::provider`].
 pub trait ReviewRules: Send + Sync {
     fn id(&self) -> ProviderId;
-    /// The host's name, as in "Send this review unchanged to GitHub".
     fn name(&self) -> &str;
-    /// Open panel text: the mode button, then the address field's label, placeholder and help.
     fn open_label(&self) -> &str;
     fn address_label(&self) -> &str;
     fn address_hint(&self) -> &str;
     fn address_help(&self) -> &str;
-    /// The command-line flag that opts in to publishing on this host.
     fn write_flag(&self) -> &str;
-    /// A limit of this host, shown beside the review preview.
     fn preview_note(&self) -> Option<&str> {
         None
     }
-    /// An address `open` accepts for this target, so a review resumed from Recents can refresh.
     fn reopen_address(&self, target: &RemoteTarget) -> String;
-    /// A browser link to one line of a file at a revision.
     fn line_url(&self, target: &RemoteTarget, path: &str, revision: &str, line: u32) -> String;
-    /// Verdicts this host can record. The preview disables the others.
     fn supports(&self, _verdict: Verdict) -> bool {
         true
     }
-    /// Refuse a review this host cannot represent, before anything is frozen.
     fn check(
         &self,
         _verdict: Verdict,
@@ -73,8 +61,6 @@ pub trait ReviewRules: Send + Sync {
     ) -> Result<(), ReviewError> {
         Ok(())
     }
-    /// Freeze where one comment attaches. It is stored with the prepared review and covered
-    /// by its fingerprint.
     fn position(
         &self,
         _target: &RemoteTarget,
@@ -83,11 +69,8 @@ pub trait ReviewRules: Send + Sync {
     ) -> Result<Option<Box<RawValue>>, ReviewError> {
         Ok(None)
     }
-    /// The review exactly as it is sent. These bytes are part of the fingerprint, so serialize
-    /// structs rather than maps, and never reorder the fields of an existing payload.
+    /// Fingerprinted: serialize structs, not maps, and never reorder existing fields.
     fn payload(&self, review: &PreparedReview) -> Box<RawValue>;
-    /// Whether this host's remote reviews carry diffz's fingerprint marker, which
-    /// reconciliation then requires.
     fn marks_reviews(&self) -> bool {
         false
     }
@@ -183,7 +166,6 @@ pub trait WorkbenchServices: Send + Sync {
     fn writes_enabled_for(&self, _provider: &ProviderId) -> bool {
         false
     }
-    /// Every registered review provider, in the order the Open panel lists them.
     fn providers(&self) -> Vec<Arc<dyn ReviewRules>> {
         vec![]
     }

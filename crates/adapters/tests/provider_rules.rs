@@ -1,4 +1,3 @@
-//! Host-specific rules: reopen addresses, line links, and the payload each host receives.
 use diffz_adapters::{github::GithubRules, gitlab::GitlabRules};
 use diffz_core::{
     domain::*,
