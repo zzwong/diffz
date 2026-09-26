@@ -1,6 +1,7 @@
 //! Omarchy theme palettes. Parse `colors.toml` files, load palettes from a file
-//! or a directory, and resolve or discover themes beneath the standard
-//! configuration and state dirs.
+//! or a directory, and provide the built-in theme sources: Omarchy's current theme
+//! and the standard theme directories.
+use crate::registry::{ThemeEntry, ThemeSource};
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
@@ -265,58 +266,63 @@ pub fn theme_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Turn a reference into a colors.toml file path, `Some` only when the file exists.
-/// `"current"` and `"omarchy"` both → `~/.local/state/omarchy/current/theme/colors.toml`;
-/// a reference holding `'/'` or starting with `'~'` → that path (a folder or a file,
-/// with `~` → `$HOME`); if neither holds, the earliest `<dir>/<name>/colors.toml` within
-/// `dirs` that exists.
-pub fn resolve_in(reference: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    let home = env::var_os("HOME").map(PathBuf::from);
-    if reference == "current" || reference == "omarchy" {
-        let path = home?
-            .join(".local")
-            .join("state")
-            .join("omarchy")
-            .join("current")
-            .join("theme")
-            .join("colors.toml");
-        return path.is_file().then_some(path);
+/// Omarchy's active theme, which Omarchy rewrites whenever the user switches themes.
+/// Selected as `"current"`, or `"omarchy"` for compatibility.
+pub struct OmarchyCurrent;
+
+impl OmarchyCurrent {
+    fn entry() -> Option<ThemeEntry> {
+        let path = PathBuf::from(env::var_os("HOME")?)
+            .join(".local/state/omarchy/current/theme/colors.toml");
+        path.is_file().then(|| ThemeEntry {
+            label: "Omarchy current theme".into(),
+            reference: "current".into(),
+            path,
+        })
     }
-    if let Some(rest) = reference.strip_prefix('~') {
-        let base = home?;
-        let path = if rest.is_empty() {
-            base
-        } else {
-            base.join(rest.trim_start_matches('/'))
-        };
-        return as_colors_file(path);
+}
+
+impl ThemeSource for OmarchyCurrent {
+    fn list(&self) -> Vec<ThemeEntry> {
+        Self::entry().into_iter().collect()
     }
-    if reference.contains('/') {
-        return as_colors_file(PathBuf::from(reference));
-    }
-    for dir in dirs {
-        let candidate = dir.join(reference).join("colors.toml");
-        if candidate.is_file() {
-            return Some(candidate);
+    fn resolve(&self, reference: &str) -> Option<ThemeEntry> {
+        if reference != "current" && reference != "omarchy" {
+            return None;
         }
+        Self::entry().map(|entry| ThemeEntry {
+            reference: reference.into(),
+            ..entry
+        })
     }
-    None
 }
 
-/// If `path` names a directory, target `path/colors.toml`; else treat it as
-/// the file. `Some` only when that file is present.
-fn as_colors_file(path: PathBuf) -> Option<PathBuf> {
-    let file = if path.is_dir() {
-        path.join("colors.toml")
-    } else {
-        path
-    };
-    file.is_file().then_some(file)
-}
+/// Named themes, each `<dir>/<name>/colors.toml`. An earlier dir wins when names repeat.
+pub struct ThemeDirectories(pub Vec<PathBuf>);
 
-/// `resolve_in(reference, &theme_dirs())`
-pub fn resolve(reference: &str) -> Option<PathBuf> {
-    resolve_in(reference, &theme_dirs())
+impl ThemeSource for ThemeDirectories {
+    fn list(&self) -> Vec<ThemeEntry> {
+        discover_in(&self.0)
+            .into_iter()
+            .map(|(name, path)| ThemeEntry {
+                label: name.clone(),
+                reference: name,
+                path,
+            })
+            .collect()
+    }
+    fn resolve(&self, reference: &str) -> Option<ThemeEntry> {
+        let path = self
+            .0
+            .iter()
+            .map(|dir| dir.join(reference).join("colors.toml"))
+            .find(|candidate| candidate.is_file())?;
+        Some(ThemeEntry {
+            label: reference.into(),
+            reference: reference.into(),
+            path,
+        })
+    }
 }
 
 /// Every `<dir>/<name>/colors.toml` beneath `dirs`; the first dir wins when
@@ -342,11 +348,6 @@ pub fn discover_in(dirs: &[PathBuf]) -> Vec<(String, PathBuf)> {
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
-}
-
-/// `discover_in(&theme_dirs())`
-pub fn discover() -> Vec<(String, PathBuf)> {
-    discover_in(&theme_dirs())
 }
 
 #[cfg(test)]
@@ -519,6 +520,16 @@ mod tests {
         theme_dir(&root.join("refs"), "nested");
 
         let dirs = [first.clone(), second.clone()];
+        let named = |reference: &str| {
+            ThemeDirectories(dirs.to_vec())
+                .resolve(reference)
+                .map(|e| e.path)
+        };
+        let by_path = |reference: &str| {
+            crate::registry::Registry::default()
+                .resolve_theme(reference)
+                .map(|e| e.path)
+        };
 
         // Duplicate name: the first dir keeps it; names sorted.
         assert_eq!(
@@ -537,30 +548,27 @@ mod tests {
         );
 
         // Name lookup: the first match that exists.
+        assert_eq!(named("dup"), Some(first.join("dup/colors.toml")));
         assert_eq!(
-            resolve_in("dup", &dirs),
-            Some(first.join("dup/colors.toml"))
-        );
-        assert_eq!(
-            resolve_in("only-second", &dirs),
+            named("only-second"),
             Some(second.join("only-second/colors.toml"))
         );
         // A missing name gives None.
-        assert_eq!(resolve_in("missing-name", &dirs), None);
+        assert_eq!(named("missing-name"), None);
 
         // Path references holding '/': a dir or the file colors.toml itself.
         let nested_dir = root.join("refs").join("nested");
         assert_eq!(
-            resolve_in(nested_dir.to_str().unwrap(), &dirs),
+            by_path(nested_dir.to_str().unwrap()),
             Some(nested.join("colors.toml"))
         );
         assert_eq!(
-            resolve_in(nested.join("colors.toml").to_str().unwrap(), &dirs),
+            by_path(nested.join("colors.toml").to_str().unwrap()),
             Some(nested.join("colors.toml"))
         );
         // A path reference that does not exist gives None.
         assert_eq!(
-            resolve_in(root.join("refs").join("gone").to_str().unwrap(), &dirs),
+            by_path(root.join("refs").join("gone").to_str().unwrap()),
             None
         );
 

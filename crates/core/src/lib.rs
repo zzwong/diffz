@@ -8,6 +8,7 @@ pub mod palette;
 pub mod patch;
 pub mod presentation;
 pub mod provider;
+pub mod registry;
 pub mod review;
 pub mod rich;
 pub mod session;

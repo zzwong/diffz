@@ -253,6 +253,7 @@ fn run() -> Result<()> {
             services,
             diffz_ui::LaunchOptions {
                 initial: options.request,
+                registry: std::sync::Arc::new(diffz_core::registry::Registry::builtin()),
                 font_family: desktop_font(options.font)?,
                 theme: options.theme,
             },

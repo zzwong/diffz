@@ -1,9 +1,7 @@
 //! Optional decoration with fixed bounds. It does not affect source identity, geometry, or completeness.
 //! A file without a grammar remains unhighlighted.
-use std::{
-    ops::Range,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use crate::registry::LanguageProvider;
+use std::{ops::Range, sync::atomic::AtomicUsize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Token {
     Keyword,
@@ -28,32 +26,31 @@ pub struct Span {
     pub bytes: Range<usize>,
     pub token: Token,
 }
-/// Returns the grammar name for `path`, or None when no grammar matches. Status text uses this result.
-pub fn language_name(path: &str) -> Option<&'static str> {
-    #[cfg(feature = "syntax")]
-    {
-        enabled::language_for_path(path).map(|l| l.name)
+/// The grammars compiled into diffz. Without the `syntax` feature it claims nothing.
+pub struct BuiltinGrammars;
+
+impl LanguageProvider for BuiltinGrammars {
+    fn claim(&self, path: &str) -> Option<(&str, u8)> {
+        #[cfg(feature = "syntax")]
+        {
+            enabled::language_for_path(path).map(|l| (l.name, 0))
+        }
+        #[cfg(not(feature = "syntax"))]
+        {
+            let _ = path;
+            None
+        }
     }
-    #[cfg(not(feature = "syntax"))]
-    {
-        let _ = path;
-        None
-    }
-}
-pub fn highlight(path: &str, source: &str, cancel: &AtomicUsize) -> Vec<Vec<Span>> {
-    let count = source.bytes().filter(|b| *b == b'\n').count() + 1;
-    let empty = || vec![vec![]; count];
-    if source.len() > 256 * 1024 || cancel.load(Ordering::Relaxed) != 0 {
-        return empty();
-    }
-    #[cfg(feature = "syntax")]
-    {
-        enabled::run(path, source, cancel).unwrap_or_else(empty)
-    }
-    #[cfg(not(feature = "syntax"))]
-    {
-        let _ = path;
-        empty()
+    fn highlight(&self, path: &str, source: &str, cancel: &AtomicUsize) -> Option<Vec<Vec<Span>>> {
+        #[cfg(feature = "syntax")]
+        {
+            enabled::run(path, source, cancel)
+        }
+        #[cfg(not(feature = "syntax"))]
+        {
+            let _ = (path, source, cancel);
+            None
+        }
     }
 }
 #[cfg(feature = "syntax")]
@@ -432,6 +429,14 @@ mod enabled {
 #[cfg(all(test, feature = "syntax"))]
 mod tests {
     use super::*;
+    use crate::registry::Registry;
+    fn highlight(path: &str, source: &str, cancel: &AtomicUsize) -> Vec<Vec<Span>> {
+        Registry::builtin().highlight(path, source, cancel)
+    }
+    fn language_name(path: &str) -> Option<&'static str> {
+        let grammars: &'static BuiltinGrammars = &BuiltinGrammars;
+        grammars.claim(path).map(|(name, _)| name)
+    }
     fn has(lines: &[Vec<Span>], line: usize, bytes: Range<usize>, token: Token) -> bool {
         lines[line]
             .iter()
