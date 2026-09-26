@@ -1592,7 +1592,7 @@ dependencies = [
 
 [[package]]
 name = "diffz"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "diffz-adapters",
@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "diffz-adapters"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "diffz-core",
  "flate2",
@@ -1620,7 +1620,7 @@ dependencies = [
 
 [[package]]
 name = "diffz-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "diffz-ui"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "diffz-core",
