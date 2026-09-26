@@ -2,7 +2,7 @@
 use crate::patch::{PatchReport, PatchRow};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, ops::Range};
+use std::{borrow::Cow, collections::BTreeMap, ops::Range};
 use thiserror::Error;
 
 macro_rules! identity {
@@ -347,21 +347,48 @@ pub struct RepositoryKey {
     pub owner: String,
     pub name: String,
 }
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProviderKind {
-    #[default]
-    GitHub,
-    GitLab,
-}
-impl ProviderKind {
+/// Names the review provider that owns a remote target. Stored snapshots and outbox
+/// entries hold it as a plain string, so a provider that is no longer registered still
+/// deserializes; only its reads and publication become unavailable.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ProviderId(Cow<'static, str>);
+impl ProviderId {
+    pub const GITHUB: ProviderId = ProviderId(Cow::Borrowed("GitHub"));
+    pub const GITLAB: ProviderId = ProviderId(Cow::Borrowed("GitLab"));
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(Cow::Owned(id.into()))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
     pub fn is_github(&self) -> bool {
-        *self == Self::GitHub
+        *self == Self::GITHUB
+    }
+    /// Domain separation for snapshot identities. GitHub keeps the original tag, so
+    /// identities computed before providers were pluggable stay valid.
+    fn identity_tag(&self) -> Vec<u8> {
+        if self.is_github() {
+            b"snapshot-v1".to_vec()
+        } else {
+            format!("snapshot-{}-v1", self.0.to_ascii_lowercase()).into_bytes()
+        }
+    }
+}
+impl Default for ProviderId {
+    fn default() -> Self {
+        Self::GITHUB
+    }
+}
+impl std::fmt::Display for ProviderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteTarget {
-    #[serde(default, skip_serializing_if = "ProviderKind::is_github")]
-    pub provider: ProviderKind,
+    #[serde(default, skip_serializing_if = "ProviderId::is_github")]
+    pub provider: ProviderId,
     pub repository: RepositoryKey,
     pub account: String,
     pub pr: u64,
@@ -449,12 +476,11 @@ impl Snapshot {
             ))
         })
         .expect("serializing only string/integer source data");
-        let version: &[u8] = if remote.is_some_and(|r| r.provider == ProviderKind::GitLab) {
-            b"snapshot-gitlab-v1"
-        } else {
-            b"snapshot-v1"
-        };
-        SnapshotId(digest(&[version, &bytes]))
+        let tag = remote.map_or_else(
+            || ProviderId::GITHUB.identity_tag(),
+            |r| r.provider.identity_tag(),
+        );
+        SnapshotId(digest(&[&tag, &bytes]))
     }
     pub fn verify_identity(&self) -> bool {
         self.id == Self::identity(&self.patch, self.remote.as_ref(), &self.origin)

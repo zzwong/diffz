@@ -1,6 +1,6 @@
 use diffz_core::{domain::*, provider::OpenRequest};
 
-fn remote(provider: ProviderKind, host: &str, owner: &str, name: &str, pr: u64) -> RemoteTarget {
+fn remote(provider: ProviderId, host: &str, owner: &str, name: &str, pr: u64) -> RemoteTarget {
     RemoteTarget {
         provider,
         repository: RepositoryKey {
@@ -23,7 +23,7 @@ fn remote(provider: ProviderKind, host: &str, owner: &str, name: &str, pr: u64) 
 #[test]
 fn github_remote_reopens_by_canonical_pull_url() {
     let r = remote(
-        ProviderKind::GitHub,
+        ProviderId::GITHUB,
         "github.com",
         "rust-lang",
         "cargo",
@@ -38,7 +38,7 @@ fn github_remote_reopens_by_canonical_pull_url() {
 #[test]
 fn gitlab_remote_reopens_by_canonical_mr_url_with_nested_groups() {
     let r = remote(
-        ProviderKind::GitLab,
+        ProviderId::GITLAB,
         "gitlab.example.com",
         "group/sub",
         "proj",

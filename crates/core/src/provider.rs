@@ -42,14 +42,13 @@ impl RemoteTarget {
         let RepositoryKey {
             host, owner, name, ..
         } = &self.repository;
-        match self.provider {
-            ProviderKind::GitHub => {
-                OpenRequest::GitHub(format!("https://{host}/{owner}/{name}/pull/{}", self.pr))
-            }
-            ProviderKind::GitLab => OpenRequest::GitLab(format!(
+        if self.provider == ProviderId::GITLAB {
+            OpenRequest::GitLab(format!(
                 "https://{host}/{owner}/{name}/-/merge_requests/{}",
                 self.pr
-            )),
+            ))
+        } else {
+            OpenRequest::GitHub(format!("https://{host}/{owner}/{name}/pull/{}", self.pr))
         }
     }
 }
@@ -133,8 +132,8 @@ pub trait WorkbenchServices: Send + Sync {
         destination: PathBuf,
     ) -> Result<(), ServiceError>;
     fn writes_enabled(&self) -> bool;
-    fn writes_enabled_for(&self, provider: ProviderKind) -> bool {
-        provider == ProviderKind::GitHub && self.writes_enabled()
+    fn writes_enabled_for(&self, provider: &ProviderId) -> bool {
+        *provider == ProviderId::GITHUB && self.writes_enabled()
     }
     fn fresh_id(&self) -> String;
 }

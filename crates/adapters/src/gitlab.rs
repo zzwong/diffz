@@ -316,7 +316,7 @@ fn string(v: &Value, key: &str) -> Result<String> {
 fn target(a: &MrAddress, m: &Value, user: &Value) -> Result<RemoteTarget> {
     let (owner, name) = a.project.rsplit_once('/').ok_or("Invalid project")?;
     let t = RemoteTarget {
-        provider: ProviderKind::GitLab,
+        provider: ProviderId::GITLAB,
         repository: RepositoryKey {
             host: a.host.clone(),
             id: m["project_id"].as_u64().ok_or("Missing project ID")?,
@@ -549,7 +549,7 @@ impl ReviewRemote for GitlabWriter {
     }
     fn send(&self, p: &PreparedReview) -> SendOutcome {
         if !p.verify()
-            || p.target.provider != ProviderKind::GitLab
+            || p.target.provider != ProviderId::GITLAB
             || p.verdict == Verdict::RequestChanges
         {
             return SendOutcome::Rejected(422);

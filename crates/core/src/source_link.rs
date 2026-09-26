@@ -1,4 +1,4 @@
-use crate::domain::{ProviderKind, Side, Snapshot, SourcePoint};
+use crate::domain::{ProviderId, Side, Snapshot, SourcePoint};
 fn encode(value: &str) -> String {
     let mut out = String::new();
     for b in value.bytes() {
@@ -26,7 +26,7 @@ pub fn source_link(snapshot: &Snapshot, point: &SourcePoint) -> Result<String, S
         Side::Right => (file.new_path.as_ref(), &t.head),
     };
     let path = path.ok_or("This side has no source file")?.utf8()?;
-    let route = if t.provider == ProviderKind::GitLab {
+    let route = if t.provider == ProviderId::GITLAB {
         "-/blob"
     } else {
         "blob"
@@ -59,7 +59,7 @@ mod link_tests {
     #[test]
     fn links_use_frozen_revision_and_correct_provider_route() {
         let remote = RemoteTarget {
-            provider: ProviderKind::GitHub,
+            provider: ProviderId::GITHUB,
             repository: RepositoryKey {
                 host: "example.com".into(),
                 id: 1,
@@ -97,7 +97,7 @@ mod link_tests {
             source_link(&snapshot, &p).unwrap(),
             "https://example.com/group/repo/blob/head/a.rs#L1"
         );
-        snapshot.remote.as_mut().unwrap().provider = ProviderKind::GitLab;
+        snapshot.remote.as_mut().unwrap().provider = ProviderId::GITLAB;
         assert_eq!(
             source_link(&snapshot, &p).unwrap(),
             "https://example.com/group/repo/-/blob/head/a.rs#L1"

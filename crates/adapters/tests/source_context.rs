@@ -1,6 +1,6 @@
 #![cfg(unix)]
 use diffz_adapters::{github::GithubReader, gitlab::GitlabReader};
-use diffz_core::domain::{ProviderKind, RemoteTarget, RepositoryKey};
+use diffz_core::domain::{ProviderId, RemoteTarget, RepositoryKey};
 use std::os::unix::fs::PermissionsExt;
 #[test]
 fn source_reads_pin_revisions_and_encode_paths_without_live_cli() {
@@ -17,7 +17,7 @@ sys.stdout.buffer.write(b'HTTP/1.1 200 OK\r\n\r\nfirst\nsecond\n')
     .unwrap();
     std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut target = RemoteTarget {
-        provider: ProviderKind::GitHub,
+        provider: ProviderId::GITHUB,
         repository: RepositoryKey {
             host: "example.com".into(),
             id: 1,
@@ -40,7 +40,7 @@ sys.stdout.buffer.write(b'HTTP/1.1 200 OK\r\n\r\nfirst\nsecond\n')
     let args = std::fs::read_to_string(program.with_extension("args")).unwrap();
     assert!(args.contains("a%20b.rs?ref="));
     assert!(args.contains(&target.head));
-    target.provider = ProviderKind::GitLab;
+    target.provider = ProviderId::GITLAB;
     target.repository.owner = "group/sub".into();
     let bytes = GitlabReader::new(program.clone())
         .source(&target, "dir/a b.rs", &target.comparison_base)

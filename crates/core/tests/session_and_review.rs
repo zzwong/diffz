@@ -12,7 +12,7 @@ fn snapshot() -> Snapshot {
         "test".into(),
         patch,
         Some(RemoteTarget {
-            provider: diffz_core::domain::ProviderKind::GitHub,
+            provider: diffz_core::domain::ProviderId::GITHUB,
             repository: RepositoryKey {
                 host: "github.com".into(),
                 id: 1,
