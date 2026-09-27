@@ -1036,11 +1036,15 @@ impl Workbench {
                         .p_2()
                         .rounded_md()
                         .border_1()
-                        .border_color(if can_save { skin.accent } else { skin.border })
-                        .bg(skin.surface)
+                        .border_color(skin.border)
+                        .bg(if can_save && self.comment_slash_index == 0 {
+                            skin.selection
+                        } else {
+                            skin.surface
+                        })
                         .when(can_save, |row| {
                             row.cursor_pointer()
-                                .hover(|s| s.bg(skin.selection))
+                                .hover(|s| s.bg(skin.selection).border_color(skin.accent))
                                 .active(|s| s.bg(skin.accent.opacity(0.3)))
                         })
                         .child(
@@ -1051,10 +1055,14 @@ impl Workbench {
                                 .items_center()
                                 .justify_center()
                                 .rounded_md()
-                                .bg(skin.selection)
-                                .text_color(skin.accent)
+                                .bg(if can_save {
+                                    skin.selection
+                                } else {
+                                    skin.raised
+                                })
+                                .text_color(if can_save { skin.accent } else { skin.muted })
                                 .text_size(px(19.))
-                                .child("+"),
+                                .child(if already_saved { "✓" } else { "+" }),
                         )
                         .child(
                             div()
@@ -1064,18 +1072,24 @@ impl Workbench {
                                     div()
                                         .text_size(px(13.))
                                         .font_weight(FontWeight::MEDIUM)
-                                        .text_color(skin.text)
-                                        .child("Save this draft"),
+                                        .text_color(if can_save { skin.text } else { skin.muted })
+                                        .child(if already_saved {
+                                            "Saved to library"
+                                        } else {
+                                            "Save this draft"
+                                        }),
                                 )
-                                .child(div().text_size(px(11.)).text_color(skin.muted).child(
-                                    if can_save {
-                                        "Reuse it in another review"
-                                    } else if already_saved {
-                                        "Already in your library"
-                                    } else {
-                                        "Write a comment first"
-                                    },
-                                )),
+                                .when(!already_saved, |details| {
+                                    details.child(
+                                        div().text_size(px(11.)).text_color(skin.muted).child(
+                                            if can_save {
+                                                "Reuse it in another review"
+                                            } else {
+                                                "Write a comment first"
+                                            },
+                                        ),
+                                    )
+                                }),
                         )
                         .on_hover(cx.listener(|a, hovered: &bool, _, c| {
                             if *hovered && a.comment_slash_index != 0 {
@@ -1135,14 +1149,20 @@ impl Workbench {
                         .collect::<String>();
                     card = card.child(
                         div()
+                            .id(("saved-reply-row", ix))
                             .h_flex()
                             .items_center()
                             .gap_2()
                             .rounded_md()
+                            .border_1()
+                            .border_color(skin.border)
+                            .bg(skin.surface)
                             .p_1()
                             .when(self.comment_slash_index == ix + 1, |row| {
                                 row.bg(skin.selection)
                             })
+                            .hover(|row| row.bg(skin.selection).border_color(skin.accent))
+                            .active(|row| row.bg(skin.accent.opacity(0.3)))
                             .child(
                                 div()
                                     .id(("saved-reply", ix))
@@ -1152,6 +1172,7 @@ impl Workbench {
                                     .gap_1()
                                     .px_2()
                                     .py_1()
+                                    .rounded_sm()
                                     .cursor_pointer()
                                     .hover(|row| row.bg(skin.selection))
                                     .active(|row| row.bg(skin.accent.opacity(0.3)))
@@ -1182,11 +1203,24 @@ impl Workbench {
                                     })),
                             )
                             .child(
-                                Button::new(("remove-reply", ix))
-                                    .ghost()
-                                    .small()
-                                    .label("×")
-                                    .tooltip("Remove saved reply")
+                                gpui_kit::base::Button::new(("remove-reply", ix))
+                                    .w(px(28.))
+                                    .h(px(28.))
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .text_size(px(18.))
+                                    .text_color(skin.muted)
+                                    .hover(|button| {
+                                        button
+                                            .bg(skin.negative.opacity(0.16))
+                                            .text_color(skin.negative)
+                                    })
+                                    .active(|button| button.bg(skin.negative.opacity(0.28)))
+                                    .accessibility_label(format!(
+                                        "Remove saved reply: {}",
+                                        reply.title
+                                    ))
+                                    .child("×")
                                     .on_click(cx.listener(move |a, _, _, c| {
                                         a.settings.saved_replies.remove(ix);
                                         a.comment_slash_index = 0;
