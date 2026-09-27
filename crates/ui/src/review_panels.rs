@@ -448,16 +448,36 @@ impl Workbench {
             .map_or(90., |p| f32::from(p.y) + 8.)
             .clamp(48., (f32::from(size.height) - 430.).max(48.));
         let y = if reading { 48. } else { y };
-        self.modal_backdrop(cx)
-            .child(
-                card.absolute()
-                    .left(px(x))
-                    .top(px(y))
-                    .w(px(width))
-                    .max_h(px((f32::from(size.height) - y - 16.).max(200.)))
-                    .when(!reading, |d| d.overflow_y_scroll()),
-            )
-            .into_any_element()
+        let mut backdrop = self.modal_backdrop(cx).child(
+            card.absolute()
+                .left(px(x))
+                .top(px(y))
+                .w(px(width))
+                .max_h(px((f32::from(size.height) - y - 16.).max(200.)))
+                .when(!reading, |d| d.overflow_y_scroll()),
+        );
+        if let Some(menu) = self.comment_slash.filter(|_| {
+            source.is_some()
+                && !reading
+                && !self.busy
+                && !selected.is_some_and(|draft| draft.published)
+                && !self.comment_preview
+        }) {
+            let viewport_width = f32::from(size.width);
+            let menu_width = 356_f32.min((viewport_width - 32.).max(240.));
+            let menu_x = (x + width - menu_width - 16.)
+                .clamp(16., (viewport_width - menu_width - 16.).max(16.));
+            let menu_y = (y + 80.).min((f32::from(size.height) - 184.).max(16.));
+            let menu_height = (f32::from(size.height) - menu_y - 16.).max(120.);
+            backdrop = backdrop.child(
+                div()
+                    .absolute()
+                    .left(px(menu_x))
+                    .top(px(menu_y))
+                    .child(self.comment_slash_menu(menu, menu_width, menu_height, cx)),
+            );
+        }
+        backdrop.into_any_element()
     }
     pub(crate) fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();

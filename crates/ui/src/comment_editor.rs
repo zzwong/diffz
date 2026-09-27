@@ -547,7 +547,7 @@ impl Workbench {
                         c.notify();
                     })),
             );
-        let mut composer = div()
+        div()
             .id("comment-editor")
             .v_flex()
             .gap_2()
@@ -656,31 +656,32 @@ impl Workbench {
                     .readonly(readonly)
                     .aria_label("Local review comment in Markdown")
                     .into_any_element()
-            });
-        if let Some(menu) = self
-            .comment_slash
-            .filter(|_| !self.comment_preview && !readonly)
-        {
-            composer = composer.child(self.comment_slash_menu(menu, cx));
-        }
-        composer.into_any_element()
+            })
+            .into_any_element()
     }
 
-    fn comment_slash_menu(&self, menu: SlashMenu, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn comment_slash_menu(
+        &self,
+        menu: SlashMenu,
+        width: f32,
+        max_height: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let skin = self.skin();
         let mut card = div()
             .id("comment-slash-menu")
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .v_flex()
             .gap_2()
             .p_3()
-            .w(px(356.))
-            .max_w_full()
+            .w(px(width))
             .rounded_md()
             .border_1()
             .border_color(skin.border)
             .bg(skin.raised)
             .shadow_lg()
-            .max_h(px(332.))
+            .max_h(px(max_height.min(332.)))
             .overflow_y_scroll();
         let heading = match menu {
             SlashMenu::Commands => "INSERT INTO COMMENT",
