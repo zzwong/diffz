@@ -1,6 +1,7 @@
 mod markdown;
 use self::markdown::{Edit, Format, code_block, format, slash_query, table};
 use crate::app::Workbench;
+use crate::icons::AppIcon;
 use diffz_core::domain::SavedReply;
 use gpui_kit::component::{
     Disableable, Sizable, StyledExt, button::*, input::Textarea, text::TextView,
@@ -47,6 +48,15 @@ impl SlashCommand {
             Self::Language => "Insert a highlighted code fence",
             Self::Replies => "Reuse a local comment",
             Self::QuoteSource => "Include the line being reviewed",
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Table => AppIcon::Rows2.path(),
+            Self::Language => "icons/diffz/comment-code-block.svg",
+            Self::Replies => AppIcon::MessageSquare.path(),
+            Self::QuoteSource => "icons/diffz/comment-quote.svg",
         }
     }
 }
@@ -180,7 +190,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.comment_slash_index = 0;
+        self.comment_slash_index = if cmd == SlashCommand::Table { 7 } else { 0 };
         match cmd {
             SlashCommand::Table => self.comment_slash = Some(SlashMenu::Table),
             SlashCommand::Language => self.comment_slash = Some(SlashMenu::Language),
@@ -207,8 +217,8 @@ impl Workbench {
             "escape" => self.dismiss_comment_menu(cx),
             "down" => self.move_comment_menu_vertical(1, cx),
             "up" => self.move_comment_menu_vertical(-1, cx),
-            "right" => self.move_comment_menu(1, cx),
-            "left" => self.move_comment_menu(-1, cx),
+            "right" => self.move_comment_menu_horizontal(1, cx),
+            "left" => self.move_comment_menu_horizontal(-1, cx),
             "enter" => self.activate_comment_menu(window, cx),
             _ => false,
         }
@@ -254,14 +264,33 @@ impl Workbench {
         delta: isize,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.move_comment_menu(
-            if self.comment_slash == Some(SlashMenu::Table) {
-                delta * 5
-            } else {
-                delta
-            },
-            cx,
-        )
+        if self.comment_slash == Some(SlashMenu::Table) {
+            let column = self.comment_slash_index % 5;
+            let row = (self.comment_slash_index / 5) as isize;
+            self.comment_slash_index = (row + delta).clamp(0, 4) as usize * 5 + column;
+            cx.stop_propagation();
+            cx.notify();
+            true
+        } else {
+            self.move_comment_menu(delta, cx)
+        }
+    }
+
+    pub(crate) fn move_comment_menu_horizontal(
+        &mut self,
+        delta: isize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.comment_slash == Some(SlashMenu::Table) {
+            let row = self.comment_slash_index / 5;
+            let column = (self.comment_slash_index % 5) as isize;
+            self.comment_slash_index = row * 5 + (column + delta).clamp(0, 4) as usize;
+            cx.stop_propagation();
+            cx.notify();
+            true
+        } else {
+            self.move_comment_menu(delta, cx)
+        }
     }
 
     pub(crate) fn activate_comment_menu(
@@ -455,38 +484,126 @@ impl Workbench {
         let mut card = div()
             .id("comment-slash-menu")
             .v_flex()
-            .gap_1()
-            .p_2()
+            .gap_2()
+            .p_3()
+            .w(px(356.))
+            .max_w_full()
             .rounded_md()
             .border_1()
             .border_color(skin.border)
             .bg(skin.raised)
             .shadow_lg()
-            .max_h(px(240.))
+            .max_h(px(332.))
             .overflow_y_scroll();
-        if menu != SlashMenu::Commands {
-            card = card.child(
-                Button::new("comment-menu-back")
-                    .ghost()
-                    .small()
-                    .label("←  Commands")
-                    .on_click(cx.listener(|a, _, _, c| {
-                        a.comment_slash = Some(SlashMenu::Commands);
-                        c.notify();
-                    })),
-            );
-        }
-        match menu {
-            SlashMenu::Commands => {
-                for (ix, cmd) in self.matching_comment_commands().into_iter().enumerate() {
-                    let selected = ix == self.comment_slash_index;
-                    card = card.child(
-                        Button::new(("comment-command", ix))
+        let heading = match menu {
+            SlashMenu::Commands => "INSERT INTO COMMENT",
+            SlashMenu::Table => "INSERT TABLE",
+            SlashMenu::Language => "CODE LANGUAGE",
+            SlashMenu::Replies => "SAVED REPLIES",
+        };
+        card = card.child(
+            div()
+                .h_flex()
+                .items_center()
+                .justify_between()
+                .px_1()
+                .child(
+                    div()
+                        .text_size(px(10.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(skin.muted)
+                        .child(heading),
+                )
+                .when(menu != SlashMenu::Commands, |row| {
+                    row.child(
+                        Button::new("comment-menu-back")
                             .ghost()
                             .small()
-                            .when(selected, |b| b.outline())
+                            .label("← Back")
+                            .on_click(cx.listener(|a, _, _, c| {
+                                a.comment_slash = Some(SlashMenu::Commands);
+                                a.comment_slash_index = 0;
+                                c.notify();
+                            })),
+                    )
+                }),
+        );
+        match menu {
+            SlashMenu::Commands => {
+                let commands = self.matching_comment_commands();
+                if commands.is_empty() {
+                    card = card.child(
+                        div()
+                            .p_3()
+                            .text_size(px(12.))
+                            .text_color(skin.muted)
+                            .child("No matching commands"),
+                    );
+                }
+                for (ix, cmd) in commands.into_iter().enumerate() {
+                    let selected = ix == self.comment_slash_index;
+                    card = card.child(
+                        div()
+                            .id(("comment-command", ix))
+                            .h_flex()
+                            .items_center()
+                            .gap_3()
+                            .px_2()
+                            .py_2()
+                            .rounded_md()
                             .cursor_pointer()
-                            .label(format!("{}  ·  {}", cmd.title(), cmd.detail()))
+                            .when(selected, |row| row.bg(skin.selection))
+                            .hover(|row| row.bg(skin.selection))
+                            .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
+                                if *hovered && a.comment_slash_index != ix {
+                                    a.comment_slash_index = ix;
+                                    c.notify();
+                                }
+                            }))
+                            .child(
+                                div()
+                                    .w(px(32.))
+                                    .h(px(32.))
+                                    .flex_shrink_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(skin.border)
+                                    .bg(skin.surface)
+                                    .child(
+                                        gpui_kit::component::Icon::default()
+                                            .path(cmd.icon())
+                                            .size(px(16.))
+                                            .text_color(if selected {
+                                                skin.accent
+                                            } else {
+                                                skin.text
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_size(px(13.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(skin.text)
+                                            .child(cmd.title()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.))
+                                            .text_color(skin.muted)
+                                            .child(cmd.detail()),
+                                    ),
+                            )
+                            .child(div().text_color(skin.muted).text_size(px(15.)).child("›"))
                             .on_click(
                                 cx.listener(move |a, _, w, c| a.choose_slash_command(cmd, w, c)),
                             ),
@@ -494,43 +611,115 @@ impl Workbench {
                 }
             }
             SlashMenu::Table => {
+                let columns = self.comment_slash_index % 5 + 1;
+                let rows = self.comment_slash_index / 5 + 1;
                 card = card.child(
                     div()
-                        .text_size(px(12.))
-                        .text_color(skin.muted)
-                        .child("Choose columns × rows"),
+                        .h_flex()
+                        .items_baseline()
+                        .gap_2()
+                        .px_1()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_size(px(17.))
+                                .text_color(skin.text)
+                                .child(format!("{columns} × {rows}")),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(skin.muted)
+                                .child("columns × rows"),
+                        ),
                 );
-                for rows in 1..=5 {
-                    let mut row = div().h_flex().gap_1();
-                    for columns in 1..=5 {
+                card = card.child(
+                    div()
+                        .px_1()
+                        .text_size(px(10.))
+                        .text_color(skin.muted)
+                        .child("COLUMNS →"),
+                );
+                for grid_row in 1..=5 {
+                    let mut row = div().h_flex().items_center().gap_1();
+                    for grid_column in 1..=5 {
+                        let index = (grid_row - 1) * 5 + grid_column - 1;
+                        let highlighted = grid_row <= rows && grid_column <= columns;
                         row = row.child(
-                            Button::new(("table-size", rows * 5 + columns))
-                                .ghost()
-                                .small()
-                                .when(
-                                    self.comment_slash_index == (rows - 1) * 5 + columns - 1,
-                                    |b| b.outline(),
-                                )
+                            div()
+                                .id(("table-cell", index))
+                                .w(px(31.))
+                                .h(px(26.))
+                                .border_1()
+                                .border_color(if highlighted {
+                                    skin.accent
+                                } else {
+                                    skin.border
+                                })
+                                .bg(if highlighted {
+                                    skin.selection
+                                } else {
+                                    skin.surface
+                                })
+                                .rounded_sm()
                                 .cursor_pointer()
-                                .label(format!("{columns}×{rows}"))
-                                .tooltip(format!("{columns} columns, {rows} rows"))
+                                .aria_label(format!("{grid_column} columns, {grid_row} rows"))
+                                .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
+                                    if *hovered && a.comment_slash_index != index {
+                                        a.comment_slash_index = index;
+                                        c.notify();
+                                    }
+                                }))
                                 .on_click(cx.listener(move |a, _, w, c| {
-                                    a.insert_slash_edit(table(columns, rows), w, c)
+                                    a.insert_slash_edit(table(grid_column, grid_row), w, c)
                                 })),
                         );
                     }
+                    row = row.child(
+                        div()
+                            .pl_2()
+                            .text_size(px(10.))
+                            .text_color(skin.muted)
+                            .child(format!("{grid_row}")),
+                    );
                     card = card.child(row);
                 }
+                card = card.child(
+                    div()
+                        .px_1()
+                        .text_size(px(11.))
+                        .text_color(skin.muted)
+                        .child("ROWS ↓  ·  Hover or use arrow keys, then Enter"),
+                );
             }
             SlashMenu::Language => {
                 for (ix, (label, language)) in LANGUAGES.into_iter().enumerate() {
                     card = card.child(
-                        Button::new(("code-language", ix))
-                            .ghost()
-                            .small()
-                            .when(self.comment_slash_index == ix, |b| b.outline())
+                        div()
+                            .id(("code-language", ix))
+                            .h_flex()
+                            .items_center()
+                            .justify_between()
+                            .px_2()
+                            .py_2()
+                            .rounded_md()
+                            .when(self.comment_slash_index == ix, |row| row.bg(skin.selection))
+                            .hover(|row| row.bg(skin.selection))
                             .cursor_pointer()
-                            .label(label)
+                            .child(div().text_size(px(13.)).text_color(skin.text).child(label))
+                            .child(
+                                div()
+                                    .font_family(crate::theme::code_font())
+                                    .text_size(px(10.))
+                                    .text_color(skin.muted)
+                                    .child(format!("```{language}")),
+                            )
+                            .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
+                                if *hovered && a.comment_slash_index != ix {
+                                    a.comment_slash_index = ix;
+                                    c.notify();
+                                }
+                            }))
                             .on_click(cx.listener(move |a, _, w, c| {
                                 a.insert_slash_edit(code_block(language, ""), w, c)
                             })),
@@ -540,19 +729,26 @@ impl Workbench {
             SlashMenu::Replies => {
                 card = card.child(
                     Button::new("save-reply")
-                        .ghost()
+                        .secondary()
                         .small()
-                        .when(self.comment_slash_index == 0, |b| b.outline())
+                        .when(self.comment_slash_index == 0, |button| button.outline())
                         .cursor_pointer()
-                        .label("Save current comment as reply")
+                        .label("＋  Save current comment")
+                        .on_hover(cx.listener(|a, hovered: &bool, _, c| {
+                            if *hovered && a.comment_slash_index != 0 {
+                                a.comment_slash_index = 0;
+                                c.notify();
+                            }
+                        }))
                         .on_click(cx.listener(|a, _, _, c| a.save_comment_reply(c))),
                 );
                 if self.settings.saved_replies.is_empty() {
                     card = card.child(
                         div()
-                            .text_size(px(12.))
+                            .p_2()
+                            .text_size(px(11.))
                             .text_color(skin.muted)
-                            .child("Your saved replies will appear here."),
+                            .child("Write a comment, then save it for future reviews."),
                     );
                 }
                 for (ix, reply) in self.settings.saved_replies.iter().enumerate() {
@@ -560,14 +756,25 @@ impl Workbench {
                     card = card.child(
                         div()
                             .h_flex()
-                            .gap_1()
+                            .items_center()
+                            .gap_2()
+                            .rounded_md()
+                            .when(self.comment_slash_index == ix + 1, |row| {
+                                row.bg(skin.selection)
+                            })
                             .child(
                                 Button::new(("saved-reply", ix))
                                     .ghost()
                                     .small()
-                                    .when(self.comment_slash_index == ix + 1, |b| b.outline())
+                                    .flex_1()
                                     .cursor_pointer()
                                     .label(reply.title.clone())
+                                    .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
+                                        if *hovered && a.comment_slash_index != ix + 1 {
+                                            a.comment_slash_index = ix + 1;
+                                            c.notify();
+                                        }
+                                    }))
                                     .on_click(cx.listener(move |a, _, w, c| {
                                         let at = body.len();
                                         a.insert_slash_edit(Edit::caret(body.clone(), at), w, c);
@@ -589,6 +796,16 @@ impl Workbench {
                     );
                 }
             }
+        }
+        if matches!(menu, SlashMenu::Commands | SlashMenu::Language) {
+            card = card.child(
+                div()
+                    .px_1()
+                    .pt_1()
+                    .text_size(px(10.))
+                    .text_color(skin.muted)
+                    .child("↑↓ Navigate  ·  Enter Select  ·  Esc Close"),
+            );
         }
         card.into_any_element()
     }

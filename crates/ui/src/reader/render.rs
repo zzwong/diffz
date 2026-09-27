@@ -287,14 +287,14 @@ impl Render for Workbench {
             )
             .capture_action(
                 cx.listener(|a, _: &gpui_kit::component::input::MoveRight, _, c| {
-                    if !a.move_comment_menu(1, c) {
+                    if !a.move_comment_menu_horizontal(1, c) {
                         c.propagate();
                     }
                 }),
             )
             .capture_action(
                 cx.listener(|a, _: &gpui_kit::component::input::MoveLeft, _, c| {
-                    if !a.move_comment_menu(-1, c) {
+                    if !a.move_comment_menu_horizontal(-1, c) {
                         c.propagate();
                     }
                 }),
