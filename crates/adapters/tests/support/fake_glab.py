@@ -3,7 +3,7 @@
 import sys,json,pathlib
 root=pathlib.Path(__file__).parent
 state_path=root/'fake-state.json'
-state=json.loads(state_path.read_text()) if state_path.exists() else {'notes':[], 'discussions':[], 'approved':False}
+state=json.loads(state_path.read_text()) if state_path.exists() else {'notes':[], 'discussions':[], 'approved':False, 'requested_changes':False}
 args=sys.argv[1:]; method=args[args.index('--method')+1]; endpoint=args[args.index('--include')+1].split('?')[0]
 assert args[args.index('--hostname')+1]=='gitlab.com'
 base='a'*40; head=('c' if (root/'changed-head').exists() else 'b')*40
@@ -14,7 +14,15 @@ discussions=[{'id':'thread','notes':notes},{'id':'general','notes':[{'id':3,'bod
 code=200; raw=False
 if method=='POST':
     body=json.load(sys.stdin)
-    if endpoint.endswith('/discussions'):
+    if endpoint=='graphql':
+        assert 'mergeRequestRequestChanges' in body['query']
+        assert body['variables']=={'projectPath':'team/sub/repo','iid':'7'}
+        if (root/'fail-change-request').exists():
+            value={'data':{'mergeRequestRequestChanges':{'errors':['Not allowed'],'mergeRequest':None}}}
+        else:
+            state['requested_changes']=True
+            value={'data':{'mergeRequestRequestChanges':{'errors':[],'mergeRequest':{'iid':'7'}}}}
+    elif endpoint.endswith('/discussions'):
         note={'id':100+len(state['discussions']),'body':body['body'],'position':body['position'],'author':{'username':'me'},'type':'DiffNote'}
         value={'id':'new-discussion','notes':[note]};state['discussions'].append(value);code=201
     elif endpoint.endswith('/approve'):state['approved']=True;value={};code=201
@@ -31,6 +39,7 @@ elif endpoint.endswith('/discussions'):value=discussions
 elif endpoint.endswith('/pipelines'):value=[{'id':5,'sha':head,'status':'running','web_url':'https://gitlab.com/team/sub/repo/-/pipelines/5'}]
 elif endpoint.endswith('/jobs'):value=[{'id':6,'name':'Test','status':'success'}]
 elif endpoint.endswith('/approvals'):value={'approved_by':[{'user':{'username':'me'}}] if state['approved'] else []}
+elif endpoint.endswith('/reviewers'):value=[{'user':{'username':'me'},'state':'requested_changes'}] if state['requested_changes'] else []
 elif '/notes/' in endpoint:value=next(n for n in state['notes'] if n['id']==int(endpoint.rsplit('/',1)[1]))
 elif endpoint.endswith('/notes'):value=state['notes']
 elif endpoint.endswith('/merge_requests/7'):value=meta

@@ -24,6 +24,9 @@ smol = { workspace = true }
 unicode-linebreak = { workspace = true }
 unicode-bidi = "=0.3.18"
 
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+
 [features]
 default = []
 syntax = ["diffz-core/syntax"]

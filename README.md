@@ -131,8 +131,10 @@ block with a language, a quote of the selected source line, or a saved reply.
 You can save the current comment as a reply from that menu; replies are stored
 with your local settings.
 
-On GitLab you can publish one-line comments, summaries of reviews, and
-approvals. Blocking change requests and multi-line comments do not work yet.
+On GitLab you can publish single-line and multi-line diff comments, review
+summaries, approvals, and change requests. Multi-line comments must stay on one
+side of one diff hunk. GitLab controls whether a change request blocks merging
+according to its plan and project settings.
 
 ### Keyboard shortcuts
 

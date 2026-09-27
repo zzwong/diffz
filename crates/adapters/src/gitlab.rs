@@ -226,16 +226,30 @@ impl GitlabReader {
         }
         drop(files);
         let discussions = self.pages(a, &format!("{}/discussions", a.root()), c.clone())?;
-        // The MR payload never carries a "changes requested" ruling; approvals are all GitLab reports.
         let approved = self
             .get(a, &format!("{}/approvals", a.root()), c.clone())
             .ok()
             .and_then(|v| Some(!v["approved_by"].as_array()?.is_empty()))
             .unwrap_or(false);
+        let requested_changes = self
+            .get(a, &format!("{}/reviewers", a.root()), c.clone())
+            .ok()
+            .and_then(|v| {
+                Some(
+                    v.as_array()?
+                        .iter()
+                        .any(|reviewer| reviewer["state"] == "requested_changes"),
+                )
+            })
+            .unwrap_or(false);
         let mut overview = Overview {
             description: m["description"].as_str().map(str::to_owned),
             author: m["author"]["username"].as_str().map(str::to_owned),
-            decision: approved.then_some(ReviewDecision::Approved),
+            decision: if requested_changes {
+                Some(ReviewDecision::ChangesRequested)
+            } else {
+                approved.then_some(ReviewDecision::Approved)
+            },
             captured_at: Some(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -436,6 +450,40 @@ pub struct GitlabPosition {
     pub old_line: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_range: Option<GitlabLineRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitlabLineRange {
+    pub start: GitlabRangeLine,
+    pub end: GitlabRangeLine,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitlabRangeLine {
+    pub line_code: String,
+    #[serde(rename = "type")]
+    pub side: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_line: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_line: Option<u32>,
+}
+
+impl GitlabRangeLine {
+    fn new(path_hash: &str, side: Side, row: &diffz_core::patch::PatchRow) -> Self {
+        Self {
+            line_code: format!(
+                "{path_hash}_{}_{}",
+                row.old_line.unwrap_or(0),
+                row.new_line.unwrap_or(0)
+            ),
+            side: if side == Side::Right { "new" } else { "old" }.into(),
+            old_line: row.old_line,
+            new_line: row.new_line,
+        }
+    }
 }
 
 // Fingerprinted: keep this field order.
@@ -470,7 +518,9 @@ impl ReviewRules for GitlabRules {
         "--allow-gitlab-writes"
     }
     fn preview_note(&self) -> Option<&str> {
-        Some("GitLab accepts comments and approval. Choose one source line for each inline draft.")
+        Some(
+            "GitLab accepts comments, approval, and change requests. Inline drafts can cover lines in one diff hunk.",
+        )
     }
     fn reopen_address(&self, t: &RemoteTarget) -> String {
         let r = &t.repository;
@@ -490,21 +540,12 @@ impl ReviewRules for GitlabRules {
             encode(path)
         )
     }
-    fn supports(&self, verdict: Verdict) -> bool {
-        verdict != Verdict::RequestChanges
-    }
     fn check(
         &self,
-        verdict: Verdict,
+        _verdict: Verdict,
         summary: &str,
         drafts: &[Draft],
     ) -> std::result::Result<(), ReviewError> {
-        if !self.supports(verdict) {
-            return Err(ReviewError(
-                "GitLab permits comments and approval; blocking change requests remain unsupported"
-                    .into(),
-            ));
-        }
         let quick_action = |text: &str| text.lines().any(|l| l.trim_start().starts_with('/'));
         if quick_action(summary) || drafts.iter().any(|d| quick_action(&d.body)) {
             return Err(ReviewError(
@@ -542,19 +583,29 @@ impl ReviewRules for GitlabRules {
             new_path: new.into(),
             old_line: None,
             new_line: None,
+            line_range: None,
         };
         if !d.is_file_level() {
-            if d.start_line != d.line {
-                return Err(fail(
-                    "GitLab posting needs each draft to hold one source line for now",
-                ));
-            }
             let row = f
                 .line(d.side, d.line)
                 .ok_or_else(|| fail("the draft holds no source line to post to GitLab"))?;
             position.position_type = "text".into();
             position.old_line = row.old_line;
             position.new_line = row.new_line;
+            if d.start_line != d.line {
+                use sha1::{Digest, Sha1};
+                let start = f
+                    .line(d.side, d.start_line)
+                    .ok_or_else(|| fail("the draft starts outside the GitLab diff"))?;
+                let path_hash = Sha1::digest(new.as_bytes())
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                position.line_range = Some(GitlabLineRange {
+                    start: GitlabRangeLine::new(&path_hash, d.side, start),
+                    end: GitlabRangeLine::new(&path_hash, d.side, row),
+                });
+            }
         }
         serde_json::value::to_raw_value(&position)
             .map(Some)
@@ -683,6 +734,19 @@ impl ReviewRemote for GitlabWriter {
             {
                 return Err("Approval could not be verified".into());
             }
+        } else if review["state"] == "CHANGES_REQUESTED" {
+            let reviewers = self.reader.get(
+                &a,
+                &format!("{}/reviewers", a.root()),
+                Cancellation::default(),
+            )?;
+            if !reviewers.as_array().is_some_and(|users| {
+                users.iter().any(|u| {
+                    u["user"]["username"] == t.account && u["state"] == "requested_changes"
+                })
+            }) {
+                return Err("GitLab change request could not be verified".into());
+            }
         }
         let ds = self.reader.pages(
             &a,
@@ -714,7 +778,11 @@ impl ReviewRemote for GitlabWriter {
                         .as_str()
                         .map_or(pos["new_line"].as_u64().is_some(), |s| s == "RIGHT");
                     let key = if right { "new" } else { "old" };
-                    result.push(json!({"body":marked["body"],"path":pos[format!("{key}_path")],"line":pos[format!("{key}_line")],"side":if right{"RIGHT"}else{"LEFT"}}));
+                    let line = &pos[format!("{key}_line")];
+                    let start_line = pos["line_range"]["start"][format!("{key}_line")]
+                        .as_u64()
+                        .map_or_else(|| line.clone(), |n| json!(n));
+                    result.push(json!({"body":marked["body"],"path":pos[format!("{key}_path")],"line":line,"start_line":start_line,"side":if right{"RIGHT"}else{"LEFT"}}));
                 }
             }
         }
@@ -732,13 +800,49 @@ impl ReviewRemote for GitlabWriter {
         Ok(result)
     }
     fn send(&self, p: &PreparedReview) -> SendOutcome {
-        if !p.verify(&GitlabRules) || p.verdict == Verdict::RequestChanges {
+        if !p.verify(&GitlabRules) {
             return SendOutcome::Rejected(422);
         }
         let a = MrAddress::from_target(&p.target);
         let tag = marker(p);
         let mut sent = false;
         let result = (|| -> Result<Value> {
+            if p.verdict == Verdict::RequestChanges {
+                if self.current(&p.target)? != p.target {
+                    return Err("MR changed before requesting changes".into());
+                }
+                sent = true;
+                let response = self.reader.request(
+                    &a,
+                    "graphql",
+                    "POST",
+                    Some(&json!({
+                        "query": "mutation($projectPath: ID!, $iid: String!) { mergeRequestRequestChanges(input: { projectPath: $projectPath, iid: $iid }) { errors mergeRequest { iid } } }",
+                        "variables": {"projectPath": a.project, "iid": a.number.to_string()}
+                    })),
+                    Cancellation::default(),
+                )?;
+                if response.status != 200 {
+                    return Err(
+                        format!("GitLab change request returned HTTP {}", response.status).into(),
+                    );
+                }
+                let body: Value = serde_json::from_slice(&response.body)?;
+                let result = &body["data"]["mergeRequestRequestChanges"];
+                if body["errors"]
+                    .as_array()
+                    .is_some_and(|errors| !errors.is_empty())
+                    || result["errors"]
+                        .as_array()
+                        .is_some_and(|errors| !errors.is_empty())
+                    || result["mergeRequest"]["iid"]
+                        .as_str()
+                        .and_then(|iid| iid.parse::<u64>().ok())
+                        != Some(a.number)
+                {
+                    return Err("GitLab did not confirm the change request".into());
+                }
+            }
             for comment in &p.comments {
                 if self.current(&p.target)? != p.target {
                     return Err("MR changed during publication".into());

@@ -92,10 +92,10 @@ impl Workbench {
         self.return_focus = window.focused(cx);
         self.panel = Panel::Line;
         self.reset_comment_editor();
-        self.draft_input.update(cx, |input, cx| {
+        self.composer.draft_input.update(cx, |input, cx| {
             input.set_value(existing.map_or_else(String::new, |d| d.body), window, cx)
         });
-        let focus = self.draft_input.read(cx).focus_handle(cx);
+        let focus = self.composer.draft_input.read(cx).focus_handle(cx);
         focus.focus(window, cx);
         window.defer(cx, move |window, cx| focus.focus(window, cx));
         cx.notify();
@@ -131,9 +131,14 @@ impl Workbench {
         self.return_focus = window.focused(cx);
         self.panel = Panel::Line;
         self.reset_comment_editor();
-        self.draft_input
+        self.composer
+            .draft_input
             .update(cx, |input, cx| input.set_value(d.body, window, cx));
-        self.draft_input.read(cx).focus_handle(cx).focus(window, cx);
+        self.composer
+            .draft_input
+            .read(cx)
+            .focus_handle(cx)
+            .focus(window, cx);
         cx.notify();
     }
     pub(super) fn edit_draft(&mut self, body: String, cx: &mut Context<Self>) {
