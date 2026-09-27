@@ -121,6 +121,7 @@ impl Workbench {
         self.comment_slash_range = None;
         self.comment_slash_query.clear();
         self.comment_slash_index = 0;
+        self.table_hover_dimensions = None;
     }
 
     pub(crate) fn sync_comment_slash(&mut self, cx: &mut Context<Self>) {
@@ -236,7 +237,10 @@ impl Workbench {
     ) {
         self.comment_slash_index = 0;
         match cmd {
-            SlashCommand::Table => self.comment_slash = Some(SlashMenu::Table),
+            SlashCommand::Table => {
+                self.table_hover_dimensions = None;
+                self.comment_slash = Some(SlashMenu::Table);
+            }
             SlashCommand::Language => self.comment_slash = Some(SlashMenu::Language),
             SlashCommand::Replies => self.comment_slash = Some(SlashMenu::Replies),
             SlashCommand::QuoteSource => {
@@ -704,10 +708,16 @@ impl Workbench {
                 )
                 .when(menu != SlashMenu::Commands, |row| {
                     row.child(
-                        Button::new("comment-menu-back")
-                            .ghost()
-                            .small()
-                            .label("← Back")
+                        div()
+                            .id("comment-menu-back")
+                            .px_2()
+                            .py_1()
+                            .rounded_sm()
+                            .cursor_pointer()
+                            .text_size(px(11.))
+                            .text_color(skin.muted)
+                            .hover(|style| style.bg(skin.selection).text_color(skin.text))
+                            .child("← Back")
                             .on_click(cx.listener(|a, _, _, c| {
                                 a.comment_slash = Some(SlashMenu::Commands);
                                 a.comment_slash_index = 0;
@@ -804,22 +814,10 @@ impl Workbench {
                 let valid = self.valid_table_dimensions(cx).is_some();
                 card = card.child(
                     div()
-                        .v_flex()
-                        .gap_1()
                         .px_1()
-                        .child(
-                            div()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_size(px(15.))
-                                .text_color(skin.text)
-                                .child("Choose a table size"),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(11.))
-                                .text_color(skin.muted)
-                                .child("Pick a grid cell or type exact dimensions."),
-                        ),
+                        .text_size(px(11.))
+                        .text_color(skin.muted)
+                        .child("Pick a size or enter columns × rows"),
                 );
                 let mut grid = div().v_flex().gap_1().child(
                     div()
@@ -830,7 +828,10 @@ impl Workbench {
                 for grid_row in 1..=5 {
                     let mut row = div().h_flex().gap_1();
                     for grid_column in 1..=5 {
-                        let highlighted = grid_row <= rows && grid_column <= columns;
+                        let (preview_columns, preview_rows) =
+                            self.table_hover_dimensions.unwrap_or((columns, rows));
+                        let highlighted =
+                            grid_row <= preview_rows && grid_column <= preview_columns;
                         row = row.child(
                             div()
                                 .id(("table-cell", (grid_row - 1) * 5 + grid_column - 1))
@@ -850,12 +851,15 @@ impl Workbench {
                                 .rounded_sm()
                                 .cursor_pointer()
                                 .aria_label(format!("{grid_column} columns, {grid_row} rows"))
-                                .on_hover(cx.listener(move |a, hovered: &bool, w, c| {
-                                    if *hovered
-                                        && (a.table_columns != grid_column
-                                            || a.table_rows != grid_row)
+                                .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
+                                    let current = (grid_column, grid_row);
+                                    if *hovered && a.table_hover_dimensions != Some(current) {
+                                        a.table_hover_dimensions = Some(current);
+                                        c.notify();
+                                    } else if !*hovered && a.table_hover_dimensions == Some(current)
                                     {
-                                        a.set_table_dimensions(grid_column, grid_row, w, c);
+                                        a.table_hover_dimensions = None;
+                                        c.notify();
                                     }
                                 }))
                                 .on_click(cx.listener(move |a, _, w, c| {
@@ -868,7 +872,7 @@ impl Workbench {
                 let dimensions = div()
                     .v_flex()
                     .gap_2()
-                    .flex_1()
+                    .w(px(118.))
                     .child(
                         div()
                             .text_size(px(10.))
@@ -903,7 +907,7 @@ impl Workbench {
                     div()
                         .h_flex()
                         .items_start()
-                        .gap_4()
+                        .gap_3()
                         .px_1()
                         .child(grid)
                         .child(dimensions),
@@ -914,21 +918,17 @@ impl Workbench {
                         .items_center()
                         .justify_between()
                         .px_1()
-                        .pt_1()
+                        .pt_2()
+                        .border_t_1()
+                        .border_color(skin.border)
                         .child(
-                            div()
-                                .v_flex()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(skin.text)
-                                        .child(format!("{columns} columns × {rows} rows")),
-                                )
-                                .child(div().text_size(px(10.)).text_color(skin.muted).child(
-                                    format!("Up to {MAX_TABLE_DIMENSION} × {MAX_TABLE_DIMENSION}"),
-                                )),
+                            div().child(
+                                div()
+                                    .text_size(px(12.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(skin.text)
+                                    .child(format!("{columns} × {rows} table")),
+                            ),
                         )
                         .child(
                             Button::new("insert-table")

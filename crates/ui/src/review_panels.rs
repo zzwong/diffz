@@ -464,7 +464,13 @@ impl Workbench {
                 && !self.comment_preview
         }) {
             let viewport_width = f32::from(size.width);
-            let menu_width = 356_f32.min((viewport_width - 32.).max(240.));
+            let preferred_width: f32 = match menu {
+                crate::comment_editor::SlashMenu::Commands => 340.,
+                crate::comment_editor::SlashMenu::Table => 296.,
+                crate::comment_editor::SlashMenu::Language => 264.,
+                crate::comment_editor::SlashMenu::Replies => 320.,
+            };
+            let menu_width = preferred_width.min((viewport_width - 32.).max(180.));
             let menu_x = (x + width - menu_width - 16.)
                 .clamp(16., (viewport_width - menu_width - 16.).max(16.));
             let menu_y = (y + 80.).min((f32::from(size.height) - 184.).max(16.));
