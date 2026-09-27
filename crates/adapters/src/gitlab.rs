@@ -125,7 +125,12 @@ impl GitlabReader {
         ]);
         req.cwd = Some(std::env::temp_dir());
         if let Some(body) = body {
-            req.args.extend(["--input".into(), "-".into()]);
+            req.args.extend([
+                "--header".into(),
+                "Content-Type: application/json".into(),
+                "--input".into(),
+                "-".into(),
+            ]);
             req.stdin = serde_json::to_vec(body)?;
         }
         let out = Runner::run(req, cancel)?;

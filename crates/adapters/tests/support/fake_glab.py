@@ -13,6 +13,7 @@ notes=[{'id':1,'body':'Existing thread','author':{'username':'reviewer'},'positi
 discussions=[{'id':'thread','notes':notes},{'id':'general','notes':[{'id':3,'body':'General note','author':{'username':'me'}}]}]+state['discussions']
 code=200; raw=False
 if method=='POST':
+    assert args[args.index('--header')+1]=='Content-Type: application/json'
     body=json.load(sys.stdin)
     if endpoint=='graphql':
         assert 'mergeRequestRequestChanges' in body['query']
