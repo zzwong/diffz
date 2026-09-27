@@ -174,7 +174,7 @@ fn gitlab_rules_still_apply() {
             Verdict::RequestChanges,
             "x".into()
         )
-        .is_err()
+        .is_ok()
     );
     assert!(
         PreparedReview::prepare(

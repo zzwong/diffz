@@ -124,6 +124,172 @@ fn gitlab_read_publish_and_history_are_local_mocked() {
     assert!(store.recent().unwrap().is_empty());
     assert!(store.snapshot(&s.id).unwrap().verify_identity());
 }
+
+#[test]
+#[cfg(unix)]
+fn gitlab_multiline_draft_posts_a_frozen_line_range() {
+    use sha1::{Digest, Sha1};
+    let temp = tempfile::tempdir().unwrap();
+    let reader = reader(temp.path());
+    let snapshot = reader
+        .snapshot(
+            &MrAddress::parse("team/sub/repo!7").unwrap(),
+            Cancellation::default(),
+        )
+        .unwrap();
+    let store = Arc::new(Store::open(&temp.path().join("db")).unwrap());
+    store.put_snapshot(&snapshot).unwrap();
+    let mut draft = Draft {
+        id: DraftId("range".into()),
+        snapshot: snapshot.id.clone(),
+        file: snapshot.patch.files[0].id.clone(),
+        side: Side::Left,
+        start_line: 1,
+        line: 2,
+        file_level: false,
+        body: "Please revisit these lines.".into(),
+        version: 1,
+        saved_version: 0,
+        published: false,
+    };
+    draft.saved_version = store.save_draft(draft.clone()).unwrap();
+    let prepared = PreparedReview::prepare(
+        &GitlabRules,
+        OperationId("range-op".into()),
+        &snapshot,
+        vec![draft.clone()],
+        Verdict::Comment,
+        "Review summary.".into(),
+    )
+    .unwrap();
+    let left_position = position(&prepared);
+    let range = left_position.line_range.as_ref().unwrap();
+    let path_hash = Sha1::digest(b"a.rs")
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(range.start.line_code, format!("{path_hash}_1_1"));
+    assert_eq!(range.end.line_code, format!("{path_hash}_2_0"));
+    assert_eq!(range.start.side, "old");
+    assert_eq!(range.end.side, "old");
+    assert_eq!(left_position.old_line, Some(2));
+    assert_eq!(left_position.new_line, None);
+    let mut right = draft;
+    right.side = Side::Right;
+    let right_review = PreparedReview::prepare(
+        &GitlabRules,
+        OperationId("right-range-op".into()),
+        &snapshot,
+        vec![right],
+        Verdict::Comment,
+        "Right-side summary.".into(),
+    )
+    .unwrap();
+    let right_range = position(&right_review).line_range.unwrap();
+    assert_eq!(right_range.start.line_code, format!("{path_hash}_1_1"));
+    assert_eq!(right_range.end.line_code, format!("{path_hash}_0_2"));
+    assert_eq!(right_range.end.side, "new");
+    store.insert_prepared(&prepared, &GitlabRules).unwrap();
+    let outbox = Outbox::new(
+        store,
+        Arc::new(GitlabRules),
+        Arc::new(GitlabWriter::new(reader)),
+    );
+    assert_eq!(
+        outbox.publish(prepared).unwrap().state,
+        OutboxState::Confirmed
+    );
+    let state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(temp.path().join("fake-state.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        state["discussions"][0]["notes"][0]["position"]["line_range"]["start"]["line_code"],
+        format!("{path_hash}_1_1")
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn gitlab_request_changes_uses_graphql_and_verifies_reviewer_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let reader = reader(temp.path());
+    let snapshot = reader
+        .snapshot(
+            &MrAddress::parse("team/sub/repo!7").unwrap(),
+            Cancellation::default(),
+        )
+        .unwrap();
+    let store = Arc::new(Store::open(&temp.path().join("db")).unwrap());
+    store.put_snapshot(&snapshot).unwrap();
+    let prepared = PreparedReview::prepare(
+        &GitlabRules,
+        OperationId("change-op".into()),
+        &snapshot,
+        vec![],
+        Verdict::RequestChanges,
+        "Please address this before merging.".into(),
+    )
+    .unwrap();
+    store.insert_prepared(&prepared, &GitlabRules).unwrap();
+    let outbox = Outbox::new(
+        store,
+        Arc::new(GitlabRules),
+        Arc::new(GitlabWriter::new(reader.clone())),
+    );
+    assert_eq!(
+        outbox.publish(prepared).unwrap().state,
+        OutboxState::Confirmed
+    );
+    let refreshed = reader
+        .snapshot(
+            &MrAddress::parse("team/sub/repo!7").unwrap(),
+            Cancellation::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        refreshed.overview.decision,
+        Some(diffz_core::review_details::ReviewDecision::ChangesRequested)
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn gitlab_change_request_error_never_posts_a_review_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    let reader = reader(temp.path());
+    let snapshot = reader
+        .snapshot(
+            &MrAddress::parse("team/sub/repo!7").unwrap(),
+            Cancellation::default(),
+        )
+        .unwrap();
+    let store = Arc::new(Store::open(&temp.path().join("db")).unwrap());
+    store.put_snapshot(&snapshot).unwrap();
+    let prepared = PreparedReview::prepare(
+        &GitlabRules,
+        OperationId("failed-change-op".into()),
+        &snapshot,
+        vec![],
+        Verdict::RequestChanges,
+        "Changes needed.".into(),
+    )
+    .unwrap();
+    store.insert_prepared(&prepared, &GitlabRules).unwrap();
+    std::fs::write(temp.path().join("fail-change-request"), "").unwrap();
+    let outbox = Outbox::new(
+        store,
+        Arc::new(GitlabRules),
+        Arc::new(GitlabWriter::new(reader)),
+    );
+    assert_eq!(
+        outbox.publish(prepared).unwrap().state,
+        OutboxState::UnknownOutcome
+    );
+    let state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(temp.path().join("fake-state.json")).unwrap())
+            .unwrap();
+    assert!(state["notes"].as_array().unwrap().is_empty());
+}
 #[test]
 #[cfg(unix)]
 fn gitlab_file_level_draft_publishes_as_plain_note_not_discussion() {

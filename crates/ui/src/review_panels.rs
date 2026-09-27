@@ -154,7 +154,8 @@ impl Workbench {
         self.return_focus = window.focused(cx);
         self.panel = Panel::Line;
         self.reset_comment_editor();
-        self.draft_input
+        self.composer
+            .draft_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.panel_focus.focus(window, cx);
         cx.notify();
@@ -456,12 +457,12 @@ impl Workbench {
                 .max_h(px((f32::from(size.height) - y - 16.).max(200.)))
                 .when(!reading, |d| d.overflow_y_scroll()),
         );
-        if let Some(menu) = self.comment_slash.filter(|_| {
+        if let Some(menu) = self.composer.comment_slash.filter(|_| {
             source.is_some()
                 && !reading
                 && !self.busy
                 && !selected.is_some_and(|draft| draft.published)
-                && !self.comment_preview
+                && !self.composer.comment_preview
         }) {
             let viewport_width = f32::from(size.width);
             let preferred_width: f32 = match menu {

@@ -5,7 +5,7 @@ mod source;
 pub(crate) use self::appearance::apply_appearance;
 use crate::{
     commands,
-    comment_editor::MAX_TABLE_DIMENSION,
+    comment_editor::{ComposerState, MAX_TABLE_DIMENSION},
     file_browser::FileBrowserState,
     reader::FilesPeek,
     theme::Skin,
@@ -86,18 +86,7 @@ pub(crate) struct Workbench {
     pub filter_input: Entity<InputState>,
     pub find_input: Entity<InputState>,
     pub palette_input: Entity<InputState>,
-    pub draft_input: Entity<TextareaState>,
-    pub table_columns_input: Entity<InputState>,
-    pub table_rows_input: Entity<InputState>,
-    pub table_columns: usize,
-    pub table_rows: usize,
-    pub table_hover_dimensions: Option<(usize, usize)>,
-    pub insert_table_hovered: bool,
-    pub comment_preview: bool,
-    pub comment_slash: Option<crate::comment_editor::SlashMenu>,
-    pub comment_slash_range: Option<std::ops::Range<usize>>,
-    pub comment_slash_query: String,
-    pub comment_slash_index: usize,
+    pub composer: ComposerState,
     pub summary_input: Entity<TextareaState>,
     pub export_input: Entity<InputState>,
     pub diff_focus: FocusHandle,
@@ -269,7 +258,7 @@ impl Workbench {
             |this: &mut Self, state, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     if let Ok(columns) = state.read(cx).value().parse::<usize>() {
-                        this.table_columns = columns;
+                        this.composer.table_columns = columns;
                     }
                     cx.notify();
                 }
@@ -280,7 +269,7 @@ impl Workbench {
             |this: &mut Self, state, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     if let Ok(rows) = state.read(cx).value().parse::<usize>() {
-                        this.table_rows = rows;
+                        this.composer.table_rows = rows;
                     }
                     cx.notify();
                 }
@@ -342,18 +331,7 @@ impl Workbench {
             filter_input,
             find_input,
             palette_input,
-            draft_input,
-            table_columns_input,
-            table_rows_input,
-            table_columns: 3,
-            table_rows: 2,
-            table_hover_dimensions: None,
-            insert_table_hovered: false,
-            comment_preview: false,
-            comment_slash: None,
-            comment_slash_range: None,
-            comment_slash_query: String::new(),
-            comment_slash_index: 0,
+            composer: ComposerState::new(draft_input, table_columns_input, table_rows_input),
             summary_input,
             export_input,
             diff_focus: cx.focus_handle().tab_stop(true),

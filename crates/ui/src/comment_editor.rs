@@ -1,5 +1,7 @@
 mod markdown;
-use self::markdown::{Edit, Format, block_context, code_block, format, slash_query, table};
+mod state;
+use self::markdown::{Edit, Format, block_context, code_block, format, table};
+pub(crate) use self::state::ComposerState;
 use crate::app::Workbench;
 use crate::icons::AppIcon;
 use crate::theme::Skin;
@@ -14,7 +16,7 @@ use gpui_kit::component::{
 use gpui_kit::{prelude::*, *};
 use std::{ops::Range, sync::atomic::AtomicUsize};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlashMenu {
     Commands,
     Table,
@@ -136,51 +138,19 @@ fn table_step_button(
 
 impl Workbench {
     pub(crate) fn reset_comment_editor(&mut self) {
-        self.comment_preview = false;
-        self.comment_slash = None;
-        self.comment_slash_range = None;
-        self.comment_slash_query.clear();
-        self.comment_slash_index = 0;
-        self.table_hover_dimensions = None;
-        self.insert_table_hovered = false;
+        self.composer.reset();
     }
 
     pub(crate) fn sync_comment_slash(&mut self, cx: &mut Context<Self>) {
-        let previous = (
-            self.comment_slash,
-            self.comment_slash_range.clone(),
-            self.comment_slash_query.clone(),
-            self.comment_slash_index,
-        );
-        let input = self.draft_input.read(cx);
-        let text = input.value();
-        if let Some((range, query)) = input
-            .selected_range()
-            .is_empty()
-            .then(|| slash_query(&text, input.cursor()))
-            .flatten()
-        {
-            if self.comment_slash_range.as_ref() != Some(&range)
-                || self.comment_slash_query != query
-            {
-                self.comment_slash_index = 0;
-                self.comment_slash = Some(SlashMenu::Commands);
-            }
-            self.comment_slash_range = Some(range);
-            self.comment_slash_query = query;
-        } else if self.comment_slash_range.is_some() {
-            self.comment_slash = None;
-            self.comment_slash_range = None;
-            self.comment_slash_query.clear();
-        }
-        if previous
-            != (
-                self.comment_slash,
-                self.comment_slash_range.clone(),
-                self.comment_slash_query.clone(),
-                self.comment_slash_index,
+        let (text, cursor, selection_empty) = {
+            let input = self.composer.draft_input.read(cx);
+            (
+                input.value().to_string(),
+                input.cursor(),
+                input.selected_range().is_empty(),
             )
-        {
+        };
+        if self.composer.sync_slash(&text, cursor, selection_empty) {
             cx.notify();
         }
     }
@@ -192,7 +162,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let input = self.draft_input.clone();
+        let input = self.composer.draft_input.clone();
         input.update(cx, |input, cx| {
             let range = replace_range.unwrap_or_else(|| input.selected_range());
             input.set_selected_range(range.clone(), cx);
@@ -201,16 +171,16 @@ impl Workbench {
             input.set_selected_range(start + edit.selection.start..start + edit.selection.end, cx);
         });
         input.read(cx).focus_handle(cx).focus(window, cx);
-        self.comment_slash = None;
-        self.comment_slash_range = None;
-        self.comment_slash_query.clear();
-        self.comment_slash_index = 0;
+        self.composer.comment_slash = None;
+        self.composer.comment_slash_range = None;
+        self.composer.comment_slash_query.clear();
+        self.composer.comment_slash_index = 0;
         cx.notify();
     }
 
     fn format_comment(&mut self, action: Format, window: &mut Window, cx: &mut Context<Self>) {
         let edit = {
-            let input = self.draft_input.read(cx);
+            let input = self.composer.draft_input.read(cx);
             let text = input.value();
             let range = input.selected_range();
             let selected = text.get(range.clone()).unwrap_or("");
@@ -233,8 +203,8 @@ impl Workbench {
     }
 
     fn active_slash_range(&self, cx: &App) -> Option<Range<usize>> {
-        self.comment_slash_range.clone().filter(|range| {
-            let input = self.draft_input.read(cx);
+        self.composer.comment_slash_range.clone().filter(|range| {
+            let input = self.composer.draft_input.read(cx);
             input.cursor() == range.end
                 && input
                     .value()
@@ -246,7 +216,7 @@ impl Workbench {
     fn insert_slash_edit(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
         let range = self.active_slash_range(cx);
         let edit = {
-            let input = self.draft_input.read(cx);
+            let input = self.composer.draft_input.read(cx);
             let text = input.value();
             let replace = range.clone().unwrap_or_else(|| input.selected_range());
             block_context(edit, &text[..replace.start], &text[replace.end..])
@@ -265,11 +235,11 @@ impl Workbench {
                 }
                 cmd.title()
                     .to_ascii_lowercase()
-                    .contains(&self.comment_slash_query)
+                    .contains(&self.composer.comment_slash_query)
                     || cmd
                         .detail()
                         .to_ascii_lowercase()
-                        .contains(&self.comment_slash_query)
+                        .contains(&self.composer.comment_slash_query)
             })
             .collect()
     }
@@ -303,15 +273,15 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.comment_slash_index = 0;
+        self.composer.comment_slash_index = 0;
         match cmd {
             SlashCommand::Table => {
-                self.table_hover_dimensions = None;
-                self.insert_table_hovered = false;
-                self.comment_slash = Some(SlashMenu::Table);
+                self.composer.table_hover_dimensions = None;
+                self.composer.insert_table_hovered = false;
+                self.composer.comment_slash = Some(SlashMenu::Table);
             }
-            SlashCommand::Language => self.comment_slash = Some(SlashMenu::Language),
-            SlashCommand::Replies => self.comment_slash = Some(SlashMenu::Replies),
+            SlashCommand::Language => self.composer.comment_slash = Some(SlashMenu::Language),
+            SlashCommand::Replies => self.composer.comment_slash = Some(SlashMenu::Replies),
             SlashCommand::QuoteSource => {
                 self.quote_source_comment(window, cx);
                 return;
@@ -342,10 +312,10 @@ impl Workbench {
     }
 
     pub(crate) fn dismiss_comment_menu(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.comment_slash.is_none() {
+        if self.composer.comment_slash.is_none() {
             return false;
         }
-        self.comment_slash = None;
+        self.composer.comment_slash = None;
         cx.stop_propagation();
         cx.notify();
         true
@@ -370,15 +340,18 @@ impl Workbench {
                 .filter(|value| (1..=MAX_TABLE_DIMENSION).contains(value))
         };
         Some((
-            parse(&self.table_columns_input)?,
-            parse(&self.table_rows_input)?,
+            parse(&self.composer.table_columns_input)?,
+            parse(&self.composer.table_rows_input)?,
         ))
     }
 
     fn table_number_focused(&self, window: &Window, cx: &App) -> bool {
-        [&self.table_columns_input, &self.table_rows_input]
-            .into_iter()
-            .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
+        [
+            &self.composer.table_columns_input,
+            &self.composer.table_rows_input,
+        ]
+        .into_iter()
+        .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
     }
 
     fn set_table_dimensions(
@@ -388,27 +361,27 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.table_columns = columns;
-        self.table_rows = rows;
-        self.table_columns_input.update(cx, |input, cx| {
+        self.composer.table_columns = columns;
+        self.composer.table_rows = rows;
+        self.composer.table_columns_input.update(cx, |input, cx| {
             input.set_value(columns.to_string(), window, cx)
         });
-        self.table_rows_input.update(cx, |input, cx| {
+        self.composer.table_rows_input.update(cx, |input, cx| {
             input.set_value(rows.to_string(), window, cx)
         });
         cx.notify();
     }
 
     pub(crate) fn move_comment_menu(&mut self, delta: isize, cx: &mut Context<Self>) -> bool {
-        let Some(menu) = self.comment_slash else {
+        let Some(menu) = self.composer.comment_slash else {
             return false;
         };
         let count = self.comment_menu_count(menu);
         if count == 0 {
             return false;
         }
-        self.comment_slash_index =
-            (self.comment_slash_index as isize + delta).rem_euclid(count as isize) as usize;
+        self.composer.comment_slash_index = (self.composer.comment_slash_index as isize + delta)
+            .rem_euclid(count as isize) as usize;
         cx.stop_propagation();
         cx.notify();
         true
@@ -420,13 +393,13 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.comment_slash == Some(SlashMenu::Table) {
+        if self.composer.comment_slash == Some(SlashMenu::Table) {
             if self.table_number_focused(window, cx) {
                 return false;
             }
             self.set_table_dimensions(
-                self.table_columns.min(5),
-                (self.table_rows as isize + delta).clamp(1, 5) as usize,
+                self.composer.table_columns.min(5),
+                (self.composer.table_rows as isize + delta).clamp(1, 5) as usize,
                 window,
                 cx,
             );
@@ -443,13 +416,13 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.comment_slash == Some(SlashMenu::Table) {
+        if self.composer.comment_slash == Some(SlashMenu::Table) {
             if self.table_number_focused(window, cx) {
                 return false;
             }
             self.set_table_dimensions(
-                (self.table_columns as isize + delta).clamp(1, 5) as usize,
-                self.table_rows.min(5),
+                (self.composer.table_columns as isize + delta).clamp(1, 5) as usize,
+                self.composer.table_rows.min(5),
                 window,
                 cx,
             );
@@ -465,7 +438,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(menu) = self.comment_slash else {
+        let Some(menu) = self.composer.comment_slash else {
             return false;
         };
         let commands = self.matching_comment_commands();
@@ -475,7 +448,7 @@ impl Workbench {
         }
         match menu {
             SlashMenu::Commands => self.choose_slash_command(
-                commands[self.comment_slash_index.min(count - 1)],
+                commands[self.composer.comment_slash_index.min(count - 1)],
                 window,
                 cx,
             ),
@@ -485,15 +458,19 @@ impl Workbench {
                 }
             }
             SlashMenu::Language => self.insert_slash_edit(
-                code_block(LANGUAGES[self.comment_slash_index.min(count - 1)].1, ""),
+                code_block(
+                    LANGUAGES[self.composer.comment_slash_index.min(count - 1)].1,
+                    "",
+                ),
                 window,
                 cx,
             ),
-            SlashMenu::Replies if self.comment_slash_index == 0 => {
+            SlashMenu::Replies if self.composer.comment_slash_index == 0 => {
                 self.save_comment_reply(window, cx)
             }
             SlashMenu::Replies => {
-                let body = self.settings.saved_replies[self.comment_slash_index.min(count - 1) - 1]
+                let body = self.settings.saved_replies
+                    [self.composer.comment_slash_index.min(count - 1) - 1]
                     .body
                     .clone();
                 self.insert_slash_edit(Edit::caret(body.clone(), body.len()), window, cx);
@@ -505,7 +482,7 @@ impl Workbench {
     }
 
     fn current_reply_body(&self, cx: &App) -> String {
-        let mut body = self.draft_input.read(cx).value().to_string();
+        let mut body = self.composer.draft_input.read(cx).value().to_string();
         if let Some(range) = self.active_slash_range(cx) {
             body.replace_range(range, "");
         }
@@ -537,8 +514,8 @@ impl Workbench {
         if let Some(range) = self.active_slash_range(cx) {
             self.edit_comment(Edit::caret(String::new(), 0), Some(range), window, cx);
         }
-        self.comment_slash = Some(SlashMenu::Replies);
-        self.comment_slash_index = self
+        self.composer.comment_slash = Some(SlashMenu::Replies);
+        self.composer.comment_slash_index = self
             .settings
             .saved_replies
             .iter()
@@ -591,14 +568,14 @@ impl Workbench {
                     .tooltip("Insert table, code, source quote, or saved reply")
                     .disabled(readonly)
                     .on_click(cx.listener(|a, _, _, c| {
-                        a.comment_slash = if a.comment_slash.is_some() {
+                        a.composer.comment_slash = if a.composer.comment_slash.is_some() {
                             None
                         } else {
                             Some(SlashMenu::Commands)
                         };
-                        a.comment_slash_range = None;
-                        a.comment_slash_query.clear();
-                        a.comment_slash_index = 0;
+                        a.composer.comment_slash_range = None;
+                        a.composer.comment_slash_query.clear();
+                        a.composer.comment_slash_index = 0;
                         c.notify();
                     })),
             )
@@ -607,17 +584,17 @@ impl Workbench {
                 Button::new("comment-preview")
                     .ghost()
                     .small()
-                    .when(self.comment_preview, |button| button.secondary())
-                    .label(if self.comment_preview {
+                    .when(self.composer.comment_preview, |button| button.secondary())
+                    .label(if self.composer.comment_preview {
                         "Write"
                     } else {
                         "Preview"
                     })
                     .on_click(cx.listener(|a, _, w, c| {
-                        a.comment_preview = !a.comment_preview;
-                        a.comment_slash = None;
-                        if !a.comment_preview {
-                            a.draft_input.read(c).focus_handle(c).focus(w, c);
+                        a.composer.comment_preview = !a.composer.comment_preview;
+                        a.composer.comment_slash = None;
+                        if !a.composer.comment_preview {
+                            a.composer.draft_input.read(c).focus_handle(c).focus(w, c);
                         }
                         c.notify();
                     })),
@@ -627,8 +604,8 @@ impl Workbench {
             .v_flex()
             .gap_2()
             .child(toolbar)
-            .child(if self.comment_preview {
-                let body = self.draft_input.read(cx).value().to_string();
+            .child(if self.composer.comment_preview {
+                let body = self.composer.draft_input.read(cx).value().to_string();
                 let preview_style = gpui_kit::base::text::TextViewStyle::default()
                     .with_foreground(skin.text)
                     .with_muted_foreground(skin.muted)
@@ -719,7 +696,7 @@ impl Workbench {
                     )
                     .into_any_element()
             } else {
-                Textarea::new(&self.draft_input)
+                Textarea::new(&self.composer.draft_input)
                     .h(px(112.))
                     .readonly(readonly)
                     .aria_label("Local review comment in Markdown")
@@ -815,8 +792,8 @@ impl Workbench {
                             .active(|style| style.bg(skin.accent.opacity(0.3)))
                             .child("← Back")
                             .on_click(cx.listener(|a, _, _, c| {
-                                a.comment_slash = Some(SlashMenu::Commands);
-                                a.comment_slash_index = 0;
+                                a.composer.comment_slash = Some(SlashMenu::Commands);
+                                a.composer.comment_slash_index = 0;
                                 c.notify();
                             })),
                     )
@@ -835,7 +812,7 @@ impl Workbench {
                     );
                 }
                 for (ix, cmd) in commands.into_iter().enumerate() {
-                    let selected = ix == self.comment_slash_index;
+                    let selected = ix == self.composer.comment_slash_index;
                     card = card.child(
                         div()
                             .id(("comment-command", ix))
@@ -850,8 +827,8 @@ impl Workbench {
                             .hover(|row| row.bg(skin.selection))
                             .active(|row| row.bg(skin.accent.opacity(0.3)))
                             .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
-                                if *hovered && a.comment_slash_index != ix {
-                                    a.comment_slash_index = ix;
+                                if *hovered && a.composer.comment_slash_index != ix {
+                                    a.composer.comment_slash_index = ix;
                                     c.notify();
                                 }
                             }))
@@ -906,15 +883,17 @@ impl Workbench {
                 }
             }
             SlashMenu::Table => {
-                let columns = self.table_columns;
-                let rows = self.table_rows;
+                let columns = self.composer.table_columns;
+                let rows = self.composer.table_rows;
                 let valid = self.valid_table_dimensions(cx).is_some();
                 let mut grid = div().v_flex().gap_1();
                 for grid_row in 1..=5 {
                     let mut row = div().h_flex().gap_1();
                     for grid_column in 1..=5 {
-                        let (preview_columns, preview_rows) =
-                            self.table_hover_dimensions.unwrap_or((columns, rows));
+                        let (preview_columns, preview_rows) = self
+                            .composer
+                            .table_hover_dimensions
+                            .unwrap_or((columns, rows));
                         let highlighted =
                             grid_row <= preview_rows && grid_column <= preview_columns;
                         row = row.child(
@@ -940,12 +919,15 @@ impl Workbench {
                                 .active(|cell| cell.bg(skin.accent.opacity(0.75)))
                                 .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
                                     let current = (grid_column, grid_row);
-                                    if *hovered && a.table_hover_dimensions != Some(current) {
-                                        a.table_hover_dimensions = Some(current);
-                                        c.notify();
-                                    } else if !*hovered && a.table_hover_dimensions == Some(current)
+                                    if *hovered
+                                        && a.composer.table_hover_dimensions != Some(current)
                                     {
-                                        a.table_hover_dimensions = None;
+                                        a.composer.table_hover_dimensions = Some(current);
+                                        c.notify();
+                                    } else if !*hovered
+                                        && a.composer.table_hover_dimensions == Some(current)
+                                    {
+                                        a.composer.table_hover_dimensions = None;
                                         c.notify();
                                     }
                                 }))
@@ -971,7 +953,7 @@ impl Workbench {
                                     .child("Columns"),
                             )
                             .child(self.table_dimension_control(
-                                &self.table_columns_input,
+                                &self.composer.table_columns_input,
                                 "columns",
                                 window,
                                 cx,
@@ -988,7 +970,7 @@ impl Workbench {
                                     .child("Rows"),
                             )
                             .child(self.table_dimension_control(
-                                &self.table_rows_input,
+                                &self.composer.table_rows_input,
                                 "rows",
                                 window,
                                 cx,
@@ -1016,12 +998,14 @@ impl Workbench {
                             Button::new("insert-table")
                                 .primary()
                                 .small()
-                                .when(!self.insert_table_hovered, |button| button.outline())
+                                .when(!self.composer.insert_table_hovered, |button| {
+                                    button.outline()
+                                })
                                 .label(format!("Insert {columns} × {rows}"))
                                 .disabled(!valid)
                                 .on_hover(cx.listener(|a, hovered: &bool, _, c| {
-                                    if a.insert_table_hovered != *hovered {
-                                        a.insert_table_hovered = *hovered;
+                                    if a.composer.insert_table_hovered != *hovered {
+                                        a.composer.insert_table_hovered = *hovered;
                                         c.notify();
                                     }
                                 }))
@@ -1044,7 +1028,9 @@ impl Workbench {
                             .px_2()
                             .py_2()
                             .rounded_md()
-                            .when(self.comment_slash_index == ix, |row| row.bg(skin.selection))
+                            .when(self.composer.comment_slash_index == ix, |row| {
+                                row.bg(skin.selection)
+                            })
                             .hover(|row| row.bg(skin.selection))
                             .active(|row| row.bg(skin.accent.opacity(0.3)))
                             .cursor_pointer()
@@ -1057,8 +1043,8 @@ impl Workbench {
                                     .child(format!("```{language}")),
                             )
                             .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
-                                if *hovered && a.comment_slash_index != ix {
-                                    a.comment_slash_index = ix;
+                                if *hovered && a.composer.comment_slash_index != ix {
+                                    a.composer.comment_slash_index = ix;
                                     c.notify();
                                 }
                             }))
@@ -1086,7 +1072,7 @@ impl Workbench {
                         .rounded_md()
                         .border_1()
                         .border_color(skin.border)
-                        .bg(if can_save && self.comment_slash_index == 0 {
+                        .bg(if can_save && self.composer.comment_slash_index == 0 {
                             skin.selection
                         } else {
                             skin.surface
@@ -1141,8 +1127,8 @@ impl Workbench {
                                 }),
                         )
                         .on_hover(cx.listener(|a, hovered: &bool, _, c| {
-                            if *hovered && a.comment_slash_index != 0 {
-                                a.comment_slash_index = 0;
+                            if *hovered && a.composer.comment_slash_index != 0 {
+                                a.composer.comment_slash_index = 0;
                                 c.notify();
                             }
                         }))
@@ -1207,7 +1193,7 @@ impl Workbench {
                             .border_color(skin.border)
                             .bg(skin.surface)
                             .p_1()
-                            .when(self.comment_slash_index == ix + 1, |row| {
+                            .when(self.composer.comment_slash_index == ix + 1, |row| {
                                 row.bg(skin.selection)
                             })
                             .hover(|row| row.bg(skin.selection).border_color(skin.accent))
@@ -1241,8 +1227,8 @@ impl Workbench {
                                             .child(excerpt),
                                     )
                                     .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
-                                        if *hovered && a.comment_slash_index != ix + 1 {
-                                            a.comment_slash_index = ix + 1;
+                                        if *hovered && a.composer.comment_slash_index != ix + 1 {
+                                            a.composer.comment_slash_index = ix + 1;
                                             c.notify();
                                         }
                                     }))
@@ -1272,7 +1258,7 @@ impl Workbench {
                                     .child("×")
                                     .on_click(cx.listener(move |a, _, _, c| {
                                         a.settings.saved_replies.remove(ix);
-                                        a.comment_slash_index = 0;
+                                        a.composer.comment_slash_index = 0;
                                         a.save_settings(c);
                                         c.notify();
                                     })),
@@ -1316,5 +1302,74 @@ mod tests {
                 .iter()
                 .any(|(range, _)| range.start >= source.find("let").unwrap())
         );
+    }
+}
+
+#[cfg(test)]
+mod pointer_tests {
+    use super::*;
+    use core::prelude::v1::test;
+    use std::{cell::Cell, rc::Rc};
+
+    struct StepButtonHarness {
+        hovered: Rc<Cell<bool>>,
+        clicked: Rc<Cell<bool>>,
+    }
+
+    impl Render for StepButtonHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let hover = self.hovered.clone();
+            let click = self.clicked.clone();
+            div().size(px(50.)).child(
+                table_step_button(
+                    gpui_kit::base::Button::new("test-column-step"),
+                    "column",
+                    "Add",
+                    "+",
+                    Skin::new(true),
+                )
+                .on_hover(move |hovered: &bool, _, _| hover.set(*hovered))
+                .on_click(move |_, _, _| click.set(true)),
+            )
+        }
+    }
+
+    #[gpui_kit::gpui::test]
+    fn table_step_button_receives_pointer_hover_and_click(cx: &mut TestAppContext) {
+        let hovered = Rc::new(Cell::new(false));
+        let clicked = Rc::new(Cell::new(false));
+        let (view, cx) = cx.add_window_view({
+            let hovered = hovered.clone();
+            let clicked = clicked.clone();
+            move |_, _| StepButtonHarness { hovered, clicked }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.simulate_mouse_move(point(px(10.), px(10.)), cx);
+            window.dispatch_event(
+                MouseDownEvent {
+                    position: point(px(10.), px(10.)),
+                    button: MouseButton::Left,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.dispatch_event(
+                MouseUpEvent {
+                    position: point(px(10.), px(10.)),
+                    button: MouseButton::Left,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                }
+                .to_platform_input(),
+                cx,
+            );
+        });
+        let _ = view;
+        assert!(hovered.get());
+        assert!(clicked.get());
     }
 }
