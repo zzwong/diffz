@@ -1,5 +1,5 @@
 mod markdown;
-use self::markdown::{Edit, Format, code_block, format, slash_query, table};
+use self::markdown::{Edit, Format, block_context, code_block, format, slash_query, table};
 use crate::app::Workbench;
 use crate::icons::AppIcon;
 use crate::theme::Skin;
@@ -146,13 +146,26 @@ impl Workbench {
     }
 
     pub(crate) fn sync_comment_slash(&mut self, cx: &mut Context<Self>) {
+        let previous = (
+            self.comment_slash,
+            self.comment_slash_range.clone(),
+            self.comment_slash_query.clone(),
+            self.comment_slash_index,
+        );
         let input = self.draft_input.read(cx);
         let text = input.value();
-        if let Some((range, query)) = slash_query(&text, input.cursor()) {
-            if self.comment_slash_query != query {
+        if let Some((range, query)) = input
+            .selected_range()
+            .is_empty()
+            .then(|| slash_query(&text, input.cursor()))
+            .flatten()
+        {
+            if self.comment_slash_range.as_ref() != Some(&range)
+                || self.comment_slash_query != query
+            {
                 self.comment_slash_index = 0;
+                self.comment_slash = Some(SlashMenu::Commands);
             }
-            self.comment_slash = Some(SlashMenu::Commands);
             self.comment_slash_range = Some(range);
             self.comment_slash_query = query;
         } else if self.comment_slash_range.is_some() {
@@ -160,7 +173,16 @@ impl Workbench {
             self.comment_slash_range = None;
             self.comment_slash_query.clear();
         }
-        cx.notify();
+        if previous
+            != (
+                self.comment_slash,
+                self.comment_slash_range.clone(),
+                self.comment_slash_query.clone(),
+                self.comment_slash_index,
+            )
+        {
+            cx.notify();
+        }
     }
 
     fn edit_comment(
@@ -187,23 +209,48 @@ impl Workbench {
     }
 
     fn format_comment(&mut self, action: Format, window: &mut Window, cx: &mut Context<Self>) {
-        let selected = {
+        let edit = {
             let input = self.draft_input.read(cx);
             let text = input.value();
-            text.get(input.selected_range()).unwrap_or("").to_owned()
+            let range = input.selected_range();
+            let selected = text.get(range.clone()).unwrap_or("");
+            let edit = format(action, selected);
+            if matches!(
+                action,
+                Format::Heading
+                    | Format::Quote
+                    | Format::CodeBlock
+                    | Format::Bulleted
+                    | Format::Numbered
+                    | Format::Checklist
+            ) {
+                block_context(edit, &text[..range.start], &text[range.end..])
+            } else {
+                edit
+            }
         };
-        self.edit_comment(format(action, &selected), None, window, cx);
+        self.edit_comment(edit, None, window, cx);
     }
 
-    fn insert_slash_edit(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
-        let range = self.comment_slash_range.clone().filter(|range| {
+    fn active_slash_range(&self, cx: &App) -> Option<Range<usize>> {
+        self.comment_slash_range.clone().filter(|range| {
             let input = self.draft_input.read(cx);
             input.cursor() == range.end
                 && input
                     .value()
                     .get(range.clone())
                     .is_some_and(|text| text.starts_with('/'))
-        });
+        })
+    }
+
+    fn insert_slash_edit(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
+        let range = self.active_slash_range(cx);
+        let edit = {
+            let input = self.draft_input.read(cx);
+            let text = input.value();
+            let replace = range.clone().unwrap_or_else(|| input.selected_range());
+            block_context(edit, &text[..replace.start], &text[replace.end..])
+        };
         self.edit_comment(edit, range, window, cx);
     }
 
@@ -299,7 +346,6 @@ impl Workbench {
             return false;
         }
         self.comment_slash = None;
-        self.comment_slash_range = None;
         cx.stop_propagation();
         cx.notify();
         true
@@ -443,7 +489,9 @@ impl Workbench {
                 window,
                 cx,
             ),
-            SlashMenu::Replies if self.comment_slash_index == 0 => self.save_comment_reply(cx),
+            SlashMenu::Replies if self.comment_slash_index == 0 => {
+                self.save_comment_reply(window, cx)
+            }
             SlashMenu::Replies => {
                 let body = self.settings.saved_replies[self.comment_slash_index.min(count - 1) - 1]
                     .body
@@ -458,15 +506,13 @@ impl Workbench {
 
     fn current_reply_body(&self, cx: &App) -> String {
         let mut body = self.draft_input.read(cx).value().to_string();
-        if let Some(range) = &self.comment_slash_range
-            && body.get(range.clone()).is_some()
-        {
-            body.replace_range(range.clone(), "");
+        if let Some(range) = self.active_slash_range(cx) {
+            body.replace_range(range, "");
         }
         body.trim().to_string()
     }
 
-    fn save_comment_reply(&mut self, cx: &mut Context<Self>) {
+    fn save_comment_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let body = self.current_reply_body(cx);
         if body.is_empty() {
             return;
@@ -487,6 +533,9 @@ impl Workbench {
                 body: body.clone(),
             });
             self.save_settings(cx);
+        }
+        if let Some(range) = self.active_slash_range(cx) {
+            self.edit_comment(Edit::caret(String::new(), 0), Some(range), window, cx);
         }
         self.comment_slash = Some(SlashMenu::Replies);
         self.comment_slash_index = self
@@ -1098,7 +1147,7 @@ impl Workbench {
                             }
                         }))
                         .when(can_save, |row| {
-                            row.on_click(cx.listener(|a, _, _, c| a.save_comment_reply(c)))
+                            row.on_click(cx.listener(|a, _, w, c| a.save_comment_reply(w, c)))
                         }),
                 );
                 if self.settings.saved_replies.is_empty() {

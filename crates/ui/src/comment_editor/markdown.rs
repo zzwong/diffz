@@ -64,18 +64,53 @@ fn wrap(selected: &str, before: &str, after: &str) -> Edit {
 }
 
 fn prefix_lines(selected: &str, prefix: &str) -> Edit {
-    let text = selected
-        .lines()
-        .map(|line| format!("{prefix}{line}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let text = if text.is_empty() {
-        prefix.to_string()
-    } else {
-        text
-    };
+    let mut text = String::new();
+    for line in selected.split_inclusive('\n') {
+        text.push_str(prefix);
+        text.push_str(line);
+    }
+    if text.is_empty() {
+        text.push_str(prefix);
+    }
     let at = text.len();
     Edit::caret(text, at)
+}
+
+/// Keep inserted block content separate from surrounding Markdown paragraphs.
+pub(crate) fn block_context(mut edit: Edit, before: &str, after: &str) -> Edit {
+    let leading = if before.is_empty() {
+        ""
+    } else {
+        match before
+            .bytes()
+            .rev()
+            .take_while(|byte| *byte == b'\n')
+            .count()
+        {
+            0 => "\n\n",
+            1 => "\n",
+            _ => "",
+        }
+    };
+    let trailing = if after.is_empty() {
+        ""
+    } else {
+        let newlines = edit
+            .text
+            .bytes()
+            .rev()
+            .take_while(|byte| *byte == b'\n')
+            .count()
+            + after.bytes().take_while(|byte| *byte == b'\n').count();
+        match newlines {
+            0 => "\n\n",
+            1 => "\n",
+            _ => "",
+        }
+    };
+    edit.text = format!("{leading}{}{trailing}", edit.text);
+    edit.selection = edit.selection.start + leading.len()..edit.selection.end + leading.len();
+    edit
 }
 
 pub(crate) fn code_block(language: &str, selected: &str) -> Edit {
@@ -157,5 +192,24 @@ mod tests {
     fn slash_only_matches_a_word_at_caret() {
         assert_eq!(slash_query("Try /tab", 8), Some((4..8, "tab".into())));
         assert_eq!(slash_query("https://a", 9), None);
+    }
+
+    #[test]
+    fn line_prefix_preserves_selected_trailing_newline() {
+        let edit = format(Format::Quote, "foo\n");
+        assert_eq!(edit.text, "> foo\n");
+        assert_eq!(edit.selection, 6..6);
+        let edit = block_context(edit, "", "bar");
+        assert_eq!(format!("{}bar", edit.text), "> foo\n\nbar");
+    }
+
+    #[test]
+    fn inserted_block_gets_paragraph_boundaries_without_moving_its_caret() {
+        let edit = block_context(code_block("rust", ""), "Please explain ", "next");
+        assert_eq!(edit.text, "\n\n```rust\n\n```\n\n");
+        assert_eq!(edit.selection, 10..10);
+        let edit = block_context(table(2, 1), "Prior\n", "\nNext");
+        assert!(edit.text.starts_with("\n| Column 1"));
+        assert!(edit.text.ends_with("|   |\n"));
     }
 }

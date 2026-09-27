@@ -258,10 +258,12 @@ impl Workbench {
             |this: &mut Self, state, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.edit_draft(state.read(cx).value().to_string(), cx);
-                    this.sync_comment_slash(cx);
                 }
             },
         ));
+        subscriptions.push(cx.observe(&draft_input, |this: &mut Self, _, cx| {
+            this.sync_comment_slash(cx);
+        }));
         subscriptions.push(cx.subscribe(
             &table_columns_input,
             |this: &mut Self, state, event: &InputEvent, cx| {
