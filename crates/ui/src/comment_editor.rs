@@ -193,61 +193,116 @@ impl Workbench {
         cx.notify();
     }
 
-    fn handle_comment_menu_key(
+    pub(crate) fn handle_comment_menu_key(
         &mut self,
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        let Some(menu) = self.comment_slash else {
-            return;
-        };
-        let commands = self.matching_comment_commands();
-        let count = match menu {
-            SlashMenu::Commands => commands.len(),
+    ) -> bool {
+        let mods = event.keystroke.modifiers;
+        if mods.platform || mods.control || mods.alt {
+            return false;
+        }
+        match event.keystroke.key.as_str() {
+            "escape" => self.dismiss_comment_menu(cx),
+            "down" => self.move_comment_menu_vertical(1, cx),
+            "up" => self.move_comment_menu_vertical(-1, cx),
+            "right" => self.move_comment_menu(1, cx),
+            "left" => self.move_comment_menu(-1, cx),
+            "enter" => self.activate_comment_menu(window, cx),
+            _ => false,
+        }
+    }
+
+    pub(crate) fn dismiss_comment_menu(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.comment_slash.is_none() {
+            return false;
+        }
+        self.comment_slash = None;
+        self.comment_slash_range = None;
+        cx.stop_propagation();
+        cx.notify();
+        true
+    }
+
+    fn comment_menu_count(&self, menu: SlashMenu) -> usize {
+        match menu {
+            SlashMenu::Commands => self.matching_comment_commands().len(),
             SlashMenu::Table => 25,
             SlashMenu::Language => LANGUAGES.len(),
             SlashMenu::Replies => self.settings.saved_replies.len() + 1,
+        }
+    }
+
+    pub(crate) fn move_comment_menu(&mut self, delta: isize, cx: &mut Context<Self>) -> bool {
+        let Some(menu) = self.comment_slash else {
+            return false;
         };
-        match event.keystroke.key.as_str() {
-            "escape" => {
-                self.comment_slash = None;
-                self.comment_slash_range = None;
-            }
-            "down" | "right" if count > 0 => {
-                self.comment_slash_index = (self.comment_slash_index + 1) % count
-            }
-            "up" | "left" if count > 0 => {
-                self.comment_slash_index = (self.comment_slash_index + count - 1) % count
-            }
-            "enter" if count > 0 => match menu {
-                SlashMenu::Commands => self.choose_slash_command(
-                    commands[self.comment_slash_index.min(count - 1)],
-                    window,
-                    cx,
-                ),
-                SlashMenu::Table => {
-                    let index = self.comment_slash_index.min(24);
-                    self.insert_slash_edit(table(index % 5 + 1, index / 5 + 1), window, cx);
-                }
-                SlashMenu::Language => self.insert_slash_edit(
-                    code_block(LANGUAGES[self.comment_slash_index.min(count - 1)].1, ""),
-                    window,
-                    cx,
-                ),
-                SlashMenu::Replies if self.comment_slash_index == 0 => self.save_comment_reply(cx),
-                SlashMenu::Replies => {
-                    let body = self.settings.saved_replies
-                        [self.comment_slash_index.min(count - 1) - 1]
-                        .body
-                        .clone();
-                    self.insert_slash_edit(Edit::caret(body.clone(), body.len()), window, cx);
-                }
+        let count = self.comment_menu_count(menu);
+        if count == 0 {
+            return false;
+        }
+        self.comment_slash_index =
+            (self.comment_slash_index as isize + delta).rem_euclid(count as isize) as usize;
+        cx.stop_propagation();
+        cx.notify();
+        true
+    }
+
+    pub(crate) fn move_comment_menu_vertical(
+        &mut self,
+        delta: isize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.move_comment_menu(
+            if self.comment_slash == Some(SlashMenu::Table) {
+                delta * 5
+            } else {
+                delta
             },
-            _ => return,
+            cx,
+        )
+    }
+
+    pub(crate) fn activate_comment_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(menu) = self.comment_slash else {
+            return false;
+        };
+        let commands = self.matching_comment_commands();
+        let count = self.comment_menu_count(menu);
+        if count == 0 {
+            return false;
+        }
+        match menu {
+            SlashMenu::Commands => self.choose_slash_command(
+                commands[self.comment_slash_index.min(count - 1)],
+                window,
+                cx,
+            ),
+            SlashMenu::Table => {
+                let index = self.comment_slash_index.min(24);
+                self.insert_slash_edit(table(index % 5 + 1, index / 5 + 1), window, cx);
+            }
+            SlashMenu::Language => self.insert_slash_edit(
+                code_block(LANGUAGES[self.comment_slash_index.min(count - 1)].1, ""),
+                window,
+                cx,
+            ),
+            SlashMenu::Replies if self.comment_slash_index == 0 => self.save_comment_reply(cx),
+            SlashMenu::Replies => {
+                let body = self.settings.saved_replies[self.comment_slash_index.min(count - 1) - 1]
+                    .body
+                    .clone();
+                self.insert_slash_edit(Edit::caret(body.clone(), body.len()), window, cx);
+            }
         }
         cx.stop_propagation();
         cx.notify();
+        true
     }
 
     fn save_comment_reply(&mut self, cx: &mut Context<Self>) {
@@ -355,9 +410,6 @@ impl Workbench {
             );
         let mut composer = div()
             .id("comment-editor")
-            .capture_key_down(
-                cx.listener(|a, e: &KeyDownEvent, w, c| a.handle_comment_menu_key(e, w, c)),
-            )
             .v_flex()
             .gap_2()
             .child(toolbar)
