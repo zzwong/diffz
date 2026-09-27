@@ -578,6 +578,13 @@ pub struct Settings {
     pub rich: bool,
     /// Experimental: flag words that differ inside each changed rich-diff block.
     pub rich_inline: bool,
+    /// Reusable Markdown snippets for review comments, kept in the local state directory.
+    pub saved_replies: Vec<SavedReply>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedReply {
+    pub title: String,
+    pub body: String,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -589,6 +596,7 @@ impl Default for Settings {
             theme: None,
             rich: true,
             rich_inline: false,
+            saved_replies: Vec::new(),
         }
     }
 }

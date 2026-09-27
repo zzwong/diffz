@@ -7,9 +7,7 @@ use diffz_core::{
     domain::*,
     review_details::{short_timestamp, thread_roots_at, visible_markdown},
 };
-use gpui_kit::component::{
-    Disableable, Sizable, StyledExt, button::*, input::Textarea, text::TextView,
-};
+use gpui_kit::component::{Disableable, Sizable, StyledExt, button::*, text::TextView};
 use gpui_kit::{prelude::*, *};
 use std::collections::BTreeMap;
 
@@ -155,6 +153,7 @@ impl Workbench {
             .set_offset(gpui_kit::point(px(0.), px(0.)));
         self.return_focus = window.focused(cx);
         self.panel = Panel::Line;
+        self.reset_comment_editor();
         self.draft_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.panel_focus.focus(window, cx);
@@ -352,14 +351,7 @@ impl Workbench {
         }
         if source.is_some() && !reading {
             card = card.child(
-                Textarea::new(&self.draft_input)
-                    .h(px(112.))
-                    .readonly(self.busy || selected.is_some_and(|d| d.published))
-                    .aria_label(if file_comment {
-                        "Local file comment"
-                    } else {
-                        "Local line comment"
-                    }),
+                self.comment_composer(self.busy || selected.is_some_and(|d| d.published), cx),
             );
             let status = if selected.is_some_and(|d| d.published) {
                 "Published comment"

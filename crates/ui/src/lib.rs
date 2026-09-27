@@ -11,6 +11,7 @@ pub mod viewport;
 pub use app::{LaunchOptions, launch};
 
 mod chrome;
+mod comment_editor;
 pub mod icons;
 mod keyboard;
 

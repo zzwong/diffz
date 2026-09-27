@@ -86,6 +86,11 @@ pub(crate) struct Workbench {
     pub find_input: Entity<InputState>,
     pub palette_input: Entity<InputState>,
     pub draft_input: Entity<TextareaState>,
+    pub comment_preview: bool,
+    pub comment_slash: Option<crate::comment_editor::SlashMenu>,
+    pub comment_slash_range: Option<std::ops::Range<usize>>,
+    pub comment_slash_query: String,
+    pub comment_slash_index: usize,
     pub summary_input: Entity<TextareaState>,
     pub export_input: Entity<InputState>,
     pub diff_focus: FocusHandle,
@@ -222,6 +227,7 @@ impl Workbench {
             |this: &mut Self, state, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.edit_draft(state.read(cx).value().to_string(), cx);
+                    this.sync_comment_slash(cx);
                 }
             },
         ));
@@ -282,6 +288,11 @@ impl Workbench {
             find_input,
             palette_input,
             draft_input,
+            comment_preview: false,
+            comment_slash: None,
+            comment_slash_range: None,
+            comment_slash_query: String::new(),
+            comment_slash_index: 0,
             summary_input,
             export_input,
             diff_focus: cx.focus_handle().tab_stop(true),
