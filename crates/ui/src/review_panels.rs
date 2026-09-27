@@ -480,7 +480,7 @@ impl Workbench {
                     .absolute()
                     .left(px(menu_x))
                     .top(px(menu_y))
-                    .child(self.comment_slash_menu(menu, menu_width, menu_height, cx)),
+                    .child(self.comment_slash_menu(menu, menu_width, menu_height, window, cx)),
             );
         }
         backdrop.into_any_element()

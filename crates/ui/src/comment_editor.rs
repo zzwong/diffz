@@ -9,7 +9,7 @@ use diffz_core::syntax::BuiltinGrammars;
 use gpui_kit::component::{
     Disableable, Sizable, StyledExt,
     button::*,
-    input::{NumberInput, Textarea},
+    input::{Input, Textarea},
 };
 use gpui_kit::{prelude::*, *};
 use std::{ops::Range, sync::atomic::AtomicUsize};
@@ -114,6 +114,26 @@ fn preview_code_styles(
     styles
 }
 
+fn table_step_button(
+    button: gpui_kit::base::Button,
+    axis: &'static str,
+    action: &'static str,
+    glyph: &'static str,
+    skin: Skin,
+) -> gpui_kit::base::Button {
+    button
+        .w(px(25.))
+        .h_full()
+        .rounded_sm()
+        .cursor_pointer()
+        .text_size(px(17.))
+        .text_color(skin.muted)
+        .accessibility_label(format!("{action} {axis}"))
+        .hover(|button| button.bg(skin.selection).text_color(skin.accent))
+        .active(|button| button.bg(skin.accent).text_color(skin.base))
+        .child(glyph)
+}
+
 impl Workbench {
     pub(crate) fn reset_comment_editor(&mut self) {
         self.comment_preview = false;
@@ -122,6 +142,7 @@ impl Workbench {
         self.comment_slash_query.clear();
         self.comment_slash_index = 0;
         self.table_hover_dimensions = None;
+        self.insert_table_hovered = false;
     }
 
     pub(crate) fn sync_comment_slash(&mut self, cx: &mut Context<Self>) {
@@ -239,6 +260,7 @@ impl Workbench {
         match cmd {
             SlashCommand::Table => {
                 self.table_hover_dimensions = None;
+                self.insert_table_hovered = false;
                 self.comment_slash = Some(SlashMenu::Table);
             }
             SlashCommand::Language => self.comment_slash = Some(SlashMenu::Language),
@@ -664,11 +686,43 @@ impl Workbench {
             .into_any_element()
     }
 
+    fn table_dimension_control(
+        &self,
+        state: &Entity<gpui_kit::component::input::InputState>,
+        axis: &'static str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let skin = self.skin();
+        let focused = state.read(cx).focus_handle(cx).is_focused(window);
+        let control = gpui_kit::base::NumberInput::new(state)
+            .size_full()
+            .decrement_button(move |button| table_step_button(button, axis, "Decrease", "−", skin))
+            .input(
+                Input::new(state)
+                    .appearance(false)
+                    .small()
+                    .h_full()
+                    .text_align(TextAlign::Center),
+            )
+            .increment_button(move |button| table_step_button(button, axis, "Increase", "+", skin));
+        div()
+            .h(px(28.))
+            .rounded_md()
+            .border_1()
+            .border_color(if focused { skin.accent } else { skin.border })
+            .bg(skin.surface)
+            .hover(|frame| frame.border_color(skin.accent))
+            .child(control)
+            .into_any_element()
+    }
+
     pub(crate) fn comment_slash_menu(
         &self,
         menu: SlashMenu,
         width: f32,
         max_height: f32,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let skin = self.skin();
@@ -708,8 +762,7 @@ impl Workbench {
                 )
                 .when(menu != SlashMenu::Commands, |row| {
                     row.child(
-                        div()
-                            .id("comment-menu-back")
+                        gpui_kit::base::Button::new("comment-menu-back")
                             .px_2()
                             .py_1()
                             .rounded_sm()
@@ -717,6 +770,7 @@ impl Workbench {
                             .text_size(px(11.))
                             .text_color(skin.muted)
                             .hover(|style| style.bg(skin.selection).text_color(skin.text))
+                            .active(|style| style.bg(skin.accent.opacity(0.3)))
                             .child("← Back")
                             .on_click(cx.listener(|a, _, _, c| {
                                 a.comment_slash = Some(SlashMenu::Commands);
@@ -752,6 +806,7 @@ impl Workbench {
                             .cursor_pointer()
                             .when(selected, |row| row.bg(skin.selection))
                             .hover(|row| row.bg(skin.selection))
+                            .active(|row| row.bg(skin.accent.opacity(0.3)))
                             .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
                                 if *hovered && a.comment_slash_index != ix {
                                     a.comment_slash_index = ix;
@@ -851,6 +906,8 @@ impl Workbench {
                                 .rounded_sm()
                                 .cursor_pointer()
                                 .aria_label(format!("{grid_column} columns, {grid_row} rows"))
+                                .hover(|cell| cell.bg(skin.accent).border_color(skin.accent))
+                                .active(|cell| cell.bg(skin.accent.opacity(0.75)))
                                 .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
                                     let current = (grid_column, grid_row);
                                     if *hovered && a.table_hover_dimensions != Some(current) {
@@ -889,7 +946,12 @@ impl Workbench {
                                     .text_color(skin.muted)
                                     .child("Columns"),
                             )
-                            .child(NumberInput::new(&self.table_columns_input).small()),
+                            .child(self.table_dimension_control(
+                                &self.table_columns_input,
+                                "columns",
+                                window,
+                                cx,
+                            )),
                     )
                     .child(
                         div()
@@ -901,7 +963,12 @@ impl Workbench {
                                     .text_color(skin.muted)
                                     .child("Rows"),
                             )
-                            .child(NumberInput::new(&self.table_rows_input).small()),
+                            .child(self.table_dimension_control(
+                                &self.table_rows_input,
+                                "rows",
+                                window,
+                                cx,
+                            )),
                     );
                 card = card.child(
                     div()
@@ -934,8 +1001,15 @@ impl Workbench {
                             Button::new("insert-table")
                                 .primary()
                                 .small()
+                                .when(!self.insert_table_hovered, |button| button.outline())
                                 .label("Insert table")
                                 .disabled(!valid)
+                                .on_hover(cx.listener(|a, hovered: &bool, _, c| {
+                                    if a.insert_table_hovered != *hovered {
+                                        a.insert_table_hovered = *hovered;
+                                        c.notify();
+                                    }
+                                }))
                                 .on_click(cx.listener(|a, _, w, c| {
                                     if let Some((columns, rows)) = a.valid_table_dimensions(c) {
                                         a.insert_slash_edit(table(columns, rows), w, c);
@@ -957,6 +1031,7 @@ impl Workbench {
                             .rounded_md()
                             .when(self.comment_slash_index == ix, |row| row.bg(skin.selection))
                             .hover(|row| row.bg(skin.selection))
+                            .active(|row| row.bg(skin.accent.opacity(0.3)))
                             .cursor_pointer()
                             .child(div().text_size(px(13.)).text_color(skin.text).child(label))
                             .child(
@@ -998,7 +1073,9 @@ impl Workbench {
                         .border_color(if can_save { skin.accent } else { skin.border })
                         .bg(skin.surface)
                         .when(can_save, |row| {
-                            row.cursor_pointer().hover(|s| s.bg(skin.selection))
+                            row.cursor_pointer()
+                                .hover(|s| s.bg(skin.selection))
+                                .active(|s| s.bg(skin.accent.opacity(0.3)))
                         })
                         .child(
                             div()
@@ -1110,6 +1187,8 @@ impl Workbench {
                                     .px_2()
                                     .py_1()
                                     .cursor_pointer()
+                                    .hover(|row| row.bg(skin.selection))
+                                    .active(|row| row.bg(skin.accent.opacity(0.3)))
                                     .child(
                                         div()
                                             .text_size(px(12.))
