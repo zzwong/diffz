@@ -1,3 +1,4 @@
+use super::MAX_TABLE_DIMENSION;
 use std::ops::Range;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -90,8 +91,8 @@ pub(crate) fn code_block(language: &str, selected: &str) -> Edit {
 }
 
 pub(crate) fn table(columns: usize, rows: usize) -> Edit {
-    let columns = columns.clamp(1, 6);
-    let rows = rows.clamp(1, 6);
+    let columns = columns.clamp(1, MAX_TABLE_DIMENSION);
+    let rows = rows.clamp(1, MAX_TABLE_DIMENSION);
     let header = format!(
         "| {} |",
         (1..=columns)
@@ -143,6 +144,13 @@ mod tests {
         let c = code_block("rust", "");
         assert_eq!(c.text, "```rust\n\n```");
         assert_eq!(c.selection, 8..8);
+    }
+
+    #[test]
+    fn table_accepts_dimensions_beyond_quick_pick_grid() {
+        let edit = table(12, 8);
+        assert!(edit.text.lines().next().unwrap().contains("Column 12"));
+        assert_eq!(edit.text.lines().count(), 10);
     }
 
     #[test]

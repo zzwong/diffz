@@ -2,12 +2,17 @@ mod markdown;
 use self::markdown::{Edit, Format, code_block, format, slash_query, table};
 use crate::app::Workbench;
 use crate::icons::AppIcon;
+use crate::theme::Skin;
 use diffz_core::domain::SavedReply;
+use diffz_core::registry::LanguageProvider;
+use diffz_core::syntax::BuiltinGrammars;
 use gpui_kit::component::{
-    Disableable, Sizable, StyledExt, button::*, input::Textarea, text::TextView,
+    Disableable, Sizable, StyledExt,
+    button::*,
+    input::{NumberInput, Textarea},
 };
 use gpui_kit::{prelude::*, *};
-use std::ops::Range;
+use std::{ops::Range, sync::atomic::AtomicUsize};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SlashMenu {
@@ -69,6 +74,45 @@ pub(crate) const LANGUAGES: [(&str, &str); 6] = [
     ("JSON", "json"),
     ("Plain text", "text"),
 ];
+
+pub(crate) const MAX_TABLE_DIMENSION: usize = 20;
+
+fn preview_code_styles(
+    block: &gpui_kit::base::text::CodeBlock,
+    skin: Skin,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let Some(language) = block.lang() else {
+        return Vec::new();
+    };
+    let path = match language.as_ref() {
+        "rust" | "rs" => "preview.rs",
+        "typescript" | "ts" => "preview.ts",
+        "javascript" | "js" => "preview.js",
+        "python" | "py" => "preview.py",
+        "bash" | "shell" | "sh" => "preview.sh",
+        "json" => "preview.json",
+        _ => return Vec::new(),
+    };
+    let code = block.code();
+    let Some(lines) = BuiltinGrammars.highlight(path, code.as_ref(), &AtomicUsize::new(0)) else {
+        return Vec::new();
+    };
+    let mut offset = 0;
+    let mut styles = Vec::new();
+    for (line, spans) in code.split_inclusive('\n').zip(lines) {
+        for span in spans {
+            styles.push((
+                offset + span.bytes.start..offset + span.bytes.end,
+                HighlightStyle {
+                    color: Some(skin.token(span.token)),
+                    ..Default::default()
+                },
+            ));
+        }
+        offset += line.len();
+    }
+    styles
+}
 
 impl Workbench {
     pub(crate) fn reset_comment_editor(&mut self) {
@@ -190,7 +234,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.comment_slash_index = if cmd == SlashCommand::Table { 7 } else { 0 };
+        self.comment_slash_index = 0;
         match cmd {
             SlashCommand::Table => self.comment_slash = Some(SlashMenu::Table),
             SlashCommand::Language => self.comment_slash = Some(SlashMenu::Language),
@@ -215,10 +259,10 @@ impl Workbench {
         }
         match event.keystroke.key.as_str() {
             "escape" => self.dismiss_comment_menu(cx),
-            "down" => self.move_comment_menu_vertical(1, cx),
-            "up" => self.move_comment_menu_vertical(-1, cx),
-            "right" => self.move_comment_menu_horizontal(1, cx),
-            "left" => self.move_comment_menu_horizontal(-1, cx),
+            "down" => self.move_comment_menu_vertical(1, window, cx),
+            "up" => self.move_comment_menu_vertical(-1, window, cx),
+            "right" => self.move_comment_menu_horizontal(1, window, cx),
+            "left" => self.move_comment_menu_horizontal(-1, window, cx),
             "enter" => self.activate_comment_menu(window, cx),
             _ => false,
         }
@@ -244,6 +288,45 @@ impl Workbench {
         }
     }
 
+    fn valid_table_dimensions(&self, cx: &App) -> Option<(usize, usize)> {
+        let parse = |input: &Entity<gpui_kit::component::input::InputState>| {
+            input
+                .read(cx)
+                .value()
+                .parse::<usize>()
+                .ok()
+                .filter(|value| (1..=MAX_TABLE_DIMENSION).contains(value))
+        };
+        Some((
+            parse(&self.table_columns_input)?,
+            parse(&self.table_rows_input)?,
+        ))
+    }
+
+    fn table_number_focused(&self, window: &Window, cx: &App) -> bool {
+        [&self.table_columns_input, &self.table_rows_input]
+            .into_iter()
+            .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
+    }
+
+    fn set_table_dimensions(
+        &mut self,
+        columns: usize,
+        rows: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.table_columns = columns;
+        self.table_rows = rows;
+        self.table_columns_input.update(cx, |input, cx| {
+            input.set_value(columns.to_string(), window, cx)
+        });
+        self.table_rows_input.update(cx, |input, cx| {
+            input.set_value(rows.to_string(), window, cx)
+        });
+        cx.notify();
+    }
+
     pub(crate) fn move_comment_menu(&mut self, delta: isize, cx: &mut Context<Self>) -> bool {
         let Some(menu) = self.comment_slash else {
             return false;
@@ -262,14 +345,20 @@ impl Workbench {
     pub(crate) fn move_comment_menu_vertical(
         &mut self,
         delta: isize,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.comment_slash == Some(SlashMenu::Table) {
-            let column = self.comment_slash_index % 5;
-            let row = (self.comment_slash_index / 5) as isize;
-            self.comment_slash_index = (row + delta).clamp(0, 4) as usize * 5 + column;
+            if self.table_number_focused(window, cx) {
+                return false;
+            }
+            self.set_table_dimensions(
+                self.table_columns.min(5),
+                (self.table_rows as isize + delta).clamp(1, 5) as usize,
+                window,
+                cx,
+            );
             cx.stop_propagation();
-            cx.notify();
             true
         } else {
             self.move_comment_menu(delta, cx)
@@ -279,14 +368,20 @@ impl Workbench {
     pub(crate) fn move_comment_menu_horizontal(
         &mut self,
         delta: isize,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.comment_slash == Some(SlashMenu::Table) {
-            let row = self.comment_slash_index / 5;
-            let column = (self.comment_slash_index % 5) as isize;
-            self.comment_slash_index = row * 5 + (column + delta).clamp(0, 4) as usize;
+            if self.table_number_focused(window, cx) {
+                return false;
+            }
+            self.set_table_dimensions(
+                (self.table_columns as isize + delta).clamp(1, 5) as usize,
+                self.table_rows.min(5),
+                window,
+                cx,
+            );
             cx.stop_propagation();
-            cx.notify();
             true
         } else {
             self.move_comment_menu(delta, cx)
@@ -313,8 +408,9 @@ impl Workbench {
                 cx,
             ),
             SlashMenu::Table => {
-                let index = self.comment_slash_index.min(24);
-                self.insert_slash_edit(table(index % 5 + 1, index / 5 + 1), window, cx);
+                if let Some((columns, rows)) = self.valid_table_dimensions(cx) {
+                    self.insert_slash_edit(table(columns, rows), window, cx);
+                }
             }
             SlashMenu::Language => self.insert_slash_edit(
                 code_block(LANGUAGES[self.comment_slash_index.min(count - 1)].1, ""),
@@ -334,14 +430,18 @@ impl Workbench {
         true
     }
 
-    fn save_comment_reply(&mut self, cx: &mut Context<Self>) {
+    fn current_reply_body(&self, cx: &App) -> String {
         let mut body = self.draft_input.read(cx).value().to_string();
         if let Some(range) = &self.comment_slash_range
             && body.get(range.clone()).is_some()
         {
             body.replace_range(range.clone(), "");
         }
-        let body = body.trim().to_string();
+        body.trim().to_string()
+    }
+
+    fn save_comment_reply(&mut self, cx: &mut Context<Self>) {
+        let body = self.current_reply_body(cx);
         if body.is_empty() {
             return;
         }
@@ -356,10 +456,19 @@ impl Workbench {
             if self.settings.saved_replies.len() == 30 {
                 self.settings.saved_replies.remove(0);
             }
-            self.settings.saved_replies.push(SavedReply { title, body });
+            self.settings.saved_replies.push(SavedReply {
+                title,
+                body: body.clone(),
+            });
             self.save_settings(cx);
         }
         self.comment_slash = Some(SlashMenu::Replies);
+        self.comment_slash_index = self
+            .settings
+            .saved_replies
+            .iter()
+            .position(|reply| reply.body == body)
+            .map_or(0, |index| index + 1);
         cx.notify();
     }
 
@@ -423,6 +532,7 @@ impl Workbench {
                 Button::new("comment-preview")
                     .ghost()
                     .small()
+                    .when(self.comment_preview, |button| button.secondary())
                     .label(if self.comment_preview {
                         "Write"
                     } else {
@@ -444,23 +554,100 @@ impl Workbench {
             .child(toolbar)
             .child(if self.comment_preview {
                 let body = self.draft_input.read(cx).value().to_string();
+                let preview_style = gpui_kit::base::text::TextViewStyle::default()
+                    .with_foreground(skin.text)
+                    .with_muted_foreground(skin.muted)
+                    .with_link(skin.accent)
+                    .with_selection(skin.selection)
+                    .with_code_background(skin.surface)
+                    .with_border(skin.border)
+                    .with_paragraph_gap(rems(0.8))
+                    .with_heading_base_font_size(px(16.))
+                    .with_heading_font_size(|level, base| match level {
+                        1 => base * 1.6,
+                        2 => base * 1.35,
+                        3 => base * 1.15,
+                        _ => base,
+                    })
+                    .with_code_block(
+                        StyleRefinement::default()
+                            .bg(skin.surface)
+                            .border_1()
+                            .border_color(skin.border),
+                    )
+                    .with_table(
+                        StyleRefinement::default()
+                            .border_1()
+                            .border_color(skin.border),
+                    )
+                    .with_table_head(
+                        StyleRefinement::default()
+                            .bg(skin.selection)
+                            .text_color(skin.text),
+                    )
+                    .with_table_cell(StyleRefinement::default().bg(skin.surface))
+                    .with_inline_code(HighlightStyle {
+                        color: Some(skin.accent),
+                        background_color: Some(skin.surface),
+                        ..Default::default()
+                    })
+                    .with_dark(self.dark);
                 div()
-                    .min_h(px(112.))
-                    .p_3()
+                    .v_flex()
                     .rounded_md()
                     .border_1()
                     .border_color(skin.border)
                     .bg(skin.base)
                     .child(
-                        TextView::markdown(
-                            "comment-preview-body",
-                            if body.trim().is_empty() {
-                                "Nothing to preview yet.".to_string()
+                        div()
+                            .h_flex()
+                            .items_center()
+                            .justify_between()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(skin.border)
+                            .bg(skin.surface)
+                            .child(
+                                div()
+                                    .text_size(px(10.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(skin.muted)
+                                    .child("RENDERED PREVIEW"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.))
+                                    .text_color(skin.muted)
+                                    .child("Markdown"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("comment-preview-scroll")
+                            .min_h(px(148.))
+                            .max_h(px(320.))
+                            .p_4()
+                            .overflow_y_scroll()
+                            .child(if body.trim().is_empty() {
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(skin.muted)
+                                    .child("Your rendered comment will appear here.")
+                                    .into_any_element()
                             } else {
-                                body
-                            },
-                        )
-                        .text_size(px(14.)),
+                                gpui_kit::base::text::TextView::markdown(
+                                    "comment-preview-body",
+                                    body,
+                                )
+                                .style(preview_style)
+                                .code_block_highlighter(move |block| {
+                                    preview_code_styles(block, skin)
+                                })
+                                .text_size(px(14.))
+                                .selectable(true)
+                                .into_any_element()
+                            }),
                     )
                     .into_any_element()
             } else {
@@ -611,45 +798,43 @@ impl Workbench {
                 }
             }
             SlashMenu::Table => {
-                let columns = self.comment_slash_index % 5 + 1;
-                let rows = self.comment_slash_index / 5 + 1;
+                let columns = self.table_columns;
+                let rows = self.table_rows;
+                let valid = self.valid_table_dimensions(cx).is_some();
                 card = card.child(
                     div()
-                        .h_flex()
-                        .items_baseline()
-                        .gap_2()
+                        .v_flex()
+                        .gap_1()
                         .px_1()
                         .child(
                             div()
                                 .font_weight(FontWeight::MEDIUM)
-                                .text_size(px(17.))
+                                .text_size(px(15.))
                                 .text_color(skin.text)
-                                .child(format!("{columns} × {rows}")),
+                                .child("Choose a table size"),
                         )
                         .child(
                             div()
                                 .text_size(px(11.))
                                 .text_color(skin.muted)
-                                .child("columns × rows"),
+                                .child("Pick a grid cell or type exact dimensions."),
                         ),
                 );
-                card = card.child(
+                let mut grid = div().v_flex().gap_1().child(
                     div()
-                        .px_1()
                         .text_size(px(10.))
                         .text_color(skin.muted)
-                        .child("COLUMNS →"),
+                        .child("QUICK PICK"),
                 );
                 for grid_row in 1..=5 {
-                    let mut row = div().h_flex().items_center().gap_1();
+                    let mut row = div().h_flex().gap_1();
                     for grid_column in 1..=5 {
-                        let index = (grid_row - 1) * 5 + grid_column - 1;
                         let highlighted = grid_row <= rows && grid_column <= columns;
                         row = row.child(
                             div()
-                                .id(("table-cell", index))
-                                .w(px(31.))
-                                .h(px(26.))
+                                .id(("table-cell", (grid_row - 1) * 5 + grid_column - 1))
+                                .w(px(23.))
+                                .h(px(23.))
                                 .border_1()
                                 .border_color(if highlighted {
                                     skin.accent
@@ -664,10 +849,12 @@ impl Workbench {
                                 .rounded_sm()
                                 .cursor_pointer()
                                 .aria_label(format!("{grid_column} columns, {grid_row} rows"))
-                                .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
-                                    if *hovered && a.comment_slash_index != index {
-                                        a.comment_slash_index = index;
-                                        c.notify();
+                                .on_hover(cx.listener(move |a, hovered: &bool, w, c| {
+                                    if *hovered
+                                        && (a.table_columns != grid_column
+                                            || a.table_rows != grid_row)
+                                    {
+                                        a.set_table_dimensions(grid_column, grid_row, w, c);
                                     }
                                 }))
                                 .on_click(cx.listener(move |a, _, w, c| {
@@ -675,21 +862,85 @@ impl Workbench {
                                 })),
                         );
                     }
-                    row = row.child(
+                    grid = grid.child(row);
+                }
+                let dimensions = div()
+                    .v_flex()
+                    .gap_2()
+                    .flex_1()
+                    .child(
                         div()
-                            .pl_2()
                             .text_size(px(10.))
                             .text_color(skin.muted)
-                            .child(format!("{grid_row}")),
+                            .child("EXACT SIZE"),
+                    )
+                    .child(
+                        div()
+                            .v_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(skin.muted)
+                                    .child("Columns"),
+                            )
+                            .child(NumberInput::new(&self.table_columns_input).small()),
+                    )
+                    .child(
+                        div()
+                            .v_flex()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(skin.muted)
+                                    .child("Rows"),
+                            )
+                            .child(NumberInput::new(&self.table_rows_input).small()),
                     );
-                    card = card.child(row);
-                }
                 card = card.child(
                     div()
+                        .h_flex()
+                        .items_start()
+                        .gap_4()
                         .px_1()
-                        .text_size(px(11.))
-                        .text_color(skin.muted)
-                        .child("ROWS ↓  ·  Hover or use arrow keys, then Enter"),
+                        .child(grid)
+                        .child(dimensions),
+                );
+                card = card.child(
+                    div()
+                        .h_flex()
+                        .items_center()
+                        .justify_between()
+                        .px_1()
+                        .pt_1()
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(skin.text)
+                                        .child(format!("{columns} columns × {rows} rows")),
+                                )
+                                .child(div().text_size(px(10.)).text_color(skin.muted).child(
+                                    format!("Up to {MAX_TABLE_DIMENSION} × {MAX_TABLE_DIMENSION}"),
+                                )),
+                        )
+                        .child(
+                            Button::new("insert-table")
+                                .primary()
+                                .small()
+                                .label("Insert table")
+                                .disabled(!valid)
+                                .on_click(cx.listener(|a, _, w, c| {
+                                    if let Some((columns, rows)) = a.valid_table_dimensions(c) {
+                                        a.insert_slash_edit(table(columns, rows), w, c);
+                                    }
+                                })),
+                        ),
                 );
             }
             SlashMenu::Language => {
@@ -727,48 +978,152 @@ impl Workbench {
                 }
             }
             SlashMenu::Replies => {
+                let candidate = self.current_reply_body(cx);
+                let already_saved = self
+                    .settings
+                    .saved_replies
+                    .iter()
+                    .any(|reply| reply.body == candidate);
+                let can_save = !candidate.is_empty() && !already_saved;
                 card = card.child(
-                    Button::new("save-reply")
-                        .secondary()
-                        .small()
-                        .when(self.comment_slash_index == 0, |button| button.outline())
-                        .cursor_pointer()
-                        .label("＋  Save current comment")
+                    div()
+                        .id("save-reply")
+                        .h_flex()
+                        .items_center()
+                        .gap_3()
+                        .p_2()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(if can_save { skin.accent } else { skin.border })
+                        .bg(skin.surface)
+                        .when(can_save, |row| {
+                            row.cursor_pointer().hover(|s| s.bg(skin.selection))
+                        })
+                        .child(
+                            div()
+                                .w(px(32.))
+                                .h(px(32.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_md()
+                                .bg(skin.selection)
+                                .text_color(skin.accent)
+                                .text_size(px(19.))
+                                .child("+"),
+                        )
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_size(px(13.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(skin.text)
+                                        .child("Save this draft"),
+                                )
+                                .child(div().text_size(px(11.)).text_color(skin.muted).child(
+                                    if can_save {
+                                        "Reuse it in another review"
+                                    } else if already_saved {
+                                        "Already in your library"
+                                    } else {
+                                        "Write a comment first"
+                                    },
+                                )),
+                        )
                         .on_hover(cx.listener(|a, hovered: &bool, _, c| {
                             if *hovered && a.comment_slash_index != 0 {
                                 a.comment_slash_index = 0;
                                 c.notify();
                             }
                         }))
-                        .on_click(cx.listener(|a, _, _, c| a.save_comment_reply(c))),
+                        .when(can_save, |row| {
+                            row.on_click(cx.listener(|a, _, _, c| a.save_comment_reply(c)))
+                        }),
                 );
                 if self.settings.saved_replies.is_empty() {
                     card = card.child(
                         div()
-                            .p_2()
-                            .text_size(px(11.))
-                            .text_color(skin.muted)
-                            .child("Write a comment, then save it for future reviews."),
+                            .h_flex()
+                            .items_center()
+                            .gap_3()
+                            .p_3()
+                            .rounded_md()
+                            .bg(skin.surface)
+                            .child(
+                                gpui_kit::component::Icon::default()
+                                    .path(AppIcon::MessageSquare.path())
+                                    .size(px(16.))
+                                    .text_color(skin.muted),
+                            )
+                            .child(
+                                div()
+                                    .v_flex()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(skin.text)
+                                            .child("No saved replies yet"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.))
+                                            .text_color(skin.muted)
+                                            .child("Save a draft to build your library."),
+                                    ),
+                            ),
                     );
                 }
                 for (ix, reply) in self.settings.saved_replies.iter().enumerate() {
                     let body = reply.body.clone();
+                    let excerpt = reply
+                        .body
+                        .lines()
+                        .skip(1)
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap_or("Click to insert")
+                        .chars()
+                        .take(72)
+                        .collect::<String>();
                     card = card.child(
                         div()
                             .h_flex()
                             .items_center()
                             .gap_2()
                             .rounded_md()
+                            .p_1()
                             .when(self.comment_slash_index == ix + 1, |row| {
                                 row.bg(skin.selection)
                             })
                             .child(
-                                Button::new(("saved-reply", ix))
-                                    .ghost()
-                                    .small()
+                                div()
+                                    .id(("saved-reply", ix))
+                                    .v_flex()
                                     .flex_1()
+                                    .min_w_0()
+                                    .gap_1()
+                                    .px_2()
+                                    .py_1()
                                     .cursor_pointer()
-                                    .label(reply.title.clone())
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(skin.text)
+                                            .text_ellipsis()
+                                            .child(reply.title.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(10.))
+                                            .text_color(skin.muted)
+                                            .text_ellipsis()
+                                            .child(excerpt),
+                                    )
                                     .on_hover(cx.listener(move |a, hovered: &bool, _, c| {
                                         if *hovered && a.comment_slash_index != ix + 1 {
                                             a.comment_slash_index = ix + 1;
@@ -808,5 +1163,29 @@ impl Workbench {
             );
         }
         card.into_any_element()
+    }
+}
+
+#[cfg(all(test, feature = "syntax"))]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+
+    #[test]
+    fn preview_code_styles_stay_within_code_block() {
+        let source = "fn main() {\n    let answer = 42;\n}\n";
+        let block = gpui_kit::base::text::CodeBlock::from_code(source, Some("rust"));
+        let styles = preview_code_styles(&block, Skin::new(true));
+        assert!(!styles.is_empty());
+        assert!(
+            styles
+                .iter()
+                .all(|(range, _)| range.start < range.end && range.end <= source.len())
+        );
+        assert!(
+            styles
+                .iter()
+                .any(|(range, _)| range.start >= source.find("let").unwrap())
+        );
     }
 }

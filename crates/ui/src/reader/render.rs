@@ -272,29 +272,29 @@ impl Render for Workbench {
                 }),
             )
             .capture_action(
-                cx.listener(|a, _: &gpui_kit::component::input::MoveDown, _, c| {
-                    if !a.move_comment_menu_vertical(1, c) {
+                cx.listener(|a, _: &gpui_kit::component::input::MoveDown, w, c| {
+                    if !a.move_comment_menu_vertical(1, w, c) {
                         c.propagate();
                     }
                 }),
             )
             .capture_action(
-                cx.listener(|a, _: &gpui_kit::component::input::MoveUp, _, c| {
-                    if !a.move_comment_menu_vertical(-1, c) {
+                cx.listener(|a, _: &gpui_kit::component::input::MoveUp, w, c| {
+                    if !a.move_comment_menu_vertical(-1, w, c) {
                         c.propagate();
                     }
                 }),
             )
             .capture_action(
-                cx.listener(|a, _: &gpui_kit::component::input::MoveRight, _, c| {
-                    if !a.move_comment_menu_horizontal(1, c) {
+                cx.listener(|a, _: &gpui_kit::component::input::MoveRight, w, c| {
+                    if !a.move_comment_menu_horizontal(1, w, c) {
                         c.propagate();
                     }
                 }),
             )
             .capture_action(
-                cx.listener(|a, _: &gpui_kit::component::input::MoveLeft, _, c| {
-                    if !a.move_comment_menu_horizontal(-1, c) {
+                cx.listener(|a, _: &gpui_kit::component::input::MoveLeft, w, c| {
+                    if !a.move_comment_menu_horizontal(-1, w, c) {
                         c.propagate();
                     }
                 }),
