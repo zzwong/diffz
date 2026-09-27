@@ -292,7 +292,7 @@ fn gitlab_change_request_error_never_posts_a_review_summary() {
 }
 #[test]
 #[cfg(unix)]
-fn gitlab_file_level_draft_publishes_as_plain_note_not_discussion() {
+fn gitlab_file_level_draft_publishes_as_positioned_discussion() {
     let temp = tempfile::tempdir().unwrap();
     let r = reader(temp.path());
     let s = r
@@ -328,7 +328,11 @@ fn gitlab_file_level_draft_publishes_as_plain_note_not_discussion() {
     .unwrap();
     assert!(p.comments[0].file_level);
     store.insert_prepared(&p, &GitlabRules).unwrap();
-    let outbox = Outbox::new(store, Arc::new(GitlabRules), Arc::new(GitlabWriter::new(r)));
+    let outbox = Outbox::new(
+        store,
+        Arc::new(GitlabRules),
+        Arc::new(GitlabWriter::new(r.clone())),
+    );
     assert_eq!(
         outbox.publish(p.clone()).unwrap().state,
         OutboxState::Confirmed
@@ -336,13 +340,26 @@ fn gitlab_file_level_draft_publishes_as_plain_note_not_discussion() {
     let state: serde_json::Value =
         serde_json::from_slice(&std::fs::read(temp.path().join("fake-state.json")).unwrap())
             .unwrap();
-    // This file-level draft went out as a single plain note on the MR, ahead of the summary.
-    let body = state["notes"][0]["body"].as_str().unwrap();
-    assert!(body.starts_with("**a.rs**\n\nPlease review the whole file."));
-    assert!(body.contains("<!-- diffz:"));
-    assert!(state["notes"][0]["type"].is_null());
-    // It never created a positioned discussion.
-    assert_eq!(state["discussions"].as_array().unwrap().len(), 0);
+    assert_eq!(state["notes"].as_array().unwrap().len(), 1);
+    assert_eq!(state["discussions"].as_array().unwrap().len(), 1);
+    let note = &state["discussions"][0]["notes"][0];
+    assert_eq!(note["position"]["position_type"], "file");
+    assert_eq!(note["position"]["new_path"], "a.rs");
+    assert!(
+        note["body"]
+            .as_str()
+            .unwrap()
+            .starts_with("Please review the whole file.")
+    );
+    let refreshed = r
+        .snapshot(
+            &MrAddress::parse("team/sub/repo!7").unwrap(),
+            Cancellation::default(),
+        )
+        .unwrap();
+    assert!(refreshed.comments.iter().any(|c| {
+        c.body.starts_with("Please review the whole file.") && c.path == "a.rs" && c.line.is_none()
+    }));
 }
 #[test]
 #[cfg(unix)]

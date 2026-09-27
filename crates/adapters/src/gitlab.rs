@@ -407,8 +407,9 @@ pub fn discussion_comments(ds: &[Value], overview: &mut Overview) -> Vec<ThreadC
                 .as_str()
                 .unwrap_or("unknown")
                 .to_string();
-            if pos["position_type"] == "text" {
-                let right = pos["new_line"].as_u64().is_some();
+            if pos["position_type"] == "text" || pos["position_type"] == "file" {
+                let file_level = pos["position_type"] == "file";
+                let right = file_level || pos["new_line"].as_u64().is_some();
                 let key = if right { "new" } else { "old" };
                 let line = pos[format!("{key}_line")]
                     .as_u64()
@@ -685,9 +686,7 @@ fn marked_note(n: &Value) -> Option<Value> {
         json!({"id":n["id"],"body":body,"commit_id":fields[1],"state":fields[2],"fingerprint":fields[0],"side":fields.get(3),"user":{"login":n["author"]["username"]}}),
     )
 }
-/// Find file-level notes that diffz wrote within the MR's ordinary notes. These notes carry the
-/// review marker and a body shaped like `"**<path>**\n\n<body>"`, that the diffz
-/// writer relies on to tell them apart from the note that holds the summary.
+/// Recognize file-level notes written before positioned file discussions were supported.
 fn file_level_note(n: &Value, fingerprint: &str) -> Option<Value> {
     let marked = marked_note(n)?;
     if marked["fingerprint"].as_str() != Some(fingerprint) {
@@ -762,7 +761,9 @@ impl ReviewRemote for GitlabWriter {
         for d in ds {
             if let Some(notes) = d["notes"].as_array() {
                 for n in notes {
-                    if n["position"]["position_type"] != "text" {
+                    if n["position"]["position_type"] != "text"
+                        && n["position"]["position_type"] != "file"
+                    {
                         continue;
                     }
                     let Some(marked) = marked_note(n) else {
@@ -778,6 +779,10 @@ impl ReviewRemote for GitlabWriter {
                         || n["author"]["username"] != t.account
                     {
                         return Err("Discussion identity mismatch".into());
+                    }
+                    if pos["position_type"] == "file" {
+                        result.push(json!({"body":marked["body"],"path":pos["new_path"],"line":0,"start_line":0,"side":"RIGHT"}));
+                        continue;
                     }
                     let right = marked["side"]
                         .as_str()
@@ -852,21 +857,12 @@ impl ReviewRemote for GitlabWriter {
                 if self.current(&p.target)? != p.target {
                     return Err("MR changed during publication".into());
                 }
-                let (endpoint, payload) = if comment.file_level {
-                    (
-                        format!("{}/notes", a.root()),
-                        json!({"body": format!("**{}**\n\n{}{}", comment.path, comment.body, tag)}),
-                    )
-                } else {
-                    let pos = comment
-                        .position
-                        .as_ref()
-                        .ok_or("Frozen GitLab position is absent")?;
-                    (
-                        format!("{}/discussions", a.root()),
-                        json!({"body":format!("{}{}:{} -->",comment.body,tag.trim_end_matches(" -->"),comment.side.api()),"position":pos}),
-                    )
-                };
+                let pos = comment
+                    .position
+                    .as_ref()
+                    .ok_or("Frozen GitLab position is absent")?;
+                let endpoint = format!("{}/discussions", a.root());
+                let payload = json!({"body":format!("{}{}:{} -->",comment.body,tag.trim_end_matches(" -->"),comment.side.api()),"position":pos});
                 sent = true;
                 let r = self.reader.request(
                     &a,
