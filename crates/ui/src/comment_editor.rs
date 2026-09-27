@@ -628,7 +628,6 @@ impl Workbench {
                         div()
                             .h_flex()
                             .items_center()
-                            .justify_between()
                             .px_3()
                             .py_2()
                             .border_b_1()
@@ -636,16 +635,10 @@ impl Workbench {
                             .bg(skin.surface)
                             .child(
                                 div()
-                                    .text_size(px(10.))
+                                    .text_size(px(12.))
                                     .font_weight(FontWeight::MEDIUM)
-                                    .text_color(skin.muted)
-                                    .child("RENDERED PREVIEW"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(10.))
-                                    .text_color(skin.muted)
-                                    .child("Markdown"),
+                                    .text_color(skin.text)
+                                    .child("Preview"),
                             ),
                     )
                     .child(
@@ -742,10 +735,10 @@ impl Workbench {
             .max_h(px(max_height.min(332.)))
             .overflow_y_scroll();
         let heading = match menu {
-            SlashMenu::Commands => "INSERT INTO COMMENT",
-            SlashMenu::Table => "INSERT TABLE",
-            SlashMenu::Language => "CODE LANGUAGE",
-            SlashMenu::Replies => "SAVED REPLIES",
+            SlashMenu::Commands => "Insert",
+            SlashMenu::Table => "Table",
+            SlashMenu::Language => "Code language",
+            SlashMenu::Replies => "Saved replies",
         };
         card = card.child(
             div()
@@ -755,9 +748,9 @@ impl Workbench {
                 .px_1()
                 .child(
                     div()
-                        .text_size(px(10.))
+                        .text_size(px(12.))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(skin.muted)
+                        .text_color(skin.text)
                         .child(heading),
                 )
                 .when(menu != SlashMenu::Commands, |row| {
@@ -867,19 +860,7 @@ impl Workbench {
                 let columns = self.table_columns;
                 let rows = self.table_rows;
                 let valid = self.valid_table_dimensions(cx).is_some();
-                card = card.child(
-                    div()
-                        .px_1()
-                        .text_size(px(11.))
-                        .text_color(skin.muted)
-                        .child("Pick a size or enter columns × rows"),
-                );
-                let mut grid = div().v_flex().gap_1().child(
-                    div()
-                        .text_size(px(10.))
-                        .text_color(skin.muted)
-                        .child("QUICK PICK"),
-                );
+                let mut grid = div().v_flex().gap_1();
                 for grid_row in 1..=5 {
                     let mut row = div().h_flex().gap_1();
                     for grid_column in 1..=5 {
@@ -932,12 +913,6 @@ impl Workbench {
                     .w(px(118.))
                     .child(
                         div()
-                            .text_size(px(10.))
-                            .text_color(skin.muted)
-                            .child("EXACT SIZE"),
-                    )
-                    .child(
-                        div()
                             .v_flex()
                             .gap_1()
                             .child(
@@ -983,26 +958,17 @@ impl Workbench {
                     div()
                         .h_flex()
                         .items_center()
-                        .justify_between()
+                        .justify_end()
                         .px_1()
                         .pt_2()
                         .border_t_1()
                         .border_color(skin.border)
                         .child(
-                            div().child(
-                                div()
-                                    .text_size(px(12.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(skin.text)
-                                    .child(format!("{columns} × {rows} table")),
-                            ),
-                        )
-                        .child(
                             Button::new("insert-table")
                                 .primary()
                                 .small()
                                 .when(!self.insert_table_hovered, |button| button.outline())
-                                .label("Insert table")
+                                .label(format!("Insert {columns} × {rows}"))
                                 .disabled(!valid)
                                 .on_hover(cx.listener(|a, hovered: &bool, _, c| {
                                     if a.insert_table_hovered != *hovered {
