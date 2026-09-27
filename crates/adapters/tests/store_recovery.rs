@@ -96,6 +96,7 @@ fn settings_are_global_and_survive_restart() {
             theme: Some("tokyo-night".into()),
             rich: false,
             rich_inline: false,
+            saved_replies: Vec::new(),
         })
         .unwrap();
     }

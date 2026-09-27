@@ -640,6 +640,34 @@ impl AssetSource for Assets {
         if let Some(bytes) = AppIcon::bytes(path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
+        let comment_icon: Option<&'static [u8]> = match path {
+            "icons/diffz/comment-heading.svg" => {
+                Some(include_bytes!("../icons/comment-heading.svg"))
+            }
+            "icons/diffz/comment-bold.svg" => Some(include_bytes!("../icons/comment-bold.svg")),
+            "icons/diffz/comment-italic.svg" => Some(include_bytes!("../icons/comment-italic.svg")),
+            "icons/diffz/comment-quote.svg" => Some(include_bytes!("../icons/comment-quote.svg")),
+            "icons/diffz/comment-inline-code.svg" => {
+                Some(include_bytes!("../icons/comment-inline-code.svg"))
+            }
+            "icons/diffz/comment-code-block.svg" => {
+                Some(include_bytes!("../icons/comment-code-block.svg"))
+            }
+            "icons/diffz/comment-link.svg" => Some(include_bytes!("../icons/comment-link.svg")),
+            "icons/diffz/comment-bulleted.svg" => {
+                Some(include_bytes!("../icons/comment-bulleted.svg"))
+            }
+            "icons/diffz/comment-numbered.svg" => {
+                Some(include_bytes!("../icons/comment-numbered.svg"))
+            }
+            "icons/diffz/comment-checklist.svg" => {
+                Some(include_bytes!("../icons/comment-checklist.svg"))
+            }
+            _ => None,
+        };
+        if let Some(bytes) = comment_icon {
+            return Ok(Some(Cow::Borrowed(bytes)));
+        }
         gpui_kit::assets::Assets.load(path)
     }
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
@@ -663,6 +691,24 @@ mod tests {
     #[test]
     fn kit_icons_still_load() {
         assert!(Assets.load("icons/check.svg").unwrap().is_some());
+    }
+    #[test]
+    fn comment_icons_resolve_to_svg() {
+        for name in [
+            "heading",
+            "bold",
+            "italic",
+            "quote",
+            "inline-code",
+            "code-block",
+            "link",
+            "bulleted",
+            "numbered",
+            "checklist",
+        ] {
+            let path = format!("icons/diffz/comment-{name}.svg");
+            assert!(Assets.load(&path).unwrap().is_some(), "{path}");
+        }
     }
 
     #[test]

@@ -124,6 +124,13 @@ required before anything leaves the machine. A local outbox keeps a record of
 everything sent, so a batch cut off midway can be reconciled rather than sent
 twice.
 
+The comment composer writes Markdown. Its toolbar inserts headings, emphasis,
+quotes, code, links, lists, and checklists around the selection. Preview shows
+the rendered comment. Type `/` to insert a table with chosen dimensions, a code
+block with a language, a quote of the selected source line, or a saved reply.
+You can save the current comment as a reply from that menu; replies are stored
+with your local settings.
+
 On GitLab you can publish one-line comments, summaries of reviews, and
 approvals. Blocking change requests and multi-line comments do not work yet.
 

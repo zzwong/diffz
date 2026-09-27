@@ -91,6 +91,7 @@ impl Workbench {
         self.thread_root = None;
         self.return_focus = window.focused(cx);
         self.panel = Panel::Line;
+        self.reset_comment_editor();
         self.draft_input.update(cx, |input, cx| {
             input.set_value(existing.map_or_else(String::new, |d| d.body), window, cx)
         });
@@ -129,6 +130,7 @@ impl Workbench {
         self.selected_draft = Some(id);
         self.return_focus = window.focused(cx);
         self.panel = Panel::Line;
+        self.reset_comment_editor();
         self.draft_input
             .update(cx, |input, cx| input.set_value(d.body, window, cx));
         self.draft_input.read(cx).focus_handle(cx).focus(window, cx);

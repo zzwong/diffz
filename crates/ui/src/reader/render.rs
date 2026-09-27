@@ -248,7 +248,10 @@ impl Render for Workbench {
             .text_size(px(13.))
             .capture_action(
                 cx.listener(|a, action: &gpui_kit::component::input::Enter, w, c| {
-                    if a.panel == Panel::Line && action.secondary {
+                    if a.panel == Panel::Line && !action.secondary && a.activate_comment_menu(w, c)
+                    {
+                        c.stop_propagation();
+                    } else if a.panel == Panel::Line && action.secondary {
                         a.command(Command::Cancel, w, c);
                         c.stop_propagation();
                     } else {
@@ -258,10 +261,40 @@ impl Render for Workbench {
             )
             .capture_action(
                 cx.listener(|a, _: &gpui_kit::component::input::Escape, w, c| {
-                    if a.panel != Panel::None {
+                    if a.panel == Panel::Line && a.dismiss_comment_menu(c) {
+                        c.stop_propagation();
+                    } else if a.panel != Panel::None {
                         a.command(Command::Cancel, w, c);
                         c.stop_propagation();
                     } else {
+                        c.propagate();
+                    }
+                }),
+            )
+            .capture_action(
+                cx.listener(|a, _: &gpui_kit::component::input::MoveDown, w, c| {
+                    if !a.move_comment_menu_vertical(1, w, c) {
+                        c.propagate();
+                    }
+                }),
+            )
+            .capture_action(
+                cx.listener(|a, _: &gpui_kit::component::input::MoveUp, w, c| {
+                    if !a.move_comment_menu_vertical(-1, w, c) {
+                        c.propagate();
+                    }
+                }),
+            )
+            .capture_action(
+                cx.listener(|a, _: &gpui_kit::component::input::MoveRight, w, c| {
+                    if !a.move_comment_menu_horizontal(1, w, c) {
+                        c.propagate();
+                    }
+                }),
+            )
+            .capture_action(
+                cx.listener(|a, _: &gpui_kit::component::input::MoveLeft, w, c| {
+                    if !a.move_comment_menu_horizontal(-1, w, c) {
                         c.propagate();
                     }
                 }),

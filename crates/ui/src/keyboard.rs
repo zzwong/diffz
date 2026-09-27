@@ -21,6 +21,9 @@ impl Workbench {
     ) {
         let key = event.keystroke.key.as_str();
         let mods = event.keystroke.modifiers;
+        if self.panel == Panel::Line && self.handle_comment_menu_key(event, window, cx) {
+            return;
+        }
         if self.panel == Panel::None
             && self.find_visible
             && key == "enter"

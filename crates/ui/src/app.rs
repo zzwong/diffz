@@ -5,6 +5,7 @@ mod source;
 pub(crate) use self::appearance::apply_appearance;
 use crate::{
     commands,
+    comment_editor::MAX_TABLE_DIMENSION,
     file_browser::FileBrowserState,
     reader::FilesPeek,
     theme::Skin,
@@ -86,6 +87,17 @@ pub(crate) struct Workbench {
     pub find_input: Entity<InputState>,
     pub palette_input: Entity<InputState>,
     pub draft_input: Entity<TextareaState>,
+    pub table_columns_input: Entity<InputState>,
+    pub table_rows_input: Entity<InputState>,
+    pub table_columns: usize,
+    pub table_rows: usize,
+    pub table_hover_dimensions: Option<(usize, usize)>,
+    pub insert_table_hovered: bool,
+    pub comment_preview: bool,
+    pub comment_slash: Option<crate::comment_editor::SlashMenu>,
+    pub comment_slash_range: Option<std::ops::Range<usize>>,
+    pub comment_slash_query: String,
+    pub comment_slash_index: usize,
     pub summary_input: Entity<TextareaState>,
     pub export_input: Entity<InputState>,
     pub diff_focus: FocusHandle,
@@ -198,6 +210,30 @@ impl Workbench {
                 .rows(4)
                 .placeholder("Leave a comment…")
         });
+        let table_columns_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value("3")
+                .min(1.)
+                .max(MAX_TABLE_DIMENSION as f64)
+                .validate(|value, _| {
+                    value.is_empty()
+                        || value
+                            .parse::<usize>()
+                            .is_ok_and(|n| (1..=MAX_TABLE_DIMENSION).contains(&n))
+                })
+        });
+        let table_rows_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value("2")
+                .min(1.)
+                .max(MAX_TABLE_DIMENSION as f64)
+                .validate(|value, _| {
+                    value.is_empty()
+                        || value
+                            .parse::<usize>()
+                            .is_ok_and(|n| (1..=MAX_TABLE_DIMENSION).contains(&n))
+                })
+        });
         let summary_input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .rows(4)
@@ -222,6 +258,31 @@ impl Workbench {
             |this: &mut Self, state, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.edit_draft(state.read(cx).value().to_string(), cx);
+                }
+            },
+        ));
+        subscriptions.push(cx.observe(&draft_input, |this: &mut Self, _, cx| {
+            this.sync_comment_slash(cx);
+        }));
+        subscriptions.push(cx.subscribe(
+            &table_columns_input,
+            |this: &mut Self, state, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    if let Ok(columns) = state.read(cx).value().parse::<usize>() {
+                        this.table_columns = columns;
+                    }
+                    cx.notify();
+                }
+            },
+        ));
+        subscriptions.push(cx.subscribe(
+            &table_rows_input,
+            |this: &mut Self, state, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    if let Ok(rows) = state.read(cx).value().parse::<usize>() {
+                        this.table_rows = rows;
+                    }
+                    cx.notify();
                 }
             },
         ));
@@ -282,6 +343,17 @@ impl Workbench {
             find_input,
             palette_input,
             draft_input,
+            table_columns_input,
+            table_rows_input,
+            table_columns: 3,
+            table_rows: 2,
+            table_hover_dimensions: None,
+            insert_table_hovered: false,
+            comment_preview: false,
+            comment_slash: None,
+            comment_slash_range: None,
+            comment_slash_query: String::new(),
+            comment_slash_index: 0,
             summary_input,
             export_input,
             diff_focus: cx.focus_handle().tab_stop(true),

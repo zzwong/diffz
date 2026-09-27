@@ -7,9 +7,7 @@ use diffz_core::{
     domain::*,
     review_details::{short_timestamp, thread_roots_at, visible_markdown},
 };
-use gpui_kit::component::{
-    Disableable, Sizable, StyledExt, button::*, input::Textarea, text::TextView,
-};
+use gpui_kit::component::{Disableable, Sizable, StyledExt, button::*, text::TextView};
 use gpui_kit::{prelude::*, *};
 use std::collections::BTreeMap;
 
@@ -155,6 +153,7 @@ impl Workbench {
             .set_offset(gpui_kit::point(px(0.), px(0.)));
         self.return_focus = window.focused(cx);
         self.panel = Panel::Line;
+        self.reset_comment_editor();
         self.draft_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.panel_focus.focus(window, cx);
@@ -352,14 +351,7 @@ impl Workbench {
         }
         if source.is_some() && !reading {
             card = card.child(
-                Textarea::new(&self.draft_input)
-                    .h(px(112.))
-                    .readonly(self.busy || selected.is_some_and(|d| d.published))
-                    .aria_label(if file_comment {
-                        "Local file comment"
-                    } else {
-                        "Local line comment"
-                    }),
+                self.comment_composer(self.busy || selected.is_some_and(|d| d.published), cx),
             );
             let status = if selected.is_some_and(|d| d.published) {
                 "Published comment"
@@ -456,16 +448,42 @@ impl Workbench {
             .map_or(90., |p| f32::from(p.y) + 8.)
             .clamp(48., (f32::from(size.height) - 430.).max(48.));
         let y = if reading { 48. } else { y };
-        self.modal_backdrop(cx)
-            .child(
-                card.absolute()
-                    .left(px(x))
-                    .top(px(y))
-                    .w(px(width))
-                    .max_h(px((f32::from(size.height) - y - 16.).max(200.)))
-                    .when(!reading, |d| d.overflow_y_scroll()),
-            )
-            .into_any_element()
+        let mut backdrop = self.modal_backdrop(cx).child(
+            card.absolute()
+                .left(px(x))
+                .top(px(y))
+                .w(px(width))
+                .max_h(px((f32::from(size.height) - y - 16.).max(200.)))
+                .when(!reading, |d| d.overflow_y_scroll()),
+        );
+        if let Some(menu) = self.comment_slash.filter(|_| {
+            source.is_some()
+                && !reading
+                && !self.busy
+                && !selected.is_some_and(|draft| draft.published)
+                && !self.comment_preview
+        }) {
+            let viewport_width = f32::from(size.width);
+            let preferred_width: f32 = match menu {
+                crate::comment_editor::SlashMenu::Commands => 340.,
+                crate::comment_editor::SlashMenu::Table => 296.,
+                crate::comment_editor::SlashMenu::Language => 264.,
+                crate::comment_editor::SlashMenu::Replies => 320.,
+            };
+            let menu_width = preferred_width.min((viewport_width - 32.).max(180.));
+            let menu_x = (x + width - menu_width - 16.)
+                .clamp(16., (viewport_width - menu_width - 16.).max(16.));
+            let menu_y = (y + 80.).min((f32::from(size.height) - 184.).max(16.));
+            let menu_height = (f32::from(size.height) - menu_y - 16.).max(120.);
+            backdrop = backdrop.child(
+                div()
+                    .absolute()
+                    .left(px(menu_x))
+                    .top(px(menu_y))
+                    .child(self.comment_slash_menu(menu, menu_width, menu_height, window, cx)),
+            );
+        }
+        backdrop.into_any_element()
     }
     pub(crate) fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();

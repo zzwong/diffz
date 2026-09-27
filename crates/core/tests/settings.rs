@@ -1,4 +1,4 @@
-use diffz_core::domain::Settings;
+use diffz_core::domain::{SavedReply, Settings};
 #[test]
 fn missing_fields_fall_back_to_defaults() {
     let s: Settings = serde_json::from_str("{}").unwrap();
@@ -20,6 +20,10 @@ fn round_trips() {
         theme: Some("tokyo-night".into()),
         rich: false,
         rich_inline: true,
+        saved_replies: vec![SavedReply {
+            title: "Naming".into(),
+            body: "Could we use a clearer name?".into(),
+        }],
     };
     let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
     assert_eq!(back, s);
