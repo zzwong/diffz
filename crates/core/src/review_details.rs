@@ -357,6 +357,59 @@ pub fn visible_markdown(body: &str) -> String {
 }
 pub use crate::scroll::BoundaryScroll;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThreadLocation {
+    Line(crate::domain::SourcePoint),
+    File(crate::domain::SourcePoint),
+    Outdated,
+}
+
+pub fn thread_location(
+    snapshot: &crate::domain::Snapshot,
+    comment: &crate::domain::ThreadComment,
+) -> ThreadLocation {
+    let Some(file) = snapshot
+        .patch
+        .files
+        .iter()
+        .find(|file| file.display_path() == comment.path)
+    else {
+        return ThreadLocation::Outdated;
+    };
+    let Some(side) = comment.side else {
+        return ThreadLocation::Outdated;
+    };
+    if let Some(line) = comment.line {
+        let point = crate::domain::SourcePoint {
+            snapshot: snapshot.id.clone(),
+            file: file.id.clone(),
+            side,
+            line,
+            byte_column: 0,
+        };
+        return if snapshot.validate_point(&point).is_ok() {
+            ThreadLocation::Line(point)
+        } else {
+            ThreadLocation::Outdated
+        };
+    }
+    if side != Side::Right
+        || snapshot
+            .remote
+            .as_ref()
+            .is_some_and(|remote| comment.commit_id != remote.head)
+    {
+        return ThreadLocation::Outdated;
+    }
+    ThreadLocation::File(crate::domain::SourcePoint {
+        snapshot: snapshot.id.clone(),
+        file: file.id.clone(),
+        side,
+        line: 0,
+        byte_column: 0,
+    })
+}
+
 pub fn thread_roots_at(
     snapshot: &crate::domain::Snapshot,
     point: &crate::domain::SourcePoint,
@@ -365,6 +418,18 @@ pub fn thread_roots_at(
         return vec![];
     };
     let path = file.display_path();
+    if point.side == Side::Right && point.line == 0 {
+        let mut roots = Vec::new();
+        for comment in &snapshot.comments {
+            if comment.path == path
+                && matches!(thread_location(snapshot, comment), ThreadLocation::File(_))
+                && !roots.contains(&comment.root_id)
+            {
+                roots.push(comment.root_id);
+            }
+        }
+        return roots;
+    }
     let mut roots = threads_at(&snapshot.comments, &path, point.side, point.line);
     if let Some(row) = file
         .line(point.side, point.line)
