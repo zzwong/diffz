@@ -422,6 +422,9 @@ pub struct ThreadComment {
     pub side: Option<Side>,
     pub line: Option<u32>,
     pub start_line: Option<u32>,
+    /// Explicit provider anchor. Older snapshots leave this unset and use location inference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_level: Option<bool>,
     pub body: String,
     pub author: String,
     pub commit_id: String,

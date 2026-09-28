@@ -85,6 +85,7 @@ fn unified_context_finds_threads_from_the_other_side() {
         side: Some(Side::Left),
         line: Some(1),
         start_line: None,
+        file_level: Some(false),
         body: "text".into(),
         author: "reviewer".into(),
         commit_id: String::new(),
@@ -121,6 +122,7 @@ fn file_thread_has_a_location_and_appears_in_file_panel() {
         side: Some(Side::Right),
         line: None,
         start_line: None,
+        file_level: Some(true),
         body: "file note".into(),
         author: "reviewer".into(),
         commit_id: String::new(),
@@ -139,12 +141,26 @@ fn file_thread_has_a_location_and_appears_in_file_panel() {
         ThreadLocation::File(point.clone())
     );
     assert_eq!(thread_roots_at(&snapshot, &point), vec![12]);
+    let mut missing_line = root.clone();
+    missing_line.file_level = Some(false);
+    assert_eq!(
+        thread_location(&snapshot, &missing_line),
+        ThreadLocation::Outdated
+    );
     let mut outdated = root;
     outdated.side = None;
     assert_eq!(
         thread_location(&snapshot, &outdated),
         ThreadLocation::Outdated
     );
+}
+
+#[test]
+fn legacy_thread_without_anchor_kind_deserializes() {
+    let mut value = serde_json::to_value(comment(1, 1, "src/review.rs")).unwrap();
+    value.as_object_mut().unwrap().remove("file_level");
+    let comment: diffz_core::domain::ThreadComment = serde_json::from_value(value).unwrap();
+    assert_eq!(comment.file_level, None);
 }
 
 #[test]
@@ -184,6 +200,7 @@ fn file_thread_from_an_older_head_is_outdated() {
         side: Some(Side::Right),
         line: None,
         start_line: None,
+        file_level: Some(true),
         body: "file note".into(),
         author: "reviewer".into(),
         commit_id: "old-head".into(),
@@ -232,6 +249,7 @@ fn comment(id: u64, root_id: u64, path: &str) -> diffz_core::domain::ThreadComme
         side: None,
         line: None,
         start_line: None,
+        file_level: None,
         body: String::new(),
         author: "reviewer".into(),
         commit_id: String::new(),

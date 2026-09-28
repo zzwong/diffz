@@ -124,7 +124,7 @@ impl Workbench {
                         }
                     }
                     let mut summary = format!(
-                        "{} drafts saved locally · {} threads pinned to lines · {} comments from conversation",
+                        "{} drafts saved locally · {} review threads · {} conversation comments",
                         active.drafts.len(),
                         roots.len(),
                         active.snapshot.overview.conversation.len()

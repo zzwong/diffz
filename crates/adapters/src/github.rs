@@ -1259,6 +1259,7 @@ fn thread(v: &Value) -> Result<ThreadComment> {
         },
         line: v["line"].as_u64().and_then(|n| n.try_into().ok()),
         start_line: v["start_line"].as_u64().and_then(|n| n.try_into().ok()),
+        file_level: Some(v["subject_type"] == "file"),
         body: text(v, "/body")?.into(),
         author: text(v, "/user/login")?.into(),
         commit_id: text(v, "/commit_id")?.into(),
@@ -1574,6 +1575,21 @@ fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, Result<T>>) -> Result<T> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn review_comment_anchor_kind_distinguishes_file_from_missing_line() {
+        let base = serde_json::json!({
+            "id": 1,
+            "path": "src/review.rs",
+            "body": "note",
+            "user": {"login": "reviewer"},
+            "commit_id": "head",
+            "side": "RIGHT"
+        });
+        let mut file = base.clone();
+        file["subject_type"] = "file".into();
+        assert_eq!(thread(&file).unwrap().file_level, Some(true));
+        assert_eq!(thread(&base).unwrap().file_level, Some(false));
+    }
     #[test]
     fn patch_rebuilt_from_file_api_parses_like_a_unified_diff() {
         use diffz_core::patch::ChangeKind;

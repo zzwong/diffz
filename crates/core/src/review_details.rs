@@ -379,7 +379,7 @@ pub fn thread_location(
     let Some(side) = comment.side else {
         return ThreadLocation::Outdated;
     };
-    if let Some(line) = comment.line {
+    if let Some(line) = comment.line.filter(|_| comment.file_level != Some(true)) {
         let point = crate::domain::SourcePoint {
             snapshot: snapshot.id.clone(),
             file: file.id.clone(),
@@ -394,6 +394,7 @@ pub fn thread_location(
         };
     }
     if side != Side::Right
+        || !comment.file_level.unwrap_or(comment.line.is_none())
         || snapshot
             .remote
             .as_ref()

@@ -985,6 +985,7 @@ pub fn discussion_comments(ds: &[Value], overview: &mut Overview) -> Vec<ThreadC
                     start_line: pos["line_range"]["start"][format!("{key}_line")]
                         .as_u64()
                         .and_then(|n| n.try_into().ok()),
+                    file_level: Some(file_level),
                     body,
                     author,
                     commit_id: pos["head_sha"].as_str().unwrap_or("").into(),
@@ -1517,6 +1518,23 @@ impl ReviewRemote for GitlabWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn positioned_file_discussion_keeps_its_anchor_kind() {
+        let discussion = serde_json::json!({"notes": [{
+            "id": 1,
+            "body": "note",
+            "author": {"username": "reviewer"},
+            "position": {
+                "position_type": "file",
+                "new_path": "src/review.rs",
+                "head_sha": "head"
+            }
+        }]});
+        let comments = discussion_comments(&[discussion], &mut Overview::default());
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].file_level, Some(true));
+        assert_eq!(comments[0].line, None);
+    }
     #[test]
     fn target_marks_draft_and_work_in_progress_mrs() {
         fn address() -> MrAddress {
