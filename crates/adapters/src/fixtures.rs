@@ -67,6 +67,7 @@ pub fn decorate(snapshot: &mut diffz_core::domain::Snapshot, id: &str) {
             side: Some(Side::Right),
             line: Some(12),
             start_line: None,
+            file_level: Some(false),
             body: body.into(),
             author: author.into(),
             commit_id: String::new(),

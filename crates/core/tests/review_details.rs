@@ -85,6 +85,7 @@ fn unified_context_finds_threads_from_the_other_side() {
         side: Some(Side::Left),
         line: Some(1),
         start_line: None,
+        file_level: Some(false),
         body: "text".into(),
         author: "reviewer".into(),
         commit_id: String::new(),
@@ -98,6 +99,123 @@ fn unified_context_finds_threads_from_the_other_side() {
         byte_column: 0,
     };
     assert_eq!(thread_roots_at(&snapshot, &point), vec![1]);
+}
+
+#[test]
+fn file_thread_has_a_location_and_appears_in_file_panel() {
+    use diffz_core::domain::*;
+    let mut snapshot = Snapshot::new(
+        "test".into(),
+        parse_patch(
+            include_bytes!("../../../fixtures/review-flow/change.patch"),
+            ParseLimits::default(),
+        )
+        .unwrap(),
+        None,
+        vec![],
+    );
+    let file = snapshot.patch.files[0].id.clone();
+    let root = ThreadComment {
+        id: 12,
+        root_id: 12,
+        path: "src/review.rs".into(),
+        side: Some(Side::Right),
+        line: None,
+        start_line: None,
+        file_level: Some(true),
+        body: "file note".into(),
+        author: "reviewer".into(),
+        commit_id: String::new(),
+        created_at: None,
+    };
+    snapshot.comments.push(root.clone());
+    let point = SourcePoint {
+        snapshot: snapshot.id.clone(),
+        file,
+        side: Side::Right,
+        line: 0,
+        byte_column: 0,
+    };
+    assert_eq!(
+        thread_location(&snapshot, &root),
+        ThreadLocation::File(point.clone())
+    );
+    assert_eq!(thread_roots_at(&snapshot, &point), vec![12]);
+    let mut missing_line = root.clone();
+    missing_line.file_level = Some(false);
+    assert_eq!(
+        thread_location(&snapshot, &missing_line),
+        ThreadLocation::Outdated
+    );
+    let mut outdated = root;
+    outdated.side = None;
+    assert_eq!(
+        thread_location(&snapshot, &outdated),
+        ThreadLocation::Outdated
+    );
+}
+
+#[test]
+fn legacy_thread_without_anchor_kind_deserializes() {
+    let mut value = serde_json::to_value(comment(1, 1, "src/review.rs")).unwrap();
+    value.as_object_mut().unwrap().remove("file_level");
+    let comment: diffz_core::domain::ThreadComment = serde_json::from_value(value).unwrap();
+    assert_eq!(comment.file_level, None);
+}
+
+#[test]
+fn file_thread_from_an_older_head_is_outdated() {
+    use diffz_core::domain::*;
+    let mut snapshot = Snapshot::new(
+        "test".into(),
+        parse_patch(
+            include_bytes!("../../../fixtures/review-flow/change.patch"),
+            ParseLimits::default(),
+        )
+        .unwrap(),
+        Some(RemoteTarget {
+            provider: ProviderId::GITHUB,
+            repository: RepositoryKey {
+                host: "github.com".into(),
+                id: 1,
+                owner: "o".into(),
+                name: "r".into(),
+            },
+            account: "reviewer".into(),
+            pr: 1,
+            target_tip: "base".into(),
+            comparison_base: "base".into(),
+            head: "new-head".into(),
+            open: true,
+            draft: false,
+            pending_review: false,
+            compare: None,
+        }),
+        vec![],
+    );
+    let root = ThreadComment {
+        id: 12,
+        root_id: 12,
+        path: "src/review.rs".into(),
+        side: Some(Side::Right),
+        line: None,
+        start_line: None,
+        file_level: Some(true),
+        body: "file note".into(),
+        author: "reviewer".into(),
+        commit_id: "old-head".into(),
+        created_at: None,
+    };
+    snapshot.comments.push(root.clone());
+    let point = SourcePoint {
+        snapshot: snapshot.id.clone(),
+        file: snapshot.patch.files[0].id.clone(),
+        side: Side::Right,
+        line: 0,
+        byte_column: 0,
+    };
+    assert_eq!(thread_location(&snapshot, &root), ThreadLocation::Outdated);
+    assert!(thread_roots_at(&snapshot, &point).is_empty());
 }
 
 #[test]
@@ -131,6 +249,7 @@ fn comment(id: u64, root_id: u64, path: &str) -> diffz_core::domain::ThreadComme
         side: None,
         line: None,
         start_line: None,
+        file_level: None,
         body: String::new(),
         author: "reviewer".into(),
         commit_id: String::new(),

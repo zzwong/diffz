@@ -1,6 +1,7 @@
 //! Reading surface and application chrome. Provider, SQL, and process code stay out of this crate.
 mod app;
 mod commands;
+mod controls;
 mod file_browser;
 pub mod native_text;
 mod panels;
