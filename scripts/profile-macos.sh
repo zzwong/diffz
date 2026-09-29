@@ -71,9 +71,16 @@ done
 absolute() { if [[ -z "$1" || "$1" == /* ]]; then echo "$1"; else echo "$caller/$1"; fi; }
 bin="$(absolute "$bin")" compare="$(absolute "$compare")" compare_to="$(absolute "$compare_to")"
 [[ "$(uname -s)" == Darwin ]] || { echo 'The profile runs on macOS only.' >&2; exit 2; }
-for tool in footprint vmmap heap top python3; do
+for tool in footprint vmmap heap top python3 swift caffeinate; do
   command -v "$tool" >/dev/null || { echo "$tool is required; nothing was measured." >&2; exit 127; }
 done
+session_locked() {
+  swift -e 'import ApplicationServices; let s = CGSessionCopyCurrentDictionary() as? [String: Any]; if s?["CGSSessionScreenIsLocked"] as? Bool == true { exit(0) } else { exit(1) }' >/dev/null 2>&1
+}
+if session_locked; then
+  echo 'The macOS desktop is locked; unlock it before profiling.' >&2
+  exit 5
+fi
 
 # Summaries, comparisons and the synthetic patch are computed in Python.
 py() {
@@ -341,13 +348,18 @@ if [[ -n "$failures" ]]; then
   fi
   echo "warning: running on a busy machine: ${failures//$'\n'/; }" >&2
 fi
-
+if session_locked; then
+  echo 'The macOS desktop locked while waiting for a quiet machine; nothing was measured.' >&2
+  exit 5
+fi
 # A short private root: state directories hold a Unix socket, whose path is limited to 104 bytes.
 tmp="$(mktemp -d /tmp/dzp.XXXXXX)"
+awake_pid=""
 # Stops every diffz this run started, including a window a failed hand-off launched, by the
 # state directories under $tmp, and every other child still running.
 cleanup() {
   local pid pids=()
+  [[ -z "$awake_pid" ]] || kill "$awake_pid" 2>/dev/null || true
   # jobs runs in this shell, not a subshell, so it lists this script's children.
   jobs -p >"$tmp/jobs"
   pgrep -f -- "--state-dir $tmp/" >>"$tmp/jobs" || true
@@ -360,6 +372,9 @@ cleanup() {
   rm -rf "$tmp"
 }
 trap cleanup EXIT
+# Keep this headless desktop active for the profile. Visibility is still checked per run.
+caffeinate -diu -t 7200 >/dev/null 2>&1 &
+awake_pid=$!
 large_patch="$tmp/large.patch"
 rm -rf "$out"
 mkdir -p "$out/raw"
@@ -408,6 +423,9 @@ source_args() {
 }
 
 footprint_now() { footprint -j "$1" -f bytes "$2" >/dev/null 2>&1 && py footprint "$1"; }
+frontmost_pid() {
+  osascript -l JavaScript -e 'ObjC.import("AppKit"); $.NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier' 2>/dev/null || true
+}
 
 # Settled means: a minimum wait, the profile steps done, then the SQLite WAL unchanged
 # (releases and blame arrive after the source shows) and phys_footprint within 1 MB of its
@@ -445,6 +463,10 @@ fail_run() {
 run_scenario() {
   local name="$1" source="$2" steps="$3" after="$4" dir="$5" msl="$6" last_try="$7" pid state log settled
   local handoff_status=""
+  if session_locked; then
+    echo 'The macOS desktop locked during profiling; stopping.' >&2
+    return 5
+  fi
   state="$tmp/$name"
   rm -rf "$state"
   mkdir -p "$state" "$dir"
@@ -459,14 +481,28 @@ run_scenario() {
   fi
   pid=$!
   settled="$(settle "$pid" "$state" "$log" "$steps")" || { fail_run "$dir" "diffz exited; see app.log"; return 1; }
+  if [[ "$(frontmost_pid)" != "$pid" ]]; then
+    stop "$pid"
+    if [[ "$last_try" == 0 ]]; then
+      echo "  $name: diffz was not frontmost; retrying" >&2
+      return 2
+    fi
+    fail_run "$dir" "diffz was not frontmost after three attempts; window visibility unverified"
+    return 1
+  fi
   # A window that was covered while it opened never drew enough frames to fill the pool.
-  # The last attempt is sampled anyway, and the summary shows the frame-buffer count.
+  # Do not sample its idle CPU: an occluded window is already at the idle floor.
   local buffers
   buffers="$(footprint_now "$tmp/settle.json" "$pid" | awk -v f="$drawable_bytes" '{printf "%d", $2 / f + 0.5}')"
   if [[ "$buffers" -lt "$frame_buffers" && "$last_try" == 0 ]]; then
     echo "  $name: $buffers of $frame_buffers frame buffers; was the window covered? retrying" >&2
     stop "$pid"
     return 2
+  fi
+  if [[ "$buffers" -lt "$frame_buffers" ]]; then
+    stop "$pid"
+    fail_run "$dir" "only $buffers of $frame_buffers frame buffers after three attempts; window visibility unverified"
+    return 1
   fi
   case "$after" in
     idle) sleep "$idle_seconds" ;;
@@ -501,6 +537,11 @@ run_scenario() {
     fi
     top -l 31 -s 1 -pid "$pid" -stats pid,cpu,csw,idlew,power >"$dir/top.txt" 2>&1
     [[ -z "$pm_pid" ]] || wait "$pm_pid" || true
+    if [[ "$(frontmost_pid)" != "$pid" ]]; then
+      stop "$pid"
+      fail_run "$dir" "diffz lost focus during CPU sampling; window visibility unverified"
+      return 1
+    fi
     ps -o pid=,rss=,vsz=,%cpu=,time= -p "$pid" >"$dir/ps.txt"
     vmmap --summary "$pid" >"$dir/vmmap.txt" 2>&1 || true
     heap -s "$pid" >"$dir/heap.txt" 2>&1 || true
@@ -527,6 +568,7 @@ PYTHON
 }
 
 started=$SECONDS
+invalid_runs=0
 for run in $(seq 1 "$repeat"); do
   echo "run $run of $repeat"
   while read -r -u 3 name net source steps after; do
@@ -534,9 +576,11 @@ for run in $(seq 1 "$repeat"); do
     for try in 1 2 3; do
       status=0
       run_scenario "$name" "$source" "$steps" "$after" "$out/raw/$name-run$run" 0 "$((try == 3))" || status=$?
+      [[ "$status" != 5 ]] || exit 5
       [[ "$status" == 2 ]] || break
       rm -rf "$out/raw/$name-run$run"
     done
+    [[ "$status" != 1 ]] || invalid_runs=$((invalid_runs + 1))
   done 3<<< "$scenario_table"
 done
 if [[ "$attribute" == 1 ]]; then
@@ -553,3 +597,7 @@ if [[ -n "$compare" ]]; then
   py compare "$compare" "$out/summary.json"
 fi
 echo "Results are in $out"
+if [[ "$invalid_runs" -gt 0 ]]; then
+  echo "$invalid_runs invalid run(s); the profile cannot support a performance conclusion" >&2
+  exit 4
+fi
