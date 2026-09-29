@@ -16,10 +16,14 @@ code = 200; raw = None; value = None
 if host == 'github.com':
     gh = load('github_compare.json')
     base, head = gh['base_commit']['sha'], gh['commits'][-1]['sha']
+    # Head behind the base, or identical refs: GitHub lists no commits and the merge base is the head.
+    if (root / 'behind').exists() or (root / 'identical').exists():
+        gh['commits'], gh['total_commits'] = [], 0
+        gh['merge_base_commit']['sha'] = head = '1' * 40 if (root / 'behind').exists() else base
     prefix = 'repos/dtolnay/anyhow'
     if endpoint == prefix:
         value = load('github_repo.json')
-    elif endpoint in (f'{prefix}/compare/1.0.80...1.0.81', f'{prefix}/compare/{base}...{head}'):
+    elif endpoint in (f'{prefix}/compare/1.0.80...1.0.81', f'{prefix}/compare/dtolnay%3A1.0.80...fork%3A1.0.81', f'{prefix}/compare/{base}...{head}'):
         if (root / 'diverged').exists():
             gh['merge_base_commit']['sha'] = '0' * 40
         if (root / 'many-commits').exists():

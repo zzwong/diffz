@@ -141,8 +141,13 @@ impl CompareAddress {
             || !u.username().is_empty()
             || u.password().is_some()
             || u.port().is_some()
-            // GitHub's own compare page appends expand=1; nothing else belongs in the address.
-            || u.query().is_some_and(|q| q != "expand=1")
+            // GitHub's own compare page appends view toggles; nothing else belongs in the address.
+            || u.query_pairs().any(|(k, v)| {
+                !matches!(
+                    (&*k, &*v),
+                    ("expand", "1") | ("diff", "split" | "unified") | ("w", "1")
+                )
+            })
         {
             return Err(
                 "a compare URL must be HTTPS, without credentials, ports, or query strings".into(),
@@ -794,26 +799,24 @@ impl GithubReader {
             );
         }
         // GitHub lists the newest commits, so the last one is the head; none means the head is behind the base.
-        let head = match named["commits"].as_array().and_then(|c| c.last()) {
-            Some(last) => oid(last, "/sha")?,
-            None => merge_base.clone(),
+        let commits = named["commits"]
+            .as_array()
+            .ok_or("GitHub's compare response is missing its commit list")?;
+        let head = match (named["total_commits"].as_u64(), commits.last()) {
+            (Some(0), _) => merge_base.clone(),
+            (_, Some(last)) => oid(last, "/sha")?,
+            _ => return Err("GitHub's compare response has no commits to pin the head to".into()),
         };
         let pinned = range(&base, &head);
-        let (compare, raw) = std::thread::scope(|s| {
-            let compare = s.spawn(|| self.get_json(&a.host, &pinned, cancel.clone()));
-            let raw = self.request(
-                &a.host,
-                &pinned,
-                "GET",
-                None,
-                "Accept: application/vnd.github.diff",
-                cancel.clone(),
-            );
-            (joined(compare), raw)
-        });
-        let compare = compare?;
-        let raw = raw?;
-        let files = compare["files"].as_array().cloned().unwrap_or_default();
+        let raw = self.request(
+            &a.host,
+            &pinned,
+            "GET",
+            None,
+            "Accept: application/vnd.github.diff",
+            cancel.clone(),
+        )?;
+        let files = named["files"].as_array().cloned().unwrap_or_default();
         let from_files = raw.status == 406;
         let body = match raw.status {
             200 => raw.body,
@@ -882,8 +885,7 @@ impl GithubReader {
                 }
             }
         }
-        let commits = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
-        let total = compare["total_commits"].as_u64().unwrap_or(0) as usize;
+        let total = named["total_commits"].as_u64().unwrap_or(0) as usize;
         if total > commits.len() {
             s.warnings.push(format!(
                 "GitHub lists only the newest {} of this compare's {total} commits; the diff still covers all of them.",

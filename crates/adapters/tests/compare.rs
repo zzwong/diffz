@@ -46,6 +46,10 @@ fn github_compare_urls() {
         github_compare("https://github.com/o/r/compare/release/1.0...feature/x?expand=1").3,
         refs("release/1.0", "feature/x", false)
     );
+    for q in ["diff=split", "diff=unified&w=1", "expand=1&diff=split&w=1"] {
+        let url = format!("https://github.com/o/r/compare/a...b?{q}");
+        assert_eq!(github_compare(&url).3, refs("a", "b", false), "{url}");
+    }
     assert_eq!(
         github_compare("https://ghe.example.com/o/r/compare/release%2F1.0...fork:topic%2Fa%23b/").3,
         refs("release/1.0", "fork:topic/a#b", false)
@@ -68,6 +72,8 @@ fn github_compare_rejections() {
         "https://user:pw@github.com/o/r/compare/a...b",
         "https://github.com:8443/o/r/compare/a...b",
         "https://github.com/o/r/compare/a...b?host=evil",
+        "https://github.com/o/r/compare/a...b?diff=evil",
+        "https://github.com/o/r/compare/a...b?w=0",
         "https://github.com/o/r/compare/a",
         "https://github.com/o/r/compare/",
         "https://github.com/o/r/compare/...b",
@@ -113,6 +119,36 @@ fn gitlab_compare_urls() {
         gitlab_compare("https://gitlab.com/g/p/-/compare?to=v2&from=v1&straight=false").2,
         refs("v1", "v2", false)
     );
+    // The Compare button redirects here with the source project's id attached.
+    for (url, r) in [
+        (
+            "https://gitlab.com/g/p/-/compare/v1...v2?from_project_id=7",
+            refs("v1", "v2", false),
+        ),
+        (
+            "https://gitlab.com/g/p/-/compare/v1..v2?from_project_id=7",
+            refs("v1", "v2", true),
+        ),
+        (
+            "https://gitlab.com/g/p/-/compare/v1..v2?straight=true",
+            refs("v1", "v2", true),
+        ),
+        (
+            "https://gitlab.com/g/p/-/compare/v1...v2?straight=false",
+            refs("v1", "v2", false),
+        ),
+        (
+            "https://gitlab.com/g/p/-/compare?from=v1&to=v2&from_project_id=7",
+            refs("v1", "v2", false),
+        ),
+    ] {
+        assert_eq!(gitlab_compare(url).2, r, "{url}");
+    }
+    match GitlabTarget::parse("https://gitlab.com/g/p/-/compare/v1...v2?from_project_id=7").unwrap()
+    {
+        GitlabTarget::Compare(a) => assert_eq!(a.from_project_id, Some(7)),
+        other => panic!("{other:?}"),
+    }
     assert!(matches!(
         GitlabTarget::parse("https://gitlab.com/g/p/-/merge_requests/3").unwrap(),
         GitlabTarget::Mr(a) if a.number == 3
@@ -133,8 +169,11 @@ fn gitlab_compare_rejections() {
         "https://gitlab.com/g/p/-/compare?from=a",
         "https://gitlab.com/g/p/-/compare?to=b",
         "https://gitlab.com/g/p/-/compare?from=a&to=b&straight=maybe",
-        "https://gitlab.com/g/p/-/compare?from=a&to=b&from_project_id=2",
+        "https://gitlab.com/g/p/-/compare?from=a&to=b&from_project_id=x",
         "https://gitlab.com/g/p/-/compare/a...b?straight=true",
+        "https://gitlab.com/g/p/-/compare/a..b?straight=false",
+        "https://gitlab.com/g/p/-/compare/a...b?from_project_id=x",
+        "https://gitlab.com/g/p/-/compare/a...b?from=c",
         "https://gitlab.com/g/p/-/compare/a....b",
         "https://gitlab.com/g/p/-/compare/a...b%20c",
         "https://gitlab.com/g/p/-/compares/a...b",
@@ -232,9 +271,47 @@ mod loaded {
                 "repos/dtolnay/anyhow",
                 "repos/dtolnay/anyhow/compare/1.0.80...1.0.81",
                 pinned.as_str(),
-                pinned.as_str(),
             ]
         );
+    }
+
+    #[test]
+    fn github_head_behind_base_pins_the_merge_base() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("behind"), "").unwrap();
+        let s = github(temp.path(), GH_URL).unwrap();
+        let t = s.remote.as_ref().unwrap();
+        assert_eq!(
+            (t.target_tip.as_str(), t.head.as_str()),
+            (GH_BASE, "1".repeat(40).as_str())
+        );
+        assert_eq!(t.comparison_base, t.head);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert!(calls(temp.path()).contains(&format!(
+            "repos/dtolnay/anyhow/compare/{GH_BASE}...{}",
+            "1".repeat(40)
+        )));
+    }
+
+    #[test]
+    fn github_identical_refs_open_an_empty_compare() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("identical"), "").unwrap();
+        let s = github(temp.path(), GH_URL).unwrap();
+        let t = s.remote.as_ref().unwrap();
+        assert_eq!((t.target_tip.as_str(), t.head.as_str()), (GH_BASE, GH_BASE));
+        assert_eq!(t.comparison_base, GH_BASE);
+        assert_eq!(s.overview.description.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn github_owner_qualified_refs_are_encoded_in_the_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let url = GH_URL.replace("1.0.80...1.0.81", "dtolnay:1.0.80...fork:1.0.81");
+        github(temp.path(), &url).unwrap();
+        assert!(calls(temp.path()).contains(
+            &"repos/dtolnay/anyhow/compare/dtolnay%3A1.0.80...fork%3A1.0.81".to_string()
+        ));
     }
 
     #[test]
@@ -314,6 +391,29 @@ mod loaded {
         assert!(calls.iter().any(|c| c.ends_with(&format!(
             "/repository/compare?from={GL_FROM}&to={GL_TO}&straight=false"
         ))));
+    }
+
+    #[test]
+    fn gitlab_from_project_id_must_match_the_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let same = gitlab(temp.path(), &format!("{GL_URL}?from_project_id=4176070")).unwrap();
+        assert_eq!(same.remote.unwrap().repository.id, 4176070);
+        let err = gitlab(temp.path(), &format!("{GL_URL}?from_project_id=1")).unwrap_err();
+        assert!(
+            err.contains("cross-project compares are not supported"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn gitlab_commits_are_listed_oldest_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let s = gitlab(temp.path(), GL_URL).unwrap();
+        let d = s.overview.description.unwrap();
+        assert!(
+            d.starts_with("- `a95c9583`") && d.lines().last().unwrap().starts_with("- `8a1c38d6`"),
+            "{d}"
+        );
     }
 
     #[test]

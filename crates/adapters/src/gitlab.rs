@@ -122,11 +122,13 @@ impl GitlabTarget {
 }
 /// `https://HOST/GROUP/PROJECT/-/compare/FROM...TO`, or the `?from=&to=&straight=` form.
 /// `FROM..TO` and `straight=true` ask for a direct diff instead of one against the merge base.
+/// GitLab's Compare button adds `from_project_id`; it is kept so a cross-project compare can be refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitlabCompare {
     pub host: String,
     pub project: String,
     pub refs: CompareRefs,
+    pub from_project_id: Option<u64>,
 }
 impl GitlabCompare {
     pub fn parse(input: &str) -> Result<Self> {
@@ -150,10 +152,28 @@ impl GitlabCompare {
             "" => None,
             t => Some(t.strip_prefix('/').ok_or("Invalid compare URL suffix")?),
         };
+        let mut from_project_id = None;
+        let mut straight = None;
+        let mut project_id = |value: &str| -> Result<()> {
+            from_project_id = Some(
+                value
+                    .parse()
+                    .map_err(|_| "from_project_id must be a number")?,
+            );
+            Ok(())
+        };
         let (from, to, direct) = match tail {
             Some(range) => {
-                if u.query().is_some() {
-                    return Err("Give the refs in the path or in the query, not both".into());
+                for (key, value) in u.query_pairs() {
+                    match &*key {
+                        "from_project_id" => project_id(&value)?,
+                        "straight" => straight = Some(&*value == "true"),
+                        _ => {
+                            return Err(
+                                "Give the refs in the path or in the query, not both".into()
+                            );
+                        }
+                    }
                 }
                 let range = decode_path(range)?;
                 let (from, to, direct) = match range.split_once("...") {
@@ -165,6 +185,9 @@ impl GitlabCompare {
                         (from, to, true)
                     }
                 };
+                if straight.is_some_and(|s| s != direct) {
+                    return Err("straight disagrees with the dots in the compare path".into());
+                }
                 (from.to_owned(), to.to_owned(), direct)
             }
             None => {
@@ -173,6 +196,7 @@ impl GitlabCompare {
                     match &*key {
                         "from" => from = Some(value.into_owned()),
                         "to" => to = Some(value.into_owned()),
+                        "from_project_id" => project_id(&value)?,
                         "straight" => {
                             direct = match &*value {
                                 "true" => true,
@@ -180,7 +204,11 @@ impl GitlabCompare {
                                 _ => return Err("straight must be true or false".into()),
                             }
                         }
-                        _ => return Err("Only from, to, and straight are accepted".into()),
+                        _ => {
+                            return Err(
+                                "Only from, to, straight, and from_project_id are accepted".into(),
+                            );
+                        }
                     }
                 }
                 (
@@ -212,6 +240,7 @@ impl GitlabCompare {
                 head: to,
                 direct,
             },
+            from_project_id,
         })
     }
 }
@@ -356,13 +385,17 @@ impl GitlabReader {
         let (compare, base) = (compare?, base?);
         let diffs = compare["diffs"].as_array().map_or(&[][..], Vec::as_slice);
         let patch = parse_patch(&patch_from_diffs(diffs), ParseLimits::default())?;
+        let id = meta["id"].as_u64().ok_or("Missing project ID")?;
+        if a.from_project_id.is_some_and(|from| from != id) {
+            return Err("cross-project compares are not supported".into());
+        }
         let path = string(&meta, "/path_with_namespace")?;
         let (owner, name) = path.rsplit_once('/').ok_or("Invalid project")?;
         let remote = RemoteTarget {
             provider: ProviderId::GITLAB,
             repository: RepositoryKey {
                 host: a.host.clone(),
-                id: meta["id"].as_u64().ok_or("Missing project ID")?,
+                id,
                 owner: owner.into(),
                 name: name.into(),
             },
@@ -410,7 +443,6 @@ impl GitlabReader {
                 .as_array()
                 .map_or(&[][..], Vec::as_slice)
                 .iter()
-                .rev()
                 .map(|c| {
                     format!(
                         "- `{}` {}\n",
@@ -1282,5 +1314,23 @@ mod tests {
         assert!(wip_mr.draft);
         let ready_mr = target(&address(), &meta(false, false), &user).unwrap();
         assert!(!ready_mr.draft);
+    }
+    #[test]
+    fn patch_from_diffs_keeps_binary_and_rename_only_entries() {
+        use diffz_core::patch::ChangeKind;
+        let diffs = vec![
+            serde_json::json!({"old_path":"logo.png","new_path":"logo.png","a_mode":"100644","b_mode":"100644","diff":""}),
+            serde_json::json!({"old_path":"old name.txt","new_path":"new name.txt","a_mode":"100644","b_mode":"100644","renamed_file":true,"diff":""}),
+        ];
+        let patch = parse_patch(&patch_from_diffs(&diffs), ParseLimits::default()).unwrap();
+        assert_eq!(patch.files.len(), 2);
+        assert_eq!(patch.files[0].display_path(), "logo.png");
+        assert!(patch.files.iter().all(|f| f.hunks.is_empty()));
+        assert!(
+            matches!(patch.files[1].kind, ChangeKind::Renamed),
+            "{:?}",
+            patch.files[1].kind
+        );
+        assert_eq!(patch.files[1].display_path(), "new name.txt");
     }
 }
