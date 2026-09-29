@@ -7,6 +7,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-29
+
+### Fixed
+
+- The Arch Linux package builds again. The v0.3.0 tag pinned a wrong source
+  checksum, so v0.3.0 was never published; 0.3.1 ships the same application.
+
 ## [0.3.0] - 2026-09-29
 
 ### Added
