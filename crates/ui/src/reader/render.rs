@@ -378,6 +378,13 @@ impl Render for Workbench {
         } else if self.panel != Panel::None {
             root = root.child(self.panel_view(window, cx));
         }
+        if crate::magnify::pinch_enabled() {
+            // Captured at the root: a pinch magnifies the whole window wherever it lands.
+            root = root.capture_pinch(|event, window, cx| {
+                crate::magnify::pinch(event, window);
+                cx.stop_propagation();
+            });
+        }
         root
     }
 }

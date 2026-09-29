@@ -21,6 +21,11 @@ impl Workbench {
     ) {
         let key = event.keystroke.key.as_str();
         let mods = event.keystroke.modifiers;
+        // Escape first undoes a pinch magnification, and only that, like pinching back out.
+        if key == "escape" && !mods.modified() && crate::magnify::reset(window) {
+            cx.stop_propagation();
+            return;
+        }
         if self.panel == Panel::Line && self.handle_comment_menu_key(event, window, cx) {
             return;
         }

@@ -15,6 +15,7 @@ mod chrome;
 mod comment_editor;
 pub mod icons;
 mod keyboard;
+mod magnify;
 
 mod review_panels;
 pub(crate) mod rich_view;

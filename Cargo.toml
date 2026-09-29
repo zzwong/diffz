@@ -45,6 +45,8 @@ unicode-linebreak = "0.1.5"
 # once a gpui-pre snapshot ships them.
 [patch.crates-io]
 gpui-pre-wgpu = { git = "https://github.com/zzwong/gpui-pre-wgpu", rev = "c74eb0aa61c314c94769f98c887cb3659cd24b3f" }
+# Spike: visual (pinch) magnification, branch diffz/visual-zoom. Not proposed upstream yet.
+gpui-pre = { git = "https://github.com/zzwong/gpui-pre", rev = "26a7ee0166209a01ac93f30ebcc864e2459ce5e5" }
 
 [profile.dev]
 debug = 1
