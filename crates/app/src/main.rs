@@ -340,12 +340,15 @@ fn app_bundle(exe: &Path) -> Option<&Path> {
 /// stderr goes to the log in `state`.
 #[cfg(all(unix, feature = "desktop"))]
 fn launch(args: Vec<std::ffi::OsString>, state: &Path) -> Result<()> {
-    use diffz_adapters::handoff::{log_file, log_path};
+    use diffz_adapters::handoff::log_file;
     let exe = std::env::current_exe()?.canonicalize()?;
     let log = log_file(state)?;
     #[cfg(target_os = "macos")]
     if let Some(bundle) = app_bundle(&exe) {
-        use diffz_adapters::process::{ProcessRequest, Runner, stderr_excerpt};
+        use diffz_adapters::{
+            handoff::log_path,
+            process::{ProcessRequest, Runner, stderr_excerpt},
+        };
         // -n: an app already running on another state directory must not swallow the request.
         // open appends the app's stderr to the log that log_file prepared.
         let open = ProcessRequest::new("/usr/bin/open".into()).args(

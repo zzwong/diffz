@@ -140,7 +140,7 @@ impl Runner {
             cmd.process_group(0);
         }
         let mut child = ChildGuard(cmd.spawn().map_err(|e| {
-            AdapterError::Message(format!("detached process could not start: {e}"))
+            AdapterError::Message(format!("configured executable could not start: {e}"))
         })?);
         let overflow = Arc::new(AtomicBool::new(false));
         let stdout = drain(
