@@ -828,6 +828,9 @@ impl ReviewProvider for GithubProvider {
     fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot> {
         self.reader()?.snapshot(&PrAddress::parse(address)?, cancel)
     }
+    fn accepts(&self, address: &str) -> bool {
+        PrAddress::parse(address).is_ok()
+    }
     fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
         self.reader()?.source(t, path, revision)
     }

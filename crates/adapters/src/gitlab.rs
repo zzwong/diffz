@@ -651,6 +651,9 @@ impl ReviewProvider for GitlabProvider {
     fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot> {
         self.reader()?.snapshot(&MrAddress::parse(address)?, cancel)
     }
+    fn accepts(&self, address: &str) -> bool {
+        MrAddress::parse(address).is_ok()
+    }
     fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
         self.reader()?.source(t, path, revision)
     }

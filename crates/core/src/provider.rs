@@ -20,7 +20,7 @@ impl Cancellation {
         self.0.load(Ordering::Relaxed)
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OpenRequest {
     Fixture(String),
     Patch(PathBuf),

@@ -19,10 +19,14 @@ diffz-adapters = { workspace = true }
 diffz-ui = { workspace = true, optional = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+smol = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [features]
 default = ["desktop", "syntax", "wasm"]
-desktop = ["dep:diffz-ui"]
+desktop = ["dep:diffz-ui", "dep:smol"]
 syntax = ["diffz-core/syntax", "diffz-ui?/syntax"]
 wasm = ["syntax", "diffz-core/wasm"]
 

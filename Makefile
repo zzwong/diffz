@@ -90,8 +90,9 @@ dev-build: $(DEV_KACHE)
 
 # ARGS is expanded by the shell, so quote arguments containing spaces inside it. A later
 # --state-dir in ARGS overrides this one. `diffz --doctor` accepts no other argument.
+# --foreground keeps the window attached to the terminal, so its output and Ctrl-C work.
 run: dev-build
-	$(DEV_BIN) $(if $(filter --doctor,$(ARGS)),,--state-dir "$(DEV_STATE_DIR)") $(ARGS)
+	$(DEV_BIN) $(if $(filter --doctor,$(ARGS)),,--foreground --state-dir "$(DEV_STATE_DIR)") $(ARGS)
 
 install-dev: $(if $(BIN),,dev-build)
 	$(DEV_INSTALL_ENV) DEV_BIN="$(or $(BIN),$(DEV_BIN))" bash scripts/install-dev.sh install

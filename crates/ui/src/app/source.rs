@@ -4,6 +4,39 @@ impl Workbench {
     pub fn open(&mut self, request: OpenRequest, refresh: bool, cx: &mut Context<Self>) {
         self.open_pending(request, refresh, None, cx);
     }
+    /// Opens a request from a later `diffz` invocation the way the Open panel does. Without one,
+    /// the window only comes forward.
+    pub fn take_handoff(
+        &mut self,
+        request: Option<OpenRequest>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let Some(request) = request else {
+            return Ok(());
+        };
+        if let Some(blocker) = self.handoff_blocker(cx) {
+            return Err(blocker.into());
+        }
+        self.open(request, false, cx);
+        Ok(())
+    }
+    /// Why opening another review now would lose work, if it would. Drafts are saved as they are
+    /// typed, but a reply or a comment on a line that takes none lives only in the composer.
+    pub(crate) fn handoff_blocker(&self, cx: &App) -> Option<&'static str> {
+        let draft = self.selected_draft.as_ref().and_then(|id| {
+            let drafts = &self.active.as_ref()?.drafts;
+            drafts.iter().find(|d| &d.id == id)
+        });
+        handoff_blocker(
+            self.unsaved() || self.busy,
+            self.panel == Panel::Line
+                && composing(
+                    &self.composer.draft_input.read(cx).value(),
+                    draft.map(|d| d.body.as_str()),
+                ),
+            self.panel == Panel::Preview && self.prepared.is_some(),
+        )
+    }
     pub(super) fn open_pending(
         &mut self,
         request: OpenRequest,
@@ -183,5 +216,36 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
                 }
             }
         }
+    }
+}
+/// Whether the composer holds text that `saved`, the body of the draft it edits, does not.
+fn composing(text: &str, saved: Option<&str>) -> bool {
+    !text.trim().is_empty() && saved != Some(text)
+}
+fn handoff_blocker(saving: bool, composing: bool, previewing: bool) -> Option<&'static str> {
+    if composing {
+        Some("a comment is being written in diffz; save or discard it first")
+    } else if previewing {
+        Some("a review is waiting to be published in diffz; publish it or close the preview first")
+    } else if saving {
+        Some("diffz is still saving or publishing; try again in a moment")
+    } else {
+        None
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::{composing, handoff_blocker};
+    #[test]
+    fn unsaved_comments_block_a_handoff() {
+        assert!(composing("a reply", None));
+        assert!(composing("edited", Some("draft")));
+        assert!(!composing("draft", Some("draft")));
+        assert!(!composing(" \n", None));
+        let blocker = handoff_blocker(false, true, false).unwrap();
+        assert!(blocker.contains("comment is being written"), "{blocker}");
+        assert!(handoff_blocker(false, false, true).is_some());
+        assert!(handoff_blocker(true, false, false).is_some());
+        assert_eq!(handoff_blocker(false, false, false), None);
     }
 }

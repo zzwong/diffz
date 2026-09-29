@@ -3,6 +3,8 @@ pub mod error;
 pub mod export;
 pub mod fixtures;
 pub mod github;
+#[cfg(unix)]
+pub mod handoff;
 pub mod local_git;
 pub mod outbox;
 pub mod process;

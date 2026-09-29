@@ -31,7 +31,7 @@ impl Drop for Store {
         let _ = FileExt::unlock(&self._lock);
     }
 }
-fn private_file(path: &Path) -> Result<File> {
+pub(crate) fn private_file(path: &Path) -> Result<File> {
     let mut o = OpenOptions::new();
     o.read(true).write(true).create(true);
     #[cfg(unix)]
@@ -41,17 +41,43 @@ fn private_file(path: &Path) -> Result<File> {
     }
     Ok(o.open(path)?)
 }
+/// Whether a live `Store` holds the writer lock of `dir`. Probing holds the lock for an instant,
+/// so a `Store::open` racing the probe can fail as if another instance were running.
+pub fn in_use(dir: &Path) -> Result<bool> {
+    let mut o = OpenOptions::new();
+    o.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.custom_flags(libc::O_NOFOLLOW);
+    }
+    let lock = match o.open(dir.join("writer.lock")) {
+        Ok(lock) => lock,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    if lock.try_lock_exclusive().is_err() {
+        return Ok(true);
+    }
+    FileExt::unlock(&lock)?;
+    Ok(false)
+}
+/// Creates the state directory `dir`, readable only by its owner.
+pub(crate) fn private_dir(dir: &Path) -> Result<()> {
+    if dir.exists() && dir.symlink_metadata()?.file_type().is_symlink() {
+        return Err("state directory cannot be symlinked".into());
+    }
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
 impl Store {
     pub fn open(dir: &Path) -> Result<Self> {
-        if dir.exists() && dir.symlink_metadata()?.file_type().is_symlink() {
-            return Err("state directory cannot be symlinked".into());
-        }
-        std::fs::create_dir_all(dir)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
-        }
+        private_dir(dir)?;
         let lock = private_file(&dir.join("writer.lock"))?;
         lock.try_lock_exclusive().map_err(|_| {
             AdapterError::Message("another diffz instance is using this state directory".into())

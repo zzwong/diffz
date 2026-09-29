@@ -1608,6 +1608,8 @@ dependencies = [
  "diffz-core",
  "diffz-ui",
  "serde_json",
+ "smol",
+ "tempfile",
 ]
 
 [[package]]

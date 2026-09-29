@@ -99,14 +99,44 @@ not Developer ID signed or notarized.
 ## Usage
 
 ```sh
-diffz --pr owner/repo#123              # GitHub pull request
-diffz --mr group/project!123           # GitLab merge request (or a full URL)
-diffz --patch change.patch             # unified diff file
+diffz owner/repo#123                   # GitHub pull request (or a full URL)
+diffz group/project!123                # GitLab merge request (or a full URL)
+diffz change.patch                     # unified diff file
+diffz --pr owner/repo#123              # the same, naming the source explicitly
+diffz --mr group/project!123
+diffz --patch change.patch
 diffz --git /repo --base main          # main..HEAD in a local repository
 diffz --staged /repo                   # the index against HEAD
 diffz --worktree /repo                 # unstaged and untracked changes
 diffz --resume <snapshot id>           # reopen a saved review
 ```
+
+A lone argument opens the patch file at that path if there is one, and is
+otherwise read as a pull or merge request address.
+
+`diffz` returns as soon as the request is on its way, so scripts and coding
+agents can call it. When a diffz window is already open on the same state
+directory, it switches to the new review and comes to the front; your drafts
+for the previous one stay saved. Otherwise a new window starts in the
+background. The exit status says whether the request was taken. A window
+refuses a new review while a comment is being written, and refuses requests
+for write permissions it was not started with. `--foreground` runs the window
+in the terminal and waits for it to close, as earlier versions did. A window
+started in the background writes its errors to `diffz.log` in the state
+directory.
+
+`--json` prints the outcome as one line on stdout:
+
+```json
+{"status":"launched","source":{"Fixture":"F03"}}
+{"status":"handed_off","source":{"Remote":{"provider":"GitHub","address":"owner/repo#1"}}}
+{"status":"error","message":"a comment is being written in diffz; save or discard it first"}
+```
+
+`status` is `launched` (a new window opened the request and is taking others),
+`handed_off` (the running window took it), or `error`. `source` is the request
+as diffz serializes it, or `null` when none was named; `message` comes only
+with `error`. The exit status is 0 exactly when `status` is not `error`.
 
 The complete option list is `diffz --help`; `diffz --doctor` reports which
 external tools the machine has.
