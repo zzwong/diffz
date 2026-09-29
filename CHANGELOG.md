@@ -23,6 +23,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The file tree button in the title bar is highlighted like the Wrap and Split
   toggles while the tree is pinned open, and screen readers announce it as a
   toggle with that state.
+- The timer that stops a runaway extension annotator ticks only while one is
+  running. Before, once any extension had annotated, it woke diffz about 100
+  times a second for the rest of the session.
 
 ## [0.3.1] - 2026-09-29
 

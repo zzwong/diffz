@@ -4,7 +4,11 @@ use crate::{
     patch::{ChangeKind, RowKind},
     provider::Cancellation,
 };
-use std::{path::PathBuf, sync::OnceLock, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Condvar, Mutex, MutexGuard, OnceLock},
+    time::Duration,
+};
 use wasmtime::{
     Config, Engine, Store, StoreLimits, StoreLimitsBuilder,
     component::{Component, Linker},
@@ -15,6 +19,54 @@ wasmtime::component::bindgen!({ path: "wit", world: "extension" });
 use diffz::extension::types as wit;
 
 const TICK: Duration = Duration::from_millis(10);
+
+/// Component calls in flight. The epoch thread ticks only while there is one,
+/// so an idle process that has run an extension does not wake 100 times a second.
+static CALLS: Calls = Calls::new();
+
+struct Calls {
+    running: Mutex<usize>,
+    changed: Condvar,
+}
+
+impl Calls {
+    const fn new() -> Self {
+        Self {
+            running: Mutex::new(0),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn count(&self) -> MutexGuard<'_, usize> {
+        // The count stays consistent across a panic, so a poisoned lock is fine.
+        self.running.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn start(&self) -> Call<'_> {
+        *self.count() += 1;
+        self.changed.notify_all();
+        Call(self)
+    }
+
+    /// Blocks while no call is running.
+    fn wait(&self) {
+        let running = self.count();
+        drop(
+            self.changed
+                .wait_while(running, |n| *n == 0)
+                .unwrap_or_else(|e| e.into_inner()),
+        );
+    }
+}
+
+/// Counts one call from creation until drop, including on early return or panic.
+struct Call<'a>(&'a Calls);
+
+impl Drop for Call<'_> {
+    fn drop(&mut self) {
+        *self.0.count() -= 1;
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
@@ -42,7 +94,12 @@ fn engine() -> Result<&'static Engine, String> {
             std::thread::Builder::new()
                 .name("diffz-wasm-epoch".into())
                 .spawn(move || {
+                    // A deadline counts ticks from when it is set. The first tick
+                    // after waking comes a full TICK later; one left over from an
+                    // earlier call can come sooner, as any first tick could when
+                    // this thread never waited.
                     loop {
+                        CALLS.wait();
                         std::thread::sleep(TICK);
                         ticker.increment_epoch();
                     }
@@ -102,6 +159,7 @@ impl Annotator for CodeAnnotator {
             .build();
         let mut store = Store::new(engine()?, limits);
         store.limiter(|limits: &mut StoreLimits| limits);
+        let _call = CALLS.start();
         store.set_epoch_deadline((self.limits.time.as_millis() / TICK.as_millis()).max(1) as u64);
         let linker = Linker::new(engine()?);
         let instance = Extension::instantiate(&mut store, component, &linker)
@@ -192,5 +250,66 @@ fn annotation(a: wit::Annotation, source: &str) -> Annotation {
         title: a.title,
         body: a.body,
         source: source.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn the_ticker_waits_until_a_call_starts_and_calls_end_on_panic() {
+        let calls = Calls::new();
+        let woke = AtomicBool::new(false);
+        std::thread::scope(|s| {
+            let ticker = s.spawn(|| {
+                calls.wait();
+                woke.store(true, Ordering::SeqCst);
+            });
+            std::thread::sleep(3 * TICK);
+            assert!(!woke.load(Ordering::SeqCst));
+            let call = calls.start();
+            let also = calls.start();
+            assert_eq!(*calls.count(), 2);
+            // Hold the calls until the waiter sees them.
+            ticker.join().unwrap();
+            drop((call, also));
+        });
+        assert!(woke.load(Ordering::SeqCst));
+        assert_eq!(*calls.count(), 0);
+        let panicked = std::panic::catch_unwind(|| {
+            let _call = calls.start();
+            panic!("component host panicked");
+        });
+        assert!(panicked.is_err());
+        assert_eq!(*calls.count(), 0);
+    }
+
+    #[test]
+    fn no_call_is_counted_after_an_annotation_ends() {
+        let todo = CodeAnnotator::new(
+            "todo/todo".into(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/extensions/todo/annotators/todo.wasm"),
+            Limits {
+                time: Duration::from_millis(50),
+                ..Default::default()
+            },
+        );
+        let patch = crate::patch::parse_patch(
+            b"diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-x\n+// TODO: z\n",
+            Default::default(),
+        )
+        .unwrap();
+        let cancel = Cancellation::default();
+        let run = |title: &str| {
+            let snapshot = Snapshot::new(title.into(), patch.clone(), None, vec![]);
+            let found = todo.annotate(&snapshot, &cancel);
+            assert_eq!(*CALLS.count(), 0, "{title}");
+            found
+        };
+        assert_eq!(run("t").unwrap().len(), 1);
+        assert_eq!(run("diffz-test-spin").unwrap_err(), "stopped after 50 ms");
     }
 }
