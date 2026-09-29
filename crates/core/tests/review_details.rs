@@ -188,6 +188,7 @@ fn file_thread_from_an_older_head_is_outdated() {
             head: "new-head".into(),
             open: true,
             draft: false,
+            merged: false,
             pending_review: false,
             compare: None,
         }),

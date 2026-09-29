@@ -108,6 +108,7 @@ mod link_tests {
             head: "head".into(),
             open: true,
             draft: false,
+            merged: false,
             pending_review: false,
             compare: None,
         };

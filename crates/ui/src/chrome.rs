@@ -134,6 +134,7 @@ impl Workbench {
         let (pill_label, pill_fg, pill_bg) = match remote {
             None => ("Local", skin.accent, skin.accent.opacity(0.1)),
             Some(r) if r.compare.is_some() => ("Compare", skin.muted, skin.muted.opacity(0.12)),
+            Some(r) if r.merged => ("Merged", skin.function, skin.function.opacity(0.12)),
             Some(r) if r.draft => ("Draft", skin.warning, skin.warning.opacity(0.12)),
             Some(r) if !r.open => ("Closed", skin.muted, skin.muted.opacity(0.12)),
             Some(_) => ("Review", skin.accent, skin.accent.opacity(0.1)),
@@ -304,7 +305,7 @@ impl Workbench {
     }
     pub(crate) fn toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         let skin = self.skin();
-        let (wrap, split, font, path, adds, dels) = self
+        let (wrap, split, font, path, moved, adds, dels) = self
             .viewport
             .as_ref()
             .map(|v| {
@@ -315,11 +316,12 @@ impl Workbench {
                     v.split,
                     v.font_size,
                     file.as_ref().map_or(String::new(), |f| f.display_path()),
+                    file.as_ref().and_then(|f| f.move_label()),
                     file.as_ref().map_or(0, |f| f.additions()),
                     file.as_ref().map_or(0, |f| f.deletions()),
                 )
             })
-            .unwrap_or((true, false, 14., String::new(), 0, 0));
+            .unwrap_or((true, false, 14., String::new(), None, 0, 0));
         let prose = self.viewport.is_some() && diffz_core::presentation::default_wrap(&path);
         let rich = self.settings.rich;
         let rich_inline = self.settings.rich_inline;
@@ -343,15 +345,39 @@ impl Workbench {
             .gap_1()
             .border_b_1()
             .border_color(skin.border)
-            .child(
-                div()
+            .child(match moved {
+                Some(m) => {
+                    let dim = skin.muted.opacity(0.7);
+                    div()
+                        .id("toolbar-path")
+                        .aria_label(m.plain())
+                        .h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_size(px(12.))
+                        .font_family(crate::theme::code_font())
+                        .child(div().flex_shrink_0().child(m.prefix.clone()))
+                        .child(div().flex_shrink_0().text_color(dim).child(format!(
+                            "{}{} → ",
+                            if m.folded() { "{" } else { "" },
+                            m.old
+                        )))
+                        .child(div().child(m.new.clone()))
+                        .when(m.folded(), |d| d.child(div().text_color(dim).child("}")))
+                        .child(div().flex_shrink_0().child(m.suffix.clone()))
+                        .into_any_element()
+                }
+                None => div()
                     .flex_1()
                     .min_w_0()
                     .text_ellipsis_middle()
                     .text_size(px(12.))
                     .font_family(crate::theme::code_font())
-                    .child(path),
-            )
+                    .child(path)
+                    .into_any_element(),
+            })
             .child(
                 Button::new("reviewed")
                     .cursor_pointer()

@@ -409,6 +409,9 @@ pub struct RemoteTarget {
     pub open: bool,
     #[serde(default)]
     pub draft: bool,
+    /// Closed because it was merged, which is not the same as closed and abandoned.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub merged: bool,
     pub pending_review: bool,
     /// Set for a compare, which has no PR number (`pr` is 0) and is read-only.
     #[serde(default, skip_serializing_if = "Option::is_none")]

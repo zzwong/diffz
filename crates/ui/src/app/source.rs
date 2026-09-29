@@ -169,6 +169,14 @@ app.status="Source unchanged; comment list and review state refreshed without mo
     }
     pub fn filter_files(&mut self, cx: &mut Context<Self>) {
         let query = self.filter_input.read(cx).value().to_lowercase();
+        let old_paths = self.active.as_ref().map_or_else(Default::default, |a| {
+            a.snapshot
+                .patch
+                .files
+                .iter()
+                .filter_map(|f| Some((f.id.clone(), f.moved_from()?.display())))
+                .collect()
+        });
         let entries = self.active.as_ref().map_or_else(Vec::new, |a| {
             let touched =
                 diffz_core::review_details::releases_by_path(&a.snapshot.overview.releases);
@@ -183,7 +191,7 @@ app.status="Source unchanged; comment list and review state refreshed without mo
                 })
                 .collect()
         });
-        self.browser.rebuild(entries, &query);
+        self.browser.rebuild(entries, old_paths, &query);
     }
     /// Narrows the tree to the files release `index` touched, or shows every file again.
     pub fn filter_release(&mut self, index: Option<usize>, cx: &mut Context<Self>) {

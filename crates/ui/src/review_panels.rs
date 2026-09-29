@@ -99,6 +99,8 @@ impl Workbench {
                                 "{} · head {}",
                                 if remote.compare.is_some() {
                                     "Read-only compare"
+                                } else if remote.merged {
+                                    "Merged review"
                                 } else if remote.open {
                                     "Open review"
                                 } else {

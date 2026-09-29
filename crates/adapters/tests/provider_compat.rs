@@ -33,6 +33,7 @@ fn target(provider: ProviderId) -> RemoteTarget {
         head: "c".repeat(40),
         open: true,
         draft: false,
+        merged: false,
         pending_review: false,
         compare: None,
     }
