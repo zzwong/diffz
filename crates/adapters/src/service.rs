@@ -255,9 +255,14 @@ impl WorkbenchServices for Services {
             })
             .collect())
     }
-    fn save_blame(&self, s: &Snapshot) -> std::result::Result<(), ServiceError> {
+    fn save_blame(
+        &self,
+        id: &SnapshotId,
+        releases_key: &str,
+        found: &diffz_core::review_details::BlameRead,
+    ) -> std::result::Result<(), ServiceError> {
         self.store
-            .put_snapshot(s)
+            .save_blame(id, releases_key, found)
             .map_err(|e| ServiceError::from(e.to_string()))
     }
     fn open(&self, r: OpenRequest, c: Cancellation) -> std::result::Result<Opened, ServiceError> {

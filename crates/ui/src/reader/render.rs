@@ -65,7 +65,7 @@ impl Render for Workbench {
             // Unreadable blame is named from the attribution itself, which is never saved.
             let warnings = a.snapshot.warnings.iter().cloned();
             for warning in warnings
-                .chain(a.snapshot.overview.unblamed_warning())
+                .chain(diffz_core::review_details::unblamed_warning(&a.blame))
                 .take(4)
             {
                 source = source.child(div().p_2().text_color(skin.warning).child(warning));

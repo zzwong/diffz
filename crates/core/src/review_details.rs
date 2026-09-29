@@ -28,6 +28,11 @@ pub struct Overview {
 }
 /// Per path, the attributed head lines, or `None` where the blame could not be read.
 pub type BlameRead = std::collections::BTreeMap<String, Option<Vec<Blamed>>>;
+/// A blame range's release index is meaningful only for this exact release list.
+pub fn releases_key(releases: &[Release]) -> String {
+    let bytes = serde_json::to_vec(releases).expect("release metadata is serializable");
+    crate::domain::digest(&[b"releases-v1", &bytes])
+}
 fn read_blame<S: serde::Serializer>(blame: &BlameRead, s: S) -> Result<S::Ok, S::Error> {
     s.collect_map(blame.iter().filter(|(_, b)| b.is_some()))
 }
@@ -154,43 +159,58 @@ pub fn blame_applies(
 impl Overview {
     /// Names the files whose blame could not be read, if any.
     pub fn unblamed_warning(&self) -> Option<String> {
-        let failed: Vec<&str> = self
-            .blame
-            .iter()
-            .filter(|(_, b)| b.is_none())
-            .map(|(path, _)| path.as_str())
-            .collect();
-        let shown = failed
-            .iter()
-            .take(3)
-            .copied()
-            .collect::<Vec<_>>()
-            .join(", ");
-        match failed.len() {
-            0 => None,
-            1 => Some(format!(
-                "{UNBLAMED} {shown}: its blame could not be read, so its lines show no release."
-            )),
-            n => Some(format!(
-                "{UNBLAMED} {n} files whose blame could not be read, so their lines show no release: {shown}{}.",
-                if n > 3 { ", …" } else { "" }
-            )),
-        }
+        unblamed_warning(&self.blame)
     }
     /// The blamed range holding head line `line` of `path`, once that file's blame is read.
     pub fn blamed(&self, path: &str, line: u32) -> Option<&Blamed> {
-        let ranges = self.blame.get(path)?.as_deref()?;
-        let at = ranges.partition_point(|b| b.end < line);
-        ranges.get(at).filter(|b| b.start <= line)
+        blamed(&self.blame, path, line)
     }
     /// The release an added row of `path` came from. Removed and unchanged rows have none:
     /// blame at the head cannot see a removal, and context predates the range.
     pub fn row_release(&self, path: &str, row: &crate::patch::PatchRow) -> Option<&Blamed> {
-        if row.kind != crate::patch::RowKind::Added {
-            return None;
-        }
-        self.blamed(path, row.new_line?)
+        row_release(&self.blame, path, row)
     }
+}
+/// Names files whose blame could not be read in the current session.
+pub fn unblamed_warning(blame: &BlameRead) -> Option<String> {
+    let failed: Vec<&str> = blame
+        .iter()
+        .filter(|(_, b)| b.is_none())
+        .map(|(path, _)| path.as_str())
+        .collect();
+    let shown = failed
+        .iter()
+        .take(3)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    match failed.len() {
+        0 => None,
+        1 => Some(format!(
+            "{UNBLAMED} {shown}: its blame could not be read, so its lines show no release."
+        )),
+        n => Some(format!(
+            "{UNBLAMED} {n} files whose blame could not be read, so their lines show no release: {shown}{}.",
+            if n > 3 { ", …" } else { "" }
+        )),
+    }
+}
+/// The blamed range holding head line `line` of `path`.
+pub fn blamed<'a>(blame: &'a BlameRead, path: &str, line: u32) -> Option<&'a Blamed> {
+    let ranges = blame.get(path)?.as_deref()?;
+    let at = ranges.partition_point(|b| b.end < line);
+    ranges.get(at).filter(|b| b.start <= line)
+}
+/// The release an added row of `path` came from.
+pub fn row_release<'a>(
+    blame: &'a BlameRead,
+    path: &str,
+    row: &crate::patch::PatchRow,
+) -> Option<&'a Blamed> {
+    if row.kind != crate::patch::RowKind::Added {
+        return None;
+    }
+    blamed(blame, path, row.new_line?)
 }
 /// What can be said of a removed line, given the names of the releases that touched its file.
 pub fn removed_in(names: &[&str]) -> String {
