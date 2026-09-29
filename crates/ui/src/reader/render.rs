@@ -62,8 +62,13 @@ impl Render for Workbench {
             );
         }
         if let Some(a) = &self.active {
-            for warning in a.snapshot.warnings.iter().take(4) {
-                source = source.child(div().p_2().text_color(skin.warning).child(warning.clone()));
+            // Unreadable blame is named from the attribution itself, which is never saved.
+            let warnings = a.snapshot.warnings.iter().cloned();
+            for warning in warnings
+                .chain(a.snapshot.overview.unblamed_warning())
+                .take(4)
+            {
+                source = source.child(div().p_2().text_color(skin.warning).child(warning));
             }
         }
         source = source.child(if self.rich_active() {

@@ -94,6 +94,16 @@ impl Viewport {
                     let bar = Bounds::new(point(x, y), size(px(3.), px(p.row.height)));
                     window.paint_quad(fill(bar, skin.severity(*severity)));
                 }
+                let release = self.releases.get(&(cell.side, cell.cell.number));
+                if let Some((index, dim)) = release.and_then(|r| Some((r.release?, r.dim))) {
+                    // A band between the line numbers and the text, in the release's color.
+                    let band = Bounds::new(
+                        point(x + px(cell.gutter - 4.), y),
+                        size(px(3.), px(p.row.height)),
+                    );
+                    let color = skin.release(index);
+                    window.paint_quad(fill(band, if dim { color.opacity(0.3) } else { color }));
+                }
 
                 let number = if p.row.unified {
                     format!(
@@ -318,6 +328,42 @@ impl Viewport {
                             );
                         }
                     }
+                }
+                // Lines from releases other than the one the view is narrowed to fade back.
+                if release.is_some_and(|r| r.dim) {
+                    window.paint_quad(fill(cb, skin.base.opacity(0.6)));
+                }
+                if let Some(release) = release.filter(|_| hover) {
+                    let font = self.font_size - 2.0;
+                    let width = label_width(&release.label, font, &self.family, window) + 16.;
+                    let chip = Bounds::new(
+                        point(
+                            x + px((cell.width - width - 8.).max(cell.gutter)),
+                            y + px(PAD),
+                        ),
+                        size(px(width), px(font * 1.4 + 2.)),
+                    );
+                    window.with_content_mask(
+                        Some(ContentMask {
+                            bounds: cb.intersect(&frame.bounds),
+                        }),
+                        |window| {
+                            window.paint_quad(fill(chip, skin.raised).corner_radii(px(4.)));
+                            window.paint_quad(fill(
+                                Bounds::new(chip.origin, size(px(3.), chip.size.height)),
+                                release.release.map_or(skin.muted, |i| skin.release(i)),
+                            ));
+                            paint_label(
+                                &release.label,
+                                point(chip.left() + px(10.), chip.top() + px(1.)),
+                                skin.text,
+                                font,
+                                &self.family,
+                                window,
+                                cx,
+                            );
+                        },
+                    );
                 }
             }
             if self.split {

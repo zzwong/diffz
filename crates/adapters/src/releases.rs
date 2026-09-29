@@ -88,6 +88,32 @@ pub fn steps(
     (steps, folded)
 }
 
+/// The commits each step adds: those its `to` reaches through `range`, the compare's commits
+/// as `(commit, parents)`, that no earlier step reached. Merged branches join the step that
+/// merged them, so a blamed commit off the first-parent path still finds its release.
+pub fn members(range: &[(String, Vec<String>)], steps: &[Step]) -> Vec<Vec<String>> {
+    let parents: HashMap<&str, &[String]> = range
+        .iter()
+        .map(|(sha, parents)| (sha.as_str(), parents.as_slice()))
+        .collect();
+    let mut seen: HashSet<&str> = HashSet::new();
+    steps
+        .iter()
+        .map(|step| {
+            let mut added = vec![];
+            let mut next = vec![step.to.as_str()];
+            while let Some(sha) = next.pop() {
+                let Some(up) = parents.get(sha) else { continue };
+                if seen.insert(sha) {
+                    added.push(sha.to_owned());
+                    next.extend(up.iter().map(String::as_str));
+                }
+            }
+            added
+        })
+        .collect()
+}
+
 pub fn folded_warning(folded: &[String]) -> Option<String> {
     let (first, last) = (folded.first()?, folded.last()?);
     Some(format!(
@@ -246,6 +272,27 @@ mod tests {
             "{warning}"
         );
         assert_eq!(folded_warning(&[]), None);
+    }
+
+    #[test]
+    fn merged_branches_join_the_step_that_merged_them() {
+        // c3 merges s1, cut from c1; v1 tags c2 and v2 tags c4.
+        let mut range: Vec<(String, Vec<String>)> = linear(4)
+            .into_iter()
+            .map(|(sha, parent)| (sha, parent.into_iter().collect()))
+            .collect();
+        range[2].1.push("s1".into());
+        range.push(("s1".into(), vec!["c1".into()]));
+        let (placed, _) = place(
+            &linear(4),
+            &tags(&[("v2", "c4"), ("v1", "c2")]),
+            &HashSet::new(),
+        );
+        let mut added = members(&range, &placed);
+        for step in &mut added {
+            step.sort();
+        }
+        assert_eq!(added, [vec!["c1", "c2"], vec!["c3", "c4", "s1"]]);
     }
 
     #[test]

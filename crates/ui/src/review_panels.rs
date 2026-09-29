@@ -197,6 +197,15 @@ impl Workbench {
                     .collect()
             })
             .unwrap_or_default();
+        // The release a single changed line came from, as its gutter marks it.
+        let release = source
+            .filter(|s| s.start.line == s.end.line && !file_comment)
+            .and_then(|s| {
+                let v = self.viewport.as_ref()?.borrow();
+                (v.file == s.start.file)
+                    .then(|| v.releases.get(&(s.start.side, s.start.line)).cloned())
+                    .flatten()
+            });
         let title = source
             .map(|s| {
                 if file_comment {
@@ -304,6 +313,18 @@ impl Workbench {
                     .when_some(n.body.clone(), |d, body| {
                         d.child(div().text_size(px(12.)).whitespace_normal().child(body))
                     }),
+            );
+        }
+        if let Some(r) = release {
+            card = card.child(
+                div()
+                    .p_2()
+                    .rounded_md()
+                    .border_l_2()
+                    .border_color(r.release.map_or(skin.muted, |i| skin.release(i)))
+                    .bg(skin.base.opacity(0.4))
+                    .text_size(px(12.))
+                    .child(r.label),
             );
         }
         if !comments.is_empty() {

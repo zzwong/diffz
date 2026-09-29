@@ -119,7 +119,7 @@ impl Workbench {
                     else if refresh{let snapshot=Arc::new(opened.snapshot);if let Some(a)=&mut app.active{a.snapshot=snapshot.clone();}
 if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}
 // The release list is read again, so indexes into the old one no longer hold.
-app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);
+app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);app.mark_releases();app.fetch_blame(cx);
 app.status="Source unchanged; comment list and review state refreshed without moving the view.".into();}
                     else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>app.status=e.message,
             }cx.notify();});
@@ -169,15 +169,17 @@ app.status="Source unchanged; comment list and review state refreshed without mo
     pub fn filter_files(&mut self, cx: &mut Context<Self>) {
         let query = self.filter_input.read(cx).value().to_lowercase();
         let entries = self.active.as_ref().map_or_else(Vec::new, |a| {
-            let release = self
-                .release_filter
-                .and_then(|i| a.snapshot.overview.releases.get(i));
+            let touched =
+                diffz_core::review_details::releases_by_path(&a.snapshot.overview.releases);
             a.snapshot
                 .patch
                 .files
                 .iter()
                 .map(|f| (f.id.clone(), f.display_path()))
-                .filter(|(_, path)| release.is_none_or(|r| r.touches(path)))
+                .filter(|(_, path)| {
+                    self.release_filter
+                        .is_none_or(|i| touched.get(path.as_str()).is_some_and(|t| t.contains(&i)))
+                })
                 .collect()
         });
         self.browser.rebuild(entries, &query);
@@ -186,6 +188,8 @@ app.status="Source unchanged; comment list and review state refreshed without mo
     pub fn filter_release(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
         self.release_filter = index;
         self.filter_files(cx);
+        self.mark_releases();
+        self.fetch_blame(cx);
         let selected = self.viewport.as_ref().map(|v| v.borrow().file.clone());
         if let Some(first) = self.browser.visible_files.first().cloned()
             && selected.is_none_or(|s| !self.browser.visible_files.contains(&s))
@@ -261,6 +265,8 @@ app.status="Source unchanged; comment list and review state refreshed without mo
         ))));
         self.drag_start = None;
         self.mark_annotations();
+        self.mark_releases();
+        self.fetch_blame(cx);
         self.schedule_view_save(cx);
         self.highlight(id, cx);
         cx.notify();
@@ -332,6 +338,9 @@ app.status="Source unchanged; comment list and review state refreshed without mo
                         if let Some(v) = &app.viewport {
                             v.borrow_mut().snapshot = snapshot;
                         }
+                        // Attribution needs the releases, so it starts once they are here.
+                        app.mark_releases();
+                        app.fetch_blame(cx);
                     }
                     Err(e) => app.status = e.message,
                 }
@@ -339,6 +348,148 @@ app.status="Source unchanged; comment list and review state refreshed without mo
             });
         })
         .detach();
+    }
+    /// Reads release attribution for the shown file and the few after it in the tree. One read
+    /// runs at a time, and its result is shown and saved only if no reload came in between.
+    fn fetch_blame(&mut self, cx: &mut Context<Self>) {
+        /// The shown file and this many after it are read together.
+        const AHEAD: usize = 3;
+        let Some(a) = &self.active else { return };
+        if self.blame_busy {
+            return;
+        }
+        let shown = self.viewport.as_ref().map(|v| v.borrow().file.clone());
+        let files = &self.browser.visible_files;
+        let start = shown
+            .and_then(|id| files.iter().position(|f| *f == id))
+            .unwrap_or(0);
+        let paths: Vec<String> = files
+            .iter()
+            .skip(start)
+            .take(AHEAD + 1)
+            .filter_map(|id| a.snapshot.file(id))
+            .filter(|f| diffz_core::review_details::blame_span(&a.snapshot.overview, f).is_some())
+            .map(|f| f.display_path())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        self.blame_busy = true;
+        let from = a.snapshot.clone();
+        let services = self.services.clone();
+        let cancel = self.open_cancel.clone();
+        cx.spawn(async move |this, cx| {
+            let read = from.clone();
+            let cancelled = cancel.clone();
+            let result = cx
+                .background_spawn(async move {
+                    let found = services.blame(read.clone(), paths, cancel)?;
+                    Ok::<_, ServiceError>(Arc::new(diffz_core::review_details::with_blame(
+                        &read, found,
+                    )))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.blame_busy = false;
+                match result {
+                    Ok(s)
+                        if app.active.as_ref().is_some_and(|a| {
+                            diffz_core::review_details::blame_applies(&a.snapshot, &from)
+                        }) =>
+                    {
+                        if let Some(v) = &app.viewport {
+                            v.borrow_mut().snapshot = s.clone();
+                        }
+                        if let Some(a) = &mut app.active {
+                            a.snapshot = s.clone();
+                        }
+                        app.mark_releases();
+                        let services = app.services.clone();
+                        cx.spawn(async move |this, cx| {
+                            let saved = cx
+                                .background_spawn(async move { services.save_blame(&s) })
+                                .await;
+                            if let Err(e) = saved {
+                                let _ = this.update(cx, |app, cx| {
+                                    app.status = e.message;
+                                    cx.notify();
+                                });
+                            }
+                        })
+                        .detach();
+                    }
+                    // A reload replaced the snapshot, or cancelled the read, while it ran.
+                    Ok(_) => {}
+                    Err(_) if cancelled.cancelled() => {}
+                    Err(e) => {
+                        app.status = e.message;
+                        cx.notify();
+                        return;
+                    }
+                }
+                app.fetch_blame(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    /// Marks the shown file's changed lines with the release each came from, as far as is known.
+    fn mark_releases(&mut self) {
+        use diffz_core::{patch::RowKind, review_details::*};
+        let (Some(a), Some(v)) = (&self.active, &self.viewport) else {
+            return;
+        };
+        let mut v = v.borrow_mut();
+        v.releases.clear();
+        let s = &a.snapshot;
+        let releases = &s.overview.releases;
+        let Some(file) = s.file(&v.file).filter(|_| releases.len() >= 2) else {
+            return;
+        };
+        let head = s
+            .remote
+            .as_ref()
+            .and_then(|t| t.compare.as_ref())
+            .map_or("head", |c| c.head.as_str());
+        let path = file.display_path();
+        let touched = releases_by_path(releases)
+            .remove(path.as_str())
+            .unwrap_or_default();
+        let names: Vec<&str> = touched.iter().map(|&i| releases[i].name(head)).collect();
+        let removed = removed_in(&names);
+        let focus = self.release_filter;
+        for row in file.hunks.iter().flat_map(|h| &h.rows) {
+            let (key, mark) = match (row.kind, row.old_line, row.new_line) {
+                (RowKind::Added, _, Some(line)) => {
+                    let Some(b) = s.overview.row_release(&path, row) else {
+                        continue;
+                    };
+                    (
+                        (Side::Right, line),
+                        crate::viewport::ReleaseMark {
+                            release: Some(b.release),
+                            label: format!(
+                                "Changed in {} · {}",
+                                releases[b.release].name(head),
+                                &b.commit[..b.commit.len().min(7)]
+                            ),
+                            dim: focus.is_some_and(|f| f != b.release),
+                        },
+                    )
+                }
+                // Blame at the head cannot see a removal, so only a file one release touched names it.
+                (RowKind::Removed, Some(line), _) => (
+                    (Side::Left, line),
+                    crate::viewport::ReleaseMark {
+                        release: (touched.len() == 1).then(|| touched[0]),
+                        label: removed.clone(),
+                        dim: focus.is_some_and(|f| !touched.contains(&f)),
+                    },
+                ),
+                _ => continue,
+            };
+            v.releases.insert(key, mark);
+        }
     }
     fn mark_annotations(&mut self) {
         let (Some(a), Some(v)) = (&self.active, &self.viewport) else {

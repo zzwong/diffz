@@ -1,0 +1,269 @@
+{
+ "gitlab-styles.gemspec": [
+  {
+   "commit": {
+    "id": "507136da02f7fb74d4591826c4f321b2b2c841a6"
+   },
+   "lines": [
+    "# frozen_string_literal: true",
+    ""
+   ]
+  },
+  {
+   "commit": {
+    "id": "f3250343d3a13a154fe9b2d356440654297b0624"
+   },
+   "lines": [
+    "lib = File.expand_path('lib', __dir__)"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "$LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)",
+    "require 'gitlab/styles/version'",
+    "",
+    "Gem::Specification.new do |spec|"
+   ]
+  },
+  {
+   "commit": {
+    "id": "f7fe8b4932d7f92070b0f437dd198f2c7873d98a"
+   },
+   "lines": [
+    "  spec.required_ruby_version = '>= 3.1'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "426cd5693ad5dfcaccea56c48f23ca447a2a3ee6"
+   },
+   "lines": [
+    "  spec.name          = 'gitlab-styles'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "  spec.version       = Gitlab::Styles::VERSION"
+   ]
+  },
+  {
+   "commit": {
+    "id": "426cd5693ad5dfcaccea56c48f23ca447a2a3ee6"
+   },
+   "lines": [
+    "  spec.authors       = ['GitLab']"
+   ]
+  },
+  {
+   "commit": {
+    "id": "8b09f3dd49def70fedce9c5a15d37d4d0f5e31de"
+   },
+   "lines": [
+    "  spec.email         = ['gitlab_rubygems@gitlab.com']"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "",
+    "  spec.summary       = 'GitLab style guides and shared style configs.'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "2151cc7095d19f343d201cfa8bae231ff6e8eabe"
+   },
+   "lines": [
+    "  spec.homepage      = 'https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "  spec.license       = 'MIT'",
+    "",
+    "  spec.files         = `git ls-files -z`.split(\"\\x0\").reject do |f|"
+   ]
+  },
+  {
+   "commit": {
+    "id": "bb5920b5c10db191c3e2e812d812247fd37c35fe"
+   },
+   "lines": [
+    "    f.match(%r{^(docs|test|spec|features|playground)/})"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "  end",
+    "  spec.bindir        = 'exe'",
+    "  spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }",
+    "  spec.require_paths = ['lib']",
+    ""
+   ]
+  },
+  {
+   "commit": {
+    "id": "97236c01b9d0eef9354a58542a8837c6ac059287"
+   },
+   "lines": [
+    "  spec.add_dependency 'rubocop', '1.81.7'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "c60fa43b1f8609bbc52fbdb733d023a07a9c22f9"
+   },
+   "lines": [
+    "  spec.add_dependency 'rubocop-capybara', '2.21.0'",
+    "  spec.add_dependency 'rubocop-factory_bot', '2.26.1'",
+    "  spec.add_dependency 'rubocop-graphql', '1.5.4'",
+    "  spec.add_dependency 'rubocop-performance', '1.23.1'",
+    "  spec.add_dependency 'rubocop-rails', '2.29.1'",
+    "  spec.add_dependency 'rubocop-rspec', '3.4.0'",
+    "  spec.add_dependency 'rubocop-rspec_rails', '2.30.0'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    ""
+   ]
+  },
+  {
+   "commit": {
+    "id": "b4d2d36bfda6dff37a53942b3af4eda1e0c062b2"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'bundler', '~> 2.1'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "f9501d9a8fe7cc3b317677fea7b187a36b7fd7a4"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'gitlab-dangerfiles', '~> 4.6.0'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8fc28c819ca59dbcecc75ca5ae281500b841d59"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'lefthook', '~> 1.3.13'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "20ad3a385f821048ba4678f425c4e9a23b992812"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'pry-byebug', '~> 3.10'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "509a741078fda87a856cd654c6047c20dfab4129"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'rake', '~> 13.0'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'rspec', '~> 3.0'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8fc28c819ca59dbcecc75ca5ae281500b841d59"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'rspec-parameterized-table_syntax', '~> 1.0.0'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "2eecd9f063f2994c784388d415427560d1fb51ee"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'rubocop-rake', '~> 0.6'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8fc28c819ca59dbcecc75ca5ae281500b841d59"
+   },
+   "lines": [
+    "  spec.add_development_dependency 'simplecov', '~> 0.22.0'",
+    "  spec.add_development_dependency 'simplecov-cobertura', '~> 2.1.0'",
+    "  spec.add_development_dependency 'simplecov-html', '~> 0.12.3'",
+    "  spec.add_development_dependency 'test_file_finder', '~> 0.1.4'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "end"
+   ]
+  }
+ ],
+ "lib/gitlab/styles/version.rb": [
+  {
+   "commit": {
+    "id": "507136da02f7fb74d4591826c4f321b2b2c841a6"
+   },
+   "lines": [
+    "# frozen_string_literal: true",
+    ""
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "module Gitlab",
+    "  module Styles"
+   ]
+  },
+  {
+   "commit": {
+    "id": "1e12752e6ad92ac5a8aa32a4da9d71168586a84e"
+   },
+   "lines": [
+    "    VERSION = '14.1.0'"
+   ]
+  },
+  {
+   "commit": {
+    "id": "b8b33419703bf9823551e4a2412f4d05680c1226"
+   },
+   "lines": [
+    "  end",
+    "end"
+   ]
+  }
+ ]
+}

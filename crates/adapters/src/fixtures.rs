@@ -46,6 +46,7 @@ pub fn decorate(snapshot: &mut diffz_core::domain::Snapshot, id: &str) {
         notices:vec!["Offline UI testing uses these made-up statuses; they do not come from real CI runs.".into()],
         conversation:vec![ConversationComment{id:7001,author:"sample-author".into(),created_at:Some("2026-09-04T09:58:00Z".into()),body:"Two files and a single line thread holding two messages make up the sample.".into()}],
         releases:vec![],
+        blame:Default::default(),
     };
     for (id, author, body) in [
         (

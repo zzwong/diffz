@@ -107,6 +107,16 @@ impl Cursor {
     }
 }
 pub type Decorations = HashMap<(Side, u32), Vec<Span>>;
+/// What the gutter says about the release of one changed line in a compare.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReleaseMark {
+    /// The release whose color marks the line; `None` when it cannot be told.
+    pub release: Option<usize>,
+    /// Shown while the line is hovered: the tag and commit, or what is known of a removal.
+    pub label: String,
+    /// Faded because the view is narrowed to another release.
+    pub dim: bool,
+}
 /// Horizontal padding that keeps a revealed match away from the text boundary.
 const REVEAL_MARGIN: f32 = 24.0;
 /// Find the smallest change to `current` that places `x1..x2` in the visible-width
@@ -151,6 +161,7 @@ pub struct Viewport {
     cache_bytes: usize,
     pub hovered: Option<SourcePoint>,
     pub annotations: HashMap<(Side, u32), diffz_core::annotation::Severity>,
+    pub releases: HashMap<(Side, u32), ReleaseMark>,
     pub hover_cursor: CursorStyle,
     /// Edge being pulled to turn the file (`0` for none) and how far, 0 to 1.
     pub pull: (i8, f32),
@@ -237,6 +248,7 @@ impl Viewport {
             cache_bytes: 0,
             hovered: None,
             annotations: HashMap::new(),
+            releases: HashMap::new(),
             hover_cursor: CursorStyle::Arrow,
             pull: (0, 0.),
         }

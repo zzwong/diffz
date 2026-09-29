@@ -141,6 +141,8 @@ pub(crate) struct Workbench {
     pub thread_root: Option<u64>,
     pub thread_scroll: ScrollHandle,
     pub context_busy: bool,
+    /// A read of release attribution is running; one runs at a time so each builds on the last.
+    pub blame_busy: bool,
     pub overview_hovered: bool,
     pub overview_focus: FocusHandle,
     pub overview_tab: usize,
@@ -406,6 +408,7 @@ impl Workbench {
             thread_root: None,
             thread_scroll: ScrollHandle::new(),
             context_busy: false,
+            blame_busy: false,
             overview_hovered: false,
             overview_focus: cx.focus_handle(),
             overview_tab: 0,

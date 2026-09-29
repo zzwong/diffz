@@ -22,6 +22,15 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the tree names the releases that changed it. The timeline keeps the newest 30
   tags and says so. Releases load after the compare shows; if they cannot be
   read, the compare stays open with a warning.
+- In a compare that spans two releases or more, the diff marks each added line
+  with the release that introduced it: a band in the gutter in that release's
+  color, and the tag and commit on hover and in the line panel. Removed lines
+  say "removed in this range", or name the releases that touched the file.
+  Narrowing the tree to one release fades the other releases' lines. Blame is
+  read through `gh` or `glab` only for the file on screen and the next few, is
+  saved with the snapshot for offline resume, and a file whose blame cannot be
+  read shows no release, is named in one warning, and is read again next session. The release badges in the
+  file tree now follow files renamed inside the range.
 - `diffz <target>` detects what it was given: a patch file, a GitHub pull
   request (`owner/repo#123` or a URL), or a GitLab merge request
   (`group/project!123` or a URL). `--pr`, `--mr` and `--patch` still work.
