@@ -42,7 +42,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without input, and stops while the window is inactive; typing or clicking
   resumes it. Before, a focused field such as the Open panel's woke diffz
   twice a second for as long as it kept focus.
-- On macOS, a visible window stops waking at the display refresh rate while nothing changes. The display link restarts when a frame is needed.
+- On macOS, a visible window no longer wakes at the display's refresh rate
+  while nothing changes. The display link stops 200 ms after the last redraw
+  and restarts when the window needs a frame.
 
 ### Fixed
 

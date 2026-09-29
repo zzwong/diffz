@@ -2929,7 +2929,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-macos"
 version = "0.3.3"
-source = "git+https://github.com/zzwong/gpui-pre-macos?rev=b142ded3c13c75355c01da76fcca973254c53e19#b142ded3c13c75355c01da76fcca973254c53e19"
+source = "git+https://github.com/zzwong/gpui-pre-macos?rev=35b9012109fff737f234ea95818de71001d4aee5#35b9012109fff737f234ea95818de71001d4aee5"
 dependencies = [
  "accesskit",
  "accesskit_macos",

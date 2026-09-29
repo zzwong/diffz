@@ -51,7 +51,7 @@ gpui-base = { git = "https://github.com/zzwong/gpui-base", rev = "218a2ee5644284
 # Temporary X11 frame-demand fix for #88, from gpui-pre-linux 0.3.3.
 # The exact delta is in patches/gpui-pre-linux-0.3.3-x11-demand.patch.
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
-gpui-pre-macos = { git = "https://github.com/zzwong/gpui-pre-macos", rev = "b142ded3c13c75355c01da76fcca973254c53e19" }
+gpui-pre-macos = { git = "https://github.com/zzwong/gpui-pre-macos", rev = "35b9012109fff737f234ea95818de71001d4aee5" }
 
 [profile.dev]
 debug = 1
