@@ -22,6 +22,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   diffz is already running on the same state directory, the open window
   switches to the new review and comes to the front, instead of the second
   launch failing because the state directory is in use.
+  Invocations that start at once share one new window, a comment being
+  written is never replaced, and a window started in the background logs its
+  errors to `diffz.log` in the state directory.
 
 ## [0.2.0] - 2026-09-26
 

@@ -118,10 +118,25 @@ otherwise read as a pull or merge request address.
 agents can call it. When a diffz window is already open on the same state
 directory, it switches to the new review and comes to the front; your drafts
 for the previous one stay saved. Otherwise a new window starts in the
-background. The exit status says whether the request was taken, and `--json`
-prints the outcome as one line, such as
-`{"status":"handed_off","source":...}`. `--foreground` runs the window in the
-terminal and waits for it to close, as earlier versions did.
+background. The exit status says whether the request was taken. A window
+refuses a new review while a comment is being written, and refuses requests
+for write permissions it was not started with. `--foreground` runs the window
+in the terminal and waits for it to close, as earlier versions did. A window
+started in the background writes its errors to `diffz.log` in the state
+directory.
+
+`--json` prints the outcome as one line on stdout:
+
+```json
+{"status":"launched","source":{"Fixture":"F03"}}
+{"status":"handed_off","source":{"Remote":{"provider":"GitHub","address":"owner/repo#1"}}}
+{"status":"error","message":"a comment is being written in diffz; save or discard it first"}
+```
+
+`status` is `launched` (a new window opened the request and is taking others),
+`handed_off` (the running window took it), or `error`. `source` is the request
+as diffz serializes it, or `null` when none was named; `message` comes only
+with `error`. The exit status is 0 exactly when `status` is not `error`.
 
 The complete option list is `diffz --help`; `diffz --doctor` reports which
 external tools the machine has.

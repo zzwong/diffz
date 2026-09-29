@@ -743,18 +743,19 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                     // The view of a review just opened saves a moment later; wait for saves
                     // like that instead of refusing the request.
                     for _ in 0..50 {
-                        if workbench.read_with(cx, |app, _| !app.unsaved() && !app.busy) {
+                        if workbench.read_with(cx, |app, cx| app.handoff_blocker(cx).is_none()) {
                             break;
                         }
                         smol::Timer::after(Duration::from_millis(100)).await;
                     }
-                    let result = window
-                        .update(cx, |_, window, cx| {
-                            window.activate_window();
-                            cx.activate(true);
-                            workbench.update(cx, |app, cx| app.take_handoff(handoff.request, cx))
-                        })
-                        .unwrap_or_else(|_| Err("the diffz window has closed".into()));
+                    let Ok(result) = window.update(cx, |_, window, cx| {
+                        window.activate_window();
+                        cx.activate(true);
+                        workbench.update(cx, |app, cx| app.take_handoff(handoff.request, cx))
+                    }) else {
+                        // Dropped unanswered, so the sender starts a window of its own.
+                        break;
+                    };
                     (handoff.reply)(result);
                 }
             })

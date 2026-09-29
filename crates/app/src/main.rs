@@ -336,19 +336,25 @@ fn app_bundle(exe: &Path) -> Option<&Path> {
         .then_some(bundle)
 }
 /// Starts a window in the background: through LaunchServices from an app bundle, so the Dock
-/// shows the app, and otherwise as this executable in a session of its own.
+/// shows the app, and otherwise as this executable in a session of its own. Either way its
+/// stderr goes to the log in `state`.
 #[cfg(all(unix, feature = "desktop"))]
-fn launch(args: Vec<std::ffi::OsString>) -> Result<()> {
+fn launch(args: Vec<std::ffi::OsString>, state: &Path) -> Result<()> {
+    use diffz_adapters::handoff::{log_file, log_path};
     let exe = std::env::current_exe()?.canonicalize()?;
+    let log = log_file(state)?;
     #[cfg(target_os = "macos")]
     if let Some(bundle) = app_bundle(&exe) {
         use diffz_adapters::process::{ProcessRequest, Runner, stderr_excerpt};
         // -n: an app already running on another state directory must not swallow the request.
+        // open appends the app's stderr to the log that log_file prepared.
         let open = ProcessRequest::new("/usr/bin/open".into()).args(
             [
                 "-n".into(),
                 "-a".into(),
                 bundle.as_os_str().to_owned(),
+                "--stderr".into(),
+                log_path(state).into(),
                 "--args".into(),
             ]
             .into_iter()
@@ -364,42 +370,58 @@ fn launch(args: Vec<std::ffi::OsString>) -> Result<()> {
         }
         return Ok(());
     }
-    diffz_adapters::process::spawn_detached(&exe, &args)?;
+    diffz_adapters::process::spawn_detached(&exe, &args, log)?;
     Ok(())
 }
+#[cfg(all(unix, feature = "desktop"))]
+fn writes(options: &Options) -> diffz_adapters::handoff::Writes {
+    diffz_adapters::handoff::Writes {
+        github: options.writes,
+        gitlab: options.gitlab_writes,
+    }
+}
 /// Gives the request to the window running on `state`, or starts one in the background. Either
-/// way this returns without waiting for the window.
+/// way this returns once a window has the request, without waiting for it to close.
 #[cfg(all(unix, feature = "desktop"))]
 fn hand_off(options: &Options, state: &Path) -> Result<()> {
-    use diffz_adapters::handoff::{Outcome, send};
-    let request = match options.requested {
+    use diffz_adapters::handoff::{Delivery, deliver};
+    let request = handed_request(options)?;
+    let result = deliver(state, request.as_ref(), writes(options), || {
+        launch_args(options, state, request.as_ref())
+            .and_then(|args| launch(args, state))
+            .map_err(|e| format!("{e:#}").into())
+    })
+    .map(|delivery| match delivery {
+        Delivery::HandedOff => "handed_off",
+        Delivery::Launched => "launched",
+    })
+    .map_err(anyhow::Error::from);
+    if matches!(result, Ok("handed_off")) && (options.font.is_some() || options.theme.is_some()) {
+        eprintln!("diffz: the running window keeps the font and theme it started with");
+    }
+    match options.json {
+        true => report(&mut std::io::stdout().lock(), result, request.as_ref()),
+        false => result.map(|_| ()),
+    }
+}
+/// The request a later invocation hands over; `None` when the command line named no source.
+#[cfg(all(unix, feature = "desktop"))]
+fn handed_request(options: &Options) -> Result<Option<OpenRequest>> {
+    Ok(match options.requested {
         true => Some(absolute(options.request.clone())?),
         false => None,
+    })
+}
+/// Prints the outcome of a handoff as one JSON line. The outcome alone sets the exit status: a
+/// request the window took stays taken when stdout is gone.
+#[cfg(any(test, all(unix, feature = "desktop")))]
+fn report(out: &mut impl Write, result: Result<&str>, request: Option<&OpenRequest>) -> Result<()> {
+    let line = match &result {
+        Ok(status) => serde_json::json!({ "status": status, "source": request }),
+        Err(e) => serde_json::json!({ "status": "error", "message": format!("{e:#}") }),
     };
-    let result = match send(state, request.as_ref()) {
-        Ok(Outcome::Accepted) => Ok("handed_off"),
-        Ok(Outcome::Refused(message)) => Err(anyhow::anyhow!(message)),
-        Ok(Outcome::NotRunning) => launch_args(options, state, request.as_ref())
-            .and_then(launch)
-            .map(|()| "launched"),
-        Err(e) => Err(e.into()),
-    };
-    if matches!(result, Ok("handed_off"))
-        && (options.writes
-            || options.gitlab_writes
-            || options.font.is_some()
-            || options.theme.is_some())
-    {
-        eprintln!(
-            "diffz: the running window keeps the write permissions, font, and theme it started with"
-        );
-    }
-    if options.json {
-        let line = match &result {
-            Ok(status) => serde_json::json!({ "status": status, "source": request }),
-            Err(e) => serde_json::json!({ "status": "error", "message": format!("{e:#}") }),
-        };
-        print(&line.to_string())?;
+    if let Err(e) = print_to(out, &line.to_string()) {
+        eprintln!("diffz: could not write the status line: {e}");
     }
     result.map(|_| ())
 }
@@ -503,15 +525,32 @@ fn run() -> Result<()> {
         None => default_state_dir()?,
     };
     // A launch from the Dock or Finder has launchd as its parent and is the window itself.
+    // Linux desktop launchers start diffz like a terminal does, so it hands off or detaches.
     #[cfg(all(unix, feature = "desktop"))]
     if !options.inspect && !options.foreground && std::os::unix::process::parent_id() != 1 {
         return hand_off(&options, &state);
     }
-    let services: Arc<dyn WorkbenchServices> = Arc::new(Services::new_with_providers(
-        &state,
-        options.writes,
-        options.gitlab_writes,
-    )?);
+    let open = || Services::new_with_providers(&state, options.writes, options.gitlab_writes);
+    // Another window can take the state first when two start at once; it gets the request.
+    #[cfg(all(unix, feature = "desktop"))]
+    let services = match options.inspect {
+        true => open()?,
+        false => match diffz_adapters::handoff::open_or_hand_off(
+            &state,
+            handed_request(&options)?.as_ref(),
+            writes(&options),
+            open,
+        )? {
+            Some(services) => services,
+            None => {
+                eprintln!("diffz: handed the request to the diffz already running");
+                return Ok(());
+            }
+        },
+    };
+    #[cfg(not(all(unix, feature = "desktop")))]
+    let services = open()?;
+    let services: Arc<dyn WorkbenchServices> = Arc::new(services);
     diffz_core::timing::mark("services");
     if options.inspect {
         let opened = services.open(options.request, Cancellation::default())?;
@@ -524,7 +563,7 @@ fn run() -> Result<()> {
         eprintln!("diffz: extension skipped: {problem}");
     }
     #[cfg(all(unix, feature = "desktop"))]
-    let handoffs = match diffz_adapters::handoff::Listener::bind(&state) {
+    let handoffs = match diffz_adapters::handoff::Listener::bind(&state, writes(&options)) {
         Ok(listener) => Some(serve(listener)),
         Err(e) => {
             eprintln!("diffz: later invocations cannot hand requests to this window: {e}");
@@ -738,6 +777,19 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+    #[test]
+    fn an_unwritable_status_line_keeps_the_exit_status() {
+        let mut out = FailingWriter(ErrorKind::StorageFull);
+        assert!(report(&mut out, Ok("launched"), None).is_ok());
+        let refused = report(&mut out, Err(anyhow::anyhow!("refused")), None).unwrap_err();
+        assert_eq!(refused.to_string(), "refused");
+        let mut out = Vec::new();
+        let request = OpenRequest::Fixture("F01".into());
+        report(&mut out, Ok("handed_off"), Some(&request)).unwrap();
+        let line: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(line["status"], "handed_off");
+        assert!(line["source"].is_object());
     }
     #[test]
     fn closed_stdout_ends_output_cleanly() {

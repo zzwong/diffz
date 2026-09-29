@@ -140,7 +140,7 @@ impl Runner {
             cmd.process_group(0);
         }
         let mut child = ChildGuard(cmd.spawn().map_err(|e| {
-            AdapterError::Message(format!("configured executable could not start: {e}"))
+            AdapterError::Message(format!("detached process could not start: {e}"))
         })?);
         let overflow = Arc::new(AtomicBool::new(false));
         let stdout = drain(
@@ -213,14 +213,14 @@ impl Runner {
         }
     }
 }
-/// Starts `executable` in a session of its own with null stdio and does not wait for it, so it
-/// outlives the terminal that started it.
-pub fn spawn_detached(executable: &Path, args: &[OsString]) -> Result<()> {
+/// Starts `executable` in a session of its own with null stdin and stdout and its stderr on
+/// `log`, and does not wait for it, so it outlives the terminal that started it.
+pub fn spawn_detached(executable: &Path, args: &[OsString], log: std::fs::File) -> Result<()> {
     let mut cmd = Command::new(executable);
     cmd.args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(log);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -235,9 +235,8 @@ pub fn spawn_detached(executable: &Path, args: &[OsString]) -> Result<()> {
             });
         }
     }
-    cmd.spawn().map_err(|e| {
-        AdapterError::Message(format!("configured executable could not start: {e}"))
-    })?;
+    cmd.spawn()
+        .map_err(|e| AdapterError::Message(format!("detached process could not start: {e}")))?;
     Ok(())
 }
 /// Search only absolute PATH entries. LocalGit also rejects tools found inside its repository.
