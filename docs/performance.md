@@ -148,6 +148,9 @@ set of scenarios, so a change can be compared against a baseline. Each scenario
 runs in a fresh process, several times, and the script writes raw samples and a
 summary. It needs Xcode's command line tools (`footprint`, `vmmap`, `heap`) and
 Python 3.
+An SSH connection is enough on a headless Mac with an online display, as long
+as its console desktop is unlocked. The script checks the live session and keeps
+the display active while it runs.
 
 ```sh
 bash scripts/profile-macos.sh                        # build the release binary, run everything
@@ -307,9 +310,13 @@ bash scripts/profile-macos.sh --bin /tmp/diffz-symbols --label attribution --att
 ## Caveats
 
 - Do not use or cover the diffz window during a run, and keep the display awake
-  and unlocked. Each window takes focus as it opens; a covered window or a
-  sleeping display stops drawing, which changes both memory and CPU. A run that
-  still has too few frame buffers after three attempts is kept and flagged.
+  and unlocked. The harness rejects a locked desktop at startup and holds a
+  user-active display assertion while it runs. Each window takes focus as it
+  opens; a covered window or a sleeping display stops drawing, which changes
+  both memory and CPU. If a run
+  still has too few frame buffers or is not frontmost after three attempts, the
+  harness records it as invalid and exits with an error rather than reporting
+  its idle CPU. It also rejects a run that loses focus during CPU sampling.
 - The window opens on the screen with the key window, not necessarily the
   built-in one. Record runs that are compared on the same display arrangement,
   with focus on the same screen; an external monitor at another scale changes every
