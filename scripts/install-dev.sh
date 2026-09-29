@@ -10,7 +10,8 @@ cd "$(dirname "$0")/.."
 usage() { echo 'Usage: PREFIX=DIR DATADIR=DIR DEV_STATE_DIR=DIR [DEV_BIN=FILE] scripts/install-dev.sh install|uninstall' >&2; exit 2; }
 action="${1:-}"
 case "$action" in install|uninstall) ;; *) usage ;; esac
-for var in PREFIX DATADIR DEV_STATE_DIR; do
+APPLICATIONS_DIR="${APPLICATIONS_DIR:-$HOME/Applications}"
+for var in PREFIX DATADIR DEV_STATE_DIR APPLICATIONS_DIR; do
   value="${!var:-}"
   [[ "$value" == /* ]] || { echo "$var must be an absolute path, got '$value'" >&2; exit 2; }
   # The Exec key would need escaping for these, and Make cannot pass them reliably anyway.
@@ -20,7 +21,7 @@ done
 
 app_id=io.github.zzwong.Diffz.Dev
 bin="$PREFIX/bin/diffz-dev"
-app="${APPLICATIONS_DIR:-$HOME/Applications}/Diffz Dev.app"
+app="$APPLICATIONS_DIR/Diffz Dev.app"
 desktop="$DATADIR/applications/$app_id.desktop"
 hicolor="$DATADIR/icons/hicolor"
 icon="$hicolor/scalable/apps/$app_id.svg"
@@ -62,7 +63,7 @@ src="${DEV_BIN:?DEV_BIN must name the diffz binary to install}"
 
 if [[ "$(uname -s)" == Darwin ]]; then
   # The handoff socket lives in the state directory, and a socket path must fit in 104 bytes.
-  (( ${#DEV_STATE_DIR} + 14 <= 104 )) ||
+  (( $(printf %s "$DEV_STATE_DIR" | wc -c) + 14 <= 104 )) ||
     { echo "DEV_STATE_DIR is too long for a handoff socket path: '$DEV_STATE_DIR'" >&2; exit 2; }
   work=target/install-dev
   mkdir -p "$work"

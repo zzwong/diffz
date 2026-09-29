@@ -56,7 +56,7 @@ pub(crate) enum Panel {
     Themes,
     Keys,
 }
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SourceMode {
     Remote(ProviderId),
     Patch,
@@ -101,6 +101,8 @@ pub(crate) struct Workbench {
     pub root_focus: FocusHandle,
     pub panel: Panel,
     pub source_mode: SourceMode,
+    /// The tab last chosen by hand, which the Open panel returns to when the text stops matching.
+    pub(crate) chosen_mode: SourceMode,
     /// What the Open panel's input was recognized as, until a tab is chosen by hand.
     pub(crate) detected: Option<String>,
     pub files_visible: bool,
@@ -357,6 +359,7 @@ impl Workbench {
             diff_focus: cx.focus_handle().tab_stop(true),
             root_focus: cx.focus_handle(),
             panel: Panel::None,
+            chosen_mode: source_mode.clone(),
             source_mode,
             detected: None,
             files_visible: true,

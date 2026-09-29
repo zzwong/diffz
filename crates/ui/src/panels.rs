@@ -303,6 +303,7 @@ impl Workbench {
                             .label(label)
                             .on_click(cx.listener(move |a, _, w, c| {
                                 a.source_mode = mode.clone();
+                                a.chosen_mode = mode.clone();
                                 a.detected = None;
                                 a.open_input.update(c, |input, c| {
                                     input.set_placeholder(placeholder.clone(), w, c)

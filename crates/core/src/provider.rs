@@ -182,5 +182,10 @@ pub trait WorkbenchServices: Send + Sync {
     fn detect(&self, _input: &str) -> Option<Detected> {
         None
     }
+    /// The host `request` would contact when it is neither a provider's public one nor one the
+    /// user has signed in to, so the address is confirmed before it is opened. Blocks on a process.
+    fn unconfirmed_host(&self, _request: &OpenRequest) -> Option<String> {
+        None
+    }
     fn fresh_id(&self) -> String;
 }

@@ -17,13 +17,38 @@ impl Workbench {
                 self.open_input.read(cx).focus_handle(cx).focus(window, cx);
             }
             Command::PasteOpen => {
-                let text = cx.read_from_clipboard().and_then(|item| item.text());
-                match text.and_then(|text| self.services.detect(&text)) {
-                    Some(found) => {
-                        if let Err(refused) = self.take_handoff(Some(found.request), cx) {
-                            self.status = refused;
+                let text = cx
+                    .read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .map(|text| text.trim().to_string());
+                match text.and_then(|text| Some((self.services.detect(&text)?, text))) {
+                    // Clipboard text is not the user's own request: a patch path or an address
+                    // on a host they have not signed in to waits for Enter.
+                    Some((found, text)) => match found.request {
+                        request @ OpenRequest::Remote { .. } => {
+                            let services = self.services.clone();
+                            let job = request.clone();
+                            cx.spawn_in(window, async move |this, cx| {
+                                let host = cx
+                                    .background_spawn(async move { services.unconfirmed_host(&job) })
+                                    .await;
+                                let _ = this.update_in(cx, |this, window, cx| match host {
+                                    Some(host) => {
+                                        let note = format!("Press Enter to open {host}");
+                                        this.prefill_open(text, note, window, cx)
+                                    }
+                                    None => {
+                                        if let Err(refused) = this.take_handoff(Some(request), cx) {
+                                            this.status = refused;
+                                        }
+                                        cx.notify();
+                                    }
+                                });
+                            })
+                            .detach();
                         }
-                    }
+                        _ => self.prefill_open(text, "Press Enter to open this patch file".into(), window, cx),
+                    },
                     None => {
                         self.status = "The clipboard holds no pull request, merge request, compare address, or patch file.".into()
                     }

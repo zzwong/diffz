@@ -38,31 +38,49 @@ impl Workbench {
         )
     }
     /// Follows the Open panel's text: a recognized source selects its tab and is named beside the
-    /// field. Text that is not recognized leaves the tab as it was chosen.
+    /// field. Text that is not recognized returns to the tab as it was chosen by hand.
     pub(crate) fn detect_source_mode(
         &mut self,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.detected = None;
-        if let Some(found) = self.services.detect(text) {
-            let (mode, hint) = match &found.request {
-                OpenRequest::Remote { provider, .. } => (
-                    SourceMode::Remote(provider.clone()),
-                    self.services
-                        .provider(provider)
-                        .map(|p| p.address_hint().to_string()),
-                ),
-                _ => (SourceMode::Patch, Some("/path/to/change.patch".to_string())),
-            };
-            if let Some(hint) = hint.filter(|_| mode != self.source_mode) {
-                self.open_input
-                    .update(cx, |input, cx| input.set_placeholder(hint, window, cx));
-            }
+        let found = self.services.detect(text);
+        let mode = mode_after_detection(&self.chosen_mode, found.as_ref().map(|f| &f.request));
+        if mode != self.source_mode {
+            let hint = self.mode_hint(&mode);
+            self.open_input
+                .update(cx, |input, cx| input.set_placeholder(hint, window, cx));
             self.source_mode = mode;
-            self.detected = Some(found.label);
         }
+        self.detected = found.map(|f| f.label);
+        cx.notify();
+    }
+    fn mode_hint(&self, mode: &SourceMode) -> String {
+        match mode {
+            SourceMode::Remote(provider) => self
+                .services
+                .provider(provider)
+                .map_or(String::new(), |p| p.address_hint().to_string()),
+            SourceMode::Patch => "/path/to/change.patch".into(),
+            _ => "/path/to/repository".into(),
+        }
+    }
+    /// Puts `text` in the Open field, named and selected as a detected source would be, and waits
+    /// for Enter with `note` beside it.
+    pub(crate) fn prefill_open(
+        &mut self,
+        text: String,
+        note: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.panel = Panel::Open;
+        self.open_input
+            .update(cx, |input, cx| input.set_value(text.clone(), window, cx));
+        self.detect_source_mode(&text, window, cx);
+        self.open_input.read(cx).focus_handle(cx).focus(window, cx);
+        self.status = note;
         cx.notify();
     }
     pub(super) fn open_pending(
@@ -261,9 +279,20 @@ fn handoff_blocker(saving: bool, composing: bool, previewing: bool) -> Option<&'
         None
     }
 }
+
+/// The tab the Open panel shows: the one a detected source belongs to, otherwise the one chosen.
+fn mode_after_detection(chosen: &SourceMode, found: Option<&OpenRequest>) -> SourceMode {
+    match found {
+        Some(OpenRequest::Remote { provider, .. }) => SourceMode::Remote(provider.clone()),
+        Some(_) => SourceMode::Patch,
+        None => chosen.clone(),
+    }
+}
 #[cfg(test)]
 mod tests {
-    use super::{composing, handoff_blocker};
+    use super::{SourceMode, composing, handoff_blocker, mode_after_detection};
+    use diffz_core::{domain::ProviderId, provider::OpenRequest};
+
     #[test]
     fn unsaved_comments_block_a_handoff() {
         assert!(composing("a reply", None));
@@ -275,5 +304,24 @@ mod tests {
         assert!(handoff_blocker(false, false, true).is_some());
         assert!(handoff_blocker(true, false, false).is_some());
         assert_eq!(handoff_blocker(false, false, false), None);
+    }
+    #[test]
+    fn a_passing_match_does_not_replace_the_chosen_tab() {
+        let chosen = SourceMode::Compare;
+        let patch = OpenRequest::Patch("/Users/me/notes".into());
+        assert_eq!(
+            mode_after_detection(&chosen, Some(&patch)),
+            SourceMode::Patch
+        );
+        // Typing on past the match returns to the tab picked by hand.
+        assert_eq!(mode_after_detection(&chosen, None), chosen);
+        let remote = OpenRequest::Remote {
+            provider: ProviderId::GITLAB,
+            address: "group/project!7".into(),
+        };
+        assert_eq!(
+            mode_after_detection(&chosen, Some(&remote)),
+            SourceMode::Remote(ProviderId::GITLAB)
+        );
     }
 }
