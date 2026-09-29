@@ -58,8 +58,12 @@ if host == 'github.com':
         else:
             value = load('github_tags.json')
             # A hotfix tagged on a release branch, off the compared range.
+            # A tag on a second-parent commit the range merged, off its first-parent path.
             if (root / 'side-tag').exists():
-                value.insert(0, {'name': '1.0.80-hotfix', 'commit': {'sha': 'f' * 40}})
+                value.insert(0, {'name': '1.0.80-hotfix', 'commit': {'sha': 'a2eb7dd5e13add83f254b6dac0f68e043effc521'}})
+            # A tag on a blob, as git/git's junio-gpg-pub, has no commit.
+            if (root / 'blob-tag').exists():
+                value.insert(0, {'name': 'gpg-pub', 'commit': {'sha': ''}})
     elif endpoint == f'{prefix}/releases?per_page=100':
         value = load('github_releases.json')
     else:
@@ -89,10 +93,12 @@ else:
             value['diffs'][0].update(collapsed=True, diff='')
     elif endpoint.startswith(f'{prefix}/repository/compare?from={wide["id"]}&to={to["id"]}&straight='):
         value = load('gitlab_range.json')
-    elif endpoint == f'{prefix}/repository/compare?from={wide["id"]}&to={frm["id"]}&straight=false':
+    elif endpoint.startswith(f'{prefix}/repository/compare?from={wide["id"]}&to={frm["id"]}&straight='):
         value = load('gitlab_step.json')
     elif endpoint == f'{prefix}/repository/tags?per_page=100&page=1':
         value = load('gitlab_tags.json')
+        if (root / 'blob-tag').exists():
+            value.insert(0, {'name': 'gpg-pub', 'commit': None, 'release': None})
     else:
         raise AssertionError(endpoint)
 sys.stdout.write('HTTP/1.1 %d Mock\r\nContent-Type: application/json\r\n\r\n' % code)

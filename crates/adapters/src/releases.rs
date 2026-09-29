@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 pub const MAX_RELEASES: usize = 30;
 /// Tag listings stop after this many pages of 100.
 pub const TAG_PAGES: usize = 10;
-/// Step compares run on at most this many `gh` or `glab` processes at once.
+/// Commit pages and step compares run on at most this many `gh` or `glab` processes at once.
+/// They start only after the tag, release, and compare reads, which overlap one another.
 pub const WIDTH: usize = 4;
 
 /// One step of the timeline: `from` (the previous tag's commit, or the base) to `to`.

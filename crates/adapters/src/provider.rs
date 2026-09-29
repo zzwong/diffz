@@ -3,6 +3,7 @@ use diffz_core::{
     domain::{RemoteTarget, Snapshot},
     provider::{Cancellation, ReviewRules},
     review::PreparedReview,
+    review_details::Release,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -14,6 +15,14 @@ pub trait ReviewProvider: Send + Sync {
     fn accepts(&self, address: &str) -> bool;
     fn source(&self, target: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>>;
     fn remote(&self) -> Result<Arc<dyn ReviewRemote>>;
+    /// A compare's releases and the warnings reading them raised; nothing for other targets.
+    fn releases(
+        &self,
+        _target: &RemoteTarget,
+        _cancel: Cancellation,
+    ) -> Result<(Vec<Release>, Vec<String>)> {
+        Ok((vec![], vec![]))
+    }
 }
 
 pub enum SendOutcome {

@@ -199,7 +199,7 @@ mod fake_cli;
 mod loaded {
     use super::fake_cli;
     use super::*;
-    use diffz_core::provider::Cancellation;
+    use diffz_core::{provider::Cancellation, review_details::Release};
     use std::{path::Path, sync::Arc};
 
     const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/compare");
@@ -224,7 +224,8 @@ mod loaded {
             .map(str::to_owned)
             .collect()
     }
-    fn github(dir: &Path, url: &str) -> Result<Snapshot, String> {
+    /// The compare alone, as it first shows.
+    fn github_compare_only(dir: &Path, url: &str) -> Result<Snapshot, String> {
         let GithubTarget::Compare(a) = GithubTarget::parse(url).unwrap() else {
             panic!("not a compare")
         };
@@ -232,13 +233,31 @@ mod loaded {
             .compare(&a, Cancellation::default())
             .map_err(|e| e.to_string())
     }
+    /// Adds the releases read after the compare shows.
+    fn with_releases(
+        mut s: Snapshot,
+        read: impl FnOnce(&RemoteTarget) -> diffz_adapters::Result<(Vec<Release>, Vec<String>)>,
+    ) -> Result<Snapshot, String> {
+        let (releases, warnings) = read(s.remote.as_ref().unwrap()).map_err(|e| e.to_string())?;
+        s.overview.releases = releases;
+        s.warnings.extend(warnings);
+        Ok(s)
+    }
+    fn github(dir: &Path, url: &str) -> Result<Snapshot, String> {
+        let s = github_compare_only(dir, url)?;
+        with_releases(s, |t| {
+            GithubReader::new(program(dir)).releases(t, Cancellation::default())
+        })
+    }
     fn gitlab(dir: &Path, url: &str) -> Result<Snapshot, String> {
         let GitlabTarget::Compare(a) = GitlabTarget::parse(url).unwrap() else {
             panic!("not a compare")
         };
-        GitlabReader::new(program(dir))
+        let reader = GitlabReader::new(program(dir));
+        let s = reader
             .compare(&a, Cancellation::default())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        with_releases(s, |t| reader.releases(t, Cancellation::default()))
     }
 
     #[test]
@@ -274,6 +293,8 @@ mod loaded {
             [
                 "repos/dtolnay/anyhow",
                 "repos/dtolnay/anyhow/compare/1.0.80...1.0.81",
+                pinned.as_str(),
+                // Releases are read after the compare shows, so its file list is read again.
                 pinned.as_str(),
                 "repos/dtolnay/anyhow/releases?per_page=100",
                 "repos/dtolnay/anyhow/tags?per_page=100&page=1",
@@ -355,7 +376,9 @@ mod loaded {
     #[test]
     fn tags_off_the_range_are_left_out() {
         let temp = tempfile::tempdir().unwrap();
+        // One tag on a commit the range merged but whose first-parent path skips it, one on a blob.
         std::fs::write(temp.path().join("side-tag"), "").unwrap();
+        std::fs::write(temp.path().join("blob-tag"), "").unwrap();
         let s = github(temp.path(), GH_RANGE).unwrap();
         assert_eq!(
             s.overview
@@ -368,14 +391,20 @@ mod loaded {
     }
 
     #[test]
-    fn unreadable_releases_leave_the_compare_open() {
+    fn a_compare_opens_without_reading_releases() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join("no-tags"), "").unwrap();
-        let s = github(temp.path(), GH_RANGE).unwrap();
+        let s = github_compare_only(temp.path(), GH_RANGE).unwrap();
         assert_eq!(s.patch.files.len(), 13);
         assert!(s.overview.releases.is_empty());
-        assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
-        assert!(s.warnings[0].contains("releases in this range could not be listed"));
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert!(
+            !calls(temp.path())
+                .iter()
+                .any(|c| c.contains("/tags") || c.contains("/releases"))
+        );
+        let err = github(temp.path(), GH_RANGE).unwrap_err();
+        assert!(err.contains("502"), "{err}");
     }
 
     #[test]
@@ -405,7 +434,8 @@ mod loaded {
         assert!(last.notes.as_deref().is_some_and(|n| !n.is_empty()));
         assert!(last.date.is_some());
         assert!(last.files.iter().any(|f| f.additions + f.deletions > 0));
-        // Tags carry their release notes, so only the step compares are added.
+        // Tags carry their release notes, so only the step compares are added, beside the
+        // compare read again once it shows.
         let calls = calls(temp.path());
         assert!(!calls.iter().any(|c| c.contains("/releases")));
         assert_eq!(
@@ -413,7 +443,31 @@ mod loaded {
                 .iter()
                 .filter(|c| c.contains("/repository/compare?"))
                 .count(),
-            3
+            4
+        );
+    }
+
+    #[test]
+    fn gitlab_steps_keep_the_compares_mode_and_skip_tags_without_a_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("blob-tag"), "").unwrap();
+        let s = gitlab(
+            temp.path(),
+            "https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/compare/13.1.0..14.1.0",
+        )
+        .unwrap();
+        assert_eq!(
+            summary(&s),
+            [(Some("14.0.0"), 20, 24), (Some("14.1.0"), 8, 11)]
+        );
+        let calls = calls(temp.path());
+        let compares: Vec<_> = calls
+            .iter()
+            .filter(|c| c.contains("/repository/compare?"))
+            .collect();
+        assert!(
+            compares.len() == 4 && compares.iter().all(|c| c.ends_with("&straight=true")),
+            "{compares:?}"
         );
     }
 

@@ -20,8 +20,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   release notes, and a link. Selecting one narrows the file tree to the files it
   touched, "Open this step" opens it as a compare of its own, and each file in
   the tree names the releases that changed it. The timeline keeps the newest 30
-  tags and says so; if the releases cannot be read, the compare still opens
-  with a warning.
+  tags and says so. Releases load after the compare shows; if they cannot be
+  read, the compare stays open with a warning.
 - `diffz <target>` detects what it was given: a patch file, a GitHub pull
   request (`owner/repo#123` or a URL), or a GitLab merge request
   (`group/project!123` or a URL). `--pr`, `--mr` and `--patch` still work.

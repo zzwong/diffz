@@ -117,7 +117,10 @@ impl Workbench {
             let _=this.update(cx,|app,cx|{if app.open_generation!=generation{return}app.loading=false;match result{
                 Ok(opened)=>{if refresh&&app.active.as_ref().is_some_and(|a|a.snapshot.id!=opened.snapshot.id){app.offered=Some(opened);app.status="New revision available. The snapshot on screen has not changed.".into();}
                     else if refresh{let snapshot=Arc::new(opened.snapshot);if let Some(a)=&mut app.active{a.snapshot=snapshot.clone();}
-if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Source unchanged; comment list and review state refreshed without moving the view.".into();}
+if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}
+// The release list is read again, so indexes into the old one no longer hold.
+app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);
+app.status="Source unchanged; comment list and review state refreshed without moving the view.".into();}
                     else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>app.status=e.message,
             }cx.notify();});
         }).detach();
@@ -156,6 +159,7 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
             self.select_file(id, cx)
         }
         self.annotate(cx);
+        self.load_releases(cx);
         self.status =
             "Snapshot loaded. The source holds still until another revision is accepted on purpose."
                 .into();
@@ -282,6 +286,54 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
                 app.mark_annotations();
                 if !problems.is_empty() {
                     app.status = format!("Annotations: {}", problems.join("; "));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    /// Reads a compare's releases after it shows. Only the snapshot the read began for takes
+    /// the result; replacing that snapshot, even with a refresh of the same one, cancels it.
+    fn load_releases(&mut self, cx: &mut Context<Self>) {
+        if let Some(stale) = self.releases_pending.take() {
+            stale.cancel();
+        }
+        let Some(a) = &self.active else { return };
+        let is_compare = a
+            .snapshot
+            .remote
+            .as_ref()
+            .is_some_and(|t| t.compare.is_some());
+        // A resumed compare keeps the releases it saved.
+        if !is_compare || !a.snapshot.overview.releases.is_empty() {
+            return;
+        }
+        let cancel = Cancellation::default();
+        self.releases_pending = Some(cancel.clone());
+        let snapshot = a.snapshot.clone();
+        let services = self.services.clone();
+        cx.spawn(async move |this, cx| {
+            let id = snapshot.id.clone();
+            let job_cancel = cancel.clone();
+            let result = cx
+                .background_spawn(async move { services.releases(&snapshot, job_cancel) })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if cancel.cancelled() || app.active.as_ref().is_none_or(|a| a.snapshot.id != id) {
+                    return;
+                }
+                app.releases_pending = None;
+                match result {
+                    Ok(snapshot) => {
+                        let snapshot = Arc::new(snapshot);
+                        if let Some(a) = &mut app.active {
+                            a.snapshot = snapshot.clone();
+                        }
+                        if let Some(v) = &app.viewport {
+                            v.borrow_mut().snapshot = snapshot;
+                        }
+                    }
+                    Err(e) => app.status = e.message,
                 }
                 cx.notify();
             });

@@ -149,6 +149,8 @@ pub(crate) struct Workbench {
     pub release_filter: Option<usize>,
     /// Releases whose notes are expanded in the overview.
     pub release_notes: std::collections::HashSet<usize>,
+    /// Set while the active compare's releases are read; cancelled when that snapshot is replaced.
+    pub releases_pending: Option<Cancellation>,
     pub gesture: crate::scrolling::GestureState,
     pub export_context: Option<ContextExport>,
     pub outbox: Vec<OutboxEntry>,
@@ -410,6 +412,7 @@ impl Workbench {
             comment_page: 0,
             release_filter: None,
             release_notes: Default::default(),
+            releases_pending: None,
             gesture: Default::default(),
             export_context: None,
             outbox: vec![],

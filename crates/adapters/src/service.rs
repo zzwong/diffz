@@ -328,6 +328,46 @@ impl WorkbenchServices for Services {
             self.ids.fetch_add(1, Ordering::Relaxed)
         )
     }
+    fn releases(
+        &self,
+        snapshot: &Snapshot,
+        cancel: Cancellation,
+    ) -> std::result::Result<Snapshot, ServiceError> {
+        let mut s = snapshot.clone();
+        let Some(t) = s.remote.as_ref().filter(|t| t.compare.is_some()) else {
+            return Ok(s);
+        };
+        let read = self
+            .permit(&cancel)
+            .and_then(|_permit| self.provider_for(&t.provider)?.releases(t, cancel.clone()));
+        // Release metadata only adds to the compare, so failing to read it never fails the open.
+        let (mut releases, warnings) = match read {
+            Ok(read) => read,
+            Err(e) => (
+                vec![],
+                vec![format!(
+                    "The releases in this range could not be listed: {e}"
+                )],
+            ),
+        };
+        // A step can carry changes the compare leaves out, such as a merge from the base branch.
+        let paths: std::collections::HashSet<String> =
+            s.patch.files.iter().map(|f| f.display_path()).collect();
+        for r in &mut releases {
+            r.files.retain(|f| paths.contains(&f.path));
+        }
+        s.overview.releases = releases;
+        for w in warnings {
+            if !s.warnings.contains(&w) {
+                s.warnings.push(w);
+            }
+        }
+        if cancel.cancelled() {
+            return Err("read cancelled".into());
+        }
+        self.store.put_snapshot(&s)?;
+        Ok(s)
+    }
 }
 const MAX_DETECTED: usize = 4096;
 const GITHUB_TOKENS: &[&str] = &[
@@ -656,5 +696,233 @@ mod tests {
         std::fs::write(root.join("Diffz/Contents/Resources/state-dir"), "relative").unwrap();
         assert_eq!(super::bundled_state_dir(&plain).unwrap(), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A compare source whose releases name one file outside its diff, and can fail or be
+    /// replaced while they are read.
+    mod releases {
+        use crate::{
+            Result,
+            provider::{ReviewProvider, ReviewRemote},
+            service::Services,
+        };
+        use diffz_core::{
+            domain::*,
+            patch::parse_patch,
+            provider::*,
+            review::PreparedReview,
+            review_details::{Release, ReleaseFile},
+        };
+        use serde_json::value::RawValue;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct Fake {
+            fail: bool,
+            /// Cancelled mid-read, as the window does when the snapshot is replaced.
+            replaced: Mutex<Option<Cancellation>>,
+        }
+        struct Rules;
+        impl ReviewRules for Rules {
+            fn id(&self) -> ProviderId {
+                ProviderId::new("Fake")
+            }
+            fn name(&self) -> &str {
+                "Fake"
+            }
+            fn open_label(&self) -> &str {
+                ""
+            }
+            fn address_label(&self) -> &str {
+                ""
+            }
+            fn address_hint(&self) -> &str {
+                ""
+            }
+            fn address_help(&self) -> &str {
+                ""
+            }
+            fn write_flag(&self) -> &str {
+                ""
+            }
+            fn reopen_address(&self, _: &RemoteTarget) -> String {
+                String::new()
+            }
+            fn line_url(&self, _: &RemoteTarget, _: &str, _: &str, _: u32) -> String {
+                String::new()
+            }
+            fn payload(&self, _: &PreparedReview) -> Box<RawValue> {
+                RawValue::from_string("{}".into()).unwrap()
+            }
+        }
+        fn file(path: &str) -> ReleaseFile {
+            ReleaseFile {
+                path: path.into(),
+                additions: 1,
+                deletions: 0,
+            }
+        }
+        fn release(tag: &str, files: Vec<ReleaseFile>) -> Release {
+            Release {
+                tag: Some(tag.into()),
+                commit: "c".repeat(40),
+                date: None,
+                commits: 1,
+                files,
+                notes: None,
+                url: None,
+            }
+        }
+        impl ReviewProvider for Fake {
+            fn rules(&self) -> Arc<dyn ReviewRules> {
+                Arc::new(Rules)
+            }
+            fn open(&self, _: &str, _: Cancellation) -> Result<Snapshot> {
+                let patch = parse_patch(
+                    b"diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-a\n+b\n",
+                    Default::default(),
+                )?;
+                let target = RemoteTarget {
+                    provider: ProviderId::new("Fake"),
+                    repository: RepositoryKey {
+                        host: "example.com".into(),
+                        id: 1,
+                        owner: "o".into(),
+                        name: "r".into(),
+                    },
+                    account: String::new(),
+                    pr: 0,
+                    target_tip: "a".repeat(40),
+                    comparison_base: "a".repeat(40),
+                    head: "c".repeat(40),
+                    open: true,
+                    draft: false,
+                    pending_review: false,
+                    compare: Some(CompareRefs {
+                        base: "v1".into(),
+                        head: "v3".into(),
+                        direct: false,
+                    }),
+                };
+                Ok(Snapshot::with_origin(
+                    "o/r  v1...v3".into(),
+                    patch,
+                    Some(target),
+                    vec![],
+                    "fake-compare".into(),
+                ))
+            }
+            fn accepts(&self, _: &str) -> bool {
+                true
+            }
+            fn source(&self, _: &RemoteTarget, _: &str, _: &str) -> Result<Vec<u8>> {
+                Err("no source".into())
+            }
+            fn remote(&self) -> Result<Arc<dyn ReviewRemote>> {
+                Err("read-only".into())
+            }
+            fn releases(
+                &self,
+                _: &RemoteTarget,
+                cancel: Cancellation,
+            ) -> Result<(Vec<Release>, Vec<String>)> {
+                if self.fail {
+                    return Err("HTTP 502".into());
+                }
+                if let Some(replaced) = self.replaced.lock().unwrap().take() {
+                    replaced.cancel();
+                    assert!(cancel.cancelled());
+                }
+                // v3 only merged the base branch in, so its one file is not in the compare.
+                Ok((
+                    vec![
+                        release("v2", vec![file("a.rs"), file("base-only.rs")]),
+                        release("v3", vec![file("base-only.rs")]),
+                    ],
+                    vec!["one warning".into()],
+                ))
+            }
+        }
+        fn services(fake: Fake) -> (tempfile::TempDir, Services) {
+            let temp = tempfile::tempdir().unwrap();
+            let mut services = Services::new(&temp.path().join("db"), false).unwrap();
+            services.register(Arc::new(fake), false);
+            (temp, services)
+        }
+        fn open(services: &Services) -> Opened {
+            let request = OpenRequest::Remote {
+                provider: ProviderId::new("Fake"),
+                address: "o/r v1...v3".into(),
+            };
+            services.open(request, Cancellation::default()).unwrap()
+        }
+        fn resume(services: &Services, id: &SnapshotId) -> Snapshot {
+            services
+                .open(OpenRequest::Resume(id.clone()), Cancellation::default())
+                .unwrap()
+                .snapshot
+        }
+
+        #[test]
+        fn a_compare_opens_before_its_releases_and_saves_them_after() {
+            let (_temp, services) = services(Fake::default());
+            let opened = open(&services);
+            assert!(opened.snapshot.overview.releases.is_empty());
+            let s = services
+                .releases(&opened.snapshot, Cancellation::default())
+                .unwrap();
+            assert_eq!(s.id, opened.snapshot.id);
+            // Files outside the compare are dropped, leaving v3 with none to narrow the tree to.
+            let files: Vec<Vec<&str>> = s
+                .overview
+                .releases
+                .iter()
+                .map(|r| r.files.iter().map(|f| f.path.as_str()).collect())
+                .collect();
+            assert_eq!(files, [vec!["a.rs"], vec![]]);
+            assert_eq!(s.warnings, ["one warning"]);
+            assert_eq!(
+                resume(&services, &s.id).overview.releases,
+                s.overview.releases
+            );
+            // Reading them again, as a resumed or refreshed compare does, repeats no warning.
+            let again = services.releases(&s, Cancellation::default()).unwrap();
+            assert_eq!(again.warnings, ["one warning"]);
+        }
+
+        #[test]
+        fn releases_for_a_replaced_snapshot_are_neither_returned_nor_saved() {
+            let cancel = Cancellation::default();
+            let (_temp, services) = services(Fake {
+                replaced: Mutex::new(Some(cancel.clone())),
+                ..Fake::default()
+            });
+            let opened = open(&services);
+            assert!(services.releases(&opened.snapshot, cancel).is_err());
+            assert!(
+                resume(&services, &opened.snapshot.id)
+                    .overview
+                    .releases
+                    .is_empty()
+            );
+        }
+
+        #[test]
+        fn unreadable_releases_are_a_warning_on_the_open_compare() {
+            let (_temp, services) = services(Fake {
+                fail: true,
+                ..Fake::default()
+            });
+            let opened = open(&services);
+            let s = services
+                .releases(&opened.snapshot, Cancellation::default())
+                .unwrap();
+            assert!(s.overview.releases.is_empty());
+            assert_eq!(
+                s.warnings,
+                ["The releases in this range could not be listed: HTTP 502"]
+            );
+            assert_eq!(resume(&services, &s.id).warnings, s.warnings);
+        }
     }
 }

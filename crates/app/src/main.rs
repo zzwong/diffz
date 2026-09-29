@@ -579,7 +579,11 @@ fn run() -> Result<()> {
             .request
             .context("--inspect needs a source; use --help")?;
         let opened = services.open(request, Cancellation::default())?;
-        return print(&serde_json::to_string_pretty(&opened.snapshot)?);
+        diffz_core::timing::mark("snapshot opened");
+        // The window reads releases after the compare shows; here the output waits for them.
+        let snapshot = services.releases(&opened.snapshot, Cancellation::default())?;
+        diffz_core::timing::mark("releases");
+        return print(&serde_json::to_string_pretty(&snapshot)?);
     }
     #[cfg(feature = "desktop")]
     let registry = diffz_core::registry::Registry::installed();

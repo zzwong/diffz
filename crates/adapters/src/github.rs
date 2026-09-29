@@ -911,47 +911,39 @@ impl GithubReader {
                 .unwrap_or_default()
                 .as_secs(),
         );
-        let t = s.remote.as_ref().expect("set above");
-        // Release metadata only adds to the compare, so failing to read it never fails the open.
-        match self.releases(a, &t.target_tip, &t.head, &compare, cancel) {
-            Ok((releases, warnings)) => {
-                s.overview.releases = releases;
-                s.warnings.extend(warnings);
-            }
-            Err(e) => s.warnings.push(format!(
-                "The releases in this range could not be listed: {e}"
-            )),
-        }
         Ok(s)
     }
     /// The release tags on a compare's range and what each changed since the one before.
-    /// `compare` is the response for `base...head`, reused for its commits when it lists them all.
-    fn releases(
+    /// Read after the compare opens, since a long range takes many more requests.
+    pub fn releases(
         &self,
-        a: &CompareAddress,
-        base: &str,
-        head: &str,
-        compare: &Value,
+        t: &RemoteTarget,
         cancel: Cancellation,
     ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
         use crate::releases::{TAG_PAGES, bounded, folded_warning, steps};
         use diffz_core::review_details::{Release, ReleaseFile};
-        let repo = format!("repos/{}/{}", a.owner, a.repo);
-        let listed = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
-        let total = compare["total_commits"].as_u64().unwrap_or(0) as usize;
+        let refs = t.compare.as_ref().ok_or("only a compare has releases")?;
+        let (base, head, target) = (t.target_tip.as_str(), t.head.as_str(), &t.repository);
+        let (host, repo) = (
+            &target.host,
+            format!("repos/{}/{}", target.owner, target.name),
+        );
         let mut warnings = vec![];
-        let (commits, tags, notes) = std::thread::scope(|s| {
+        let (compare, tags, notes) = std::thread::scope(|s| {
             let tags = s.spawn(|| {
                 let mut tags = vec![];
                 for page in 1..=TAG_PAGES {
                     let v = self.get_json(
-                        &a.host,
+                        host,
                         &format!("{repo}/tags?per_page=100&page={page}"),
                         cancel.clone(),
                     )?;
                     let rows = v.as_array().ok_or("expected GitHub array page")?;
                     for t in rows {
-                        tags.push((text(t, "/name")?.to_owned(), oid(t, "/commit/sha")?));
+                        // A tag on a tree or blob, such as git's junio-gpg-pub, names no commit.
+                        if let Ok(sha) = oid(t, "/commit/sha") {
+                            tags.push((text(t, "/name")?.to_owned(), sha));
+                        }
                     }
                     if rows.len() < 100 {
                         return Ok((tags, false));
@@ -962,38 +954,42 @@ impl GithubReader {
             // One page of the newest releases; older tags keep their link but show no notes.
             let notes = s.spawn(|| {
                 self.get_json(
-                    &a.host,
+                    host,
                     &format!("{repo}/releases?per_page=100"),
                     cancel.clone(),
                 )
             });
-            // The compare lists at most 250 commits, oldest first; pages of 100 reach the rest.
-            let commits = if total <= listed.len() {
-                Ok(listed.to_vec())
-            } else if total > 5000 {
-                Err(
-                    format!("the range holds {total} commits, more than the 5,000 that are placed")
-                        .into(),
-                )
-            } else {
-                let pages: Vec<usize> = (1..=total.div_ceil(100)).collect();
-                bounded(&pages, |page| {
-                    self.get_json(
-                        &a.host,
-                        &format!("{repo}/compare/{base}...{head}?per_page=100&page={page}"),
-                        cancel.clone(),
-                    )
-                })
-                .map(|pages| {
-                    pages
-                        .iter()
-                        .flat_map(|p| p["commits"].as_array().cloned().unwrap_or_default())
-                        .collect::<Vec<_>>()
-                })
-            };
-            (commits, joined(tags), joined(notes))
+            let compare = self.get_json(
+                host,
+                &format!("{repo}/compare/{base}...{head}"),
+                cancel.clone(),
+            );
+            (compare, joined(tags), joined(notes))
         });
-        let (commits, (tags, truncated), notes) = (commits?, tags?, notes?);
+        let (compare, (tags, truncated), notes) = (compare?, tags?, notes?);
+        let listed = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
+        let total = compare["total_commits"].as_u64().unwrap_or(0) as usize;
+        // The compare lists at most 250 commits, oldest first; pages of 100 reach the rest.
+        let commits = if total <= listed.len() {
+            listed.to_vec()
+        } else if total > 5000 {
+            return Err(format!(
+                "the range holds {total} commits, more than the 5,000 that are placed"
+            )
+            .into());
+        } else {
+            let pages: Vec<usize> = (1..=total.div_ceil(100)).collect();
+            bounded(&pages, |page| {
+                self.get_json(
+                    host,
+                    &format!("{repo}/compare/{base}...{head}?per_page=100&page={page}"),
+                    cancel.clone(),
+                )
+            })?
+            .iter()
+            .flat_map(|p| p["commits"].as_array().cloned().unwrap_or_default())
+            .collect()
+        };
         if truncated {
             warnings.push(format!(
                 "Only the first {} tags were checked for releases in this range.",
@@ -1030,10 +1026,10 @@ impl GithubReader {
         };
         // A single step spanning the whole compare is the compare already read.
         let stats = match &steps[..] {
-            [only] if only.from == base && only.to == head => vec![stats(compare)],
+            [only] if only.from == base && only.to == head => vec![stats(&compare)],
             _ => bounded(&steps, |step| {
                 self.get_json(
-                    &a.host,
+                    host,
                     &format!("{repo}/compare/{}...{}?per_page=1", step.from, step.to),
                     cancel.clone(),
                 )
@@ -1053,10 +1049,10 @@ impl GithubReader {
             .into_iter()
             .zip(stats)
             .map(|(step, (commits, files))| {
-                let name = step.tag.as_deref().unwrap_or(&a.refs.head);
+                let name = step.tag.as_deref().unwrap_or(&refs.head);
                 if files.len() >= 300 {
                     warnings.push(format!(
-                        "GitHub lists only the first 300 files of {name}, so the file tree may leave some of its files out."
+                        "GitHub lists only the first 300 files of {name}, so the file tree may leave some of its files out and its +/− totals may be low."
                     ));
                 }
                 let release = step.tag.as_deref().and_then(|t| notes.get(t));
@@ -1067,10 +1063,9 @@ impl GithubReader {
                             .map_or_else(
                                 || {
                                     format!(
-                                        "https://{}/{}/{}/releases/tag/{}",
-                                        a.host,
-                                        a.owner,
-                                        a.repo,
+                                        "https://{host}/{}/{}/releases/tag/{}",
+                                        target.owner,
+                                        target.name,
                                         encode_path(t)
                                     )
                                 },
@@ -1317,6 +1312,13 @@ impl ReviewProvider for GithubProvider {
     }
     fn remote(&self) -> Result<Arc<dyn ReviewRemote>> {
         Ok(Arc::new(GithubWriter::new(self.reader()?.clone())))
+    }
+    fn releases(
+        &self,
+        t: &RemoteTarget,
+        cancel: Cancellation,
+    ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
+        self.reader()?.releases(t, cancel)
     }
 }
 

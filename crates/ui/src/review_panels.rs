@@ -1086,7 +1086,13 @@ impl Workbench {
         let refs = snapshot.remote.as_ref()?.compare.as_ref()?;
         let releases = &snapshot.overview.releases;
         if releases.is_empty() {
-            return None;
+            return self.releases_pending.as_ref().map(|_| {
+                div()
+                    .text_size(px(12.))
+                    .text_color(skin.muted)
+                    .child("Loading releases…")
+                    .into_any_element()
+            });
         }
         let mut timeline = div().v_flex().gap_2().flex_shrink_0().child(
             div()
@@ -1187,23 +1193,26 @@ impl Workbench {
             let mut actions = div()
                 .h_flex()
                 .gap_1()
-                .child(
-                    Button::new(("release-files", index))
-                        .ghost()
-                        .xsmall()
-                        .cursor_pointer()
-                        .label(if selected {
-                            "Show all files"
-                        } else {
-                            "Show its files"
-                        })
-                        .when(selected, |b| b.text_color(skin.accent))
-                        .tooltip(format!("Narrow the file tree to the files {name} touched"))
-                        .on_click(cx.listener(move |a, _, _, c| {
-                            let next = (a.release_filter != Some(index)).then_some(index);
-                            a.filter_release(next, c)
-                        })),
-                )
+                // A release whose files the compare leaves out would narrow the tree to nothing.
+                .when(!r.files.is_empty(), |d| {
+                    d.child(
+                        Button::new(("release-files", index))
+                            .ghost()
+                            .xsmall()
+                            .cursor_pointer()
+                            .label(if selected {
+                                "Show all files"
+                            } else {
+                                "Show its files"
+                            })
+                            .when(selected, |b| b.text_color(skin.accent))
+                            .tooltip(format!("Narrow the file tree to the files {name} touched"))
+                            .on_click(cx.listener(move |a, _, _, c| {
+                                let next = (a.release_filter != Some(index)).then_some(index);
+                                a.filter_release(next, c)
+                            })),
+                    )
+                })
                 .child(
                     Button::new(("release-open", index))
                         .ghost()

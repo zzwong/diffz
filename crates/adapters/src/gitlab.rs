@@ -244,6 +244,8 @@ impl GitlabCompare {
         })
     }
 }
+/// GitLab's default cap on the files one compare lists; an instance may raise it to 3000.
+const DIFF_FILES: usize = 1000;
 pub struct GitlabReader {
     executable: PathBuf,
 }
@@ -417,9 +419,9 @@ impl GitlabReader {
             vec![],
             format!("gitlab-compare:{}:{path}:{label}", a.host),
         );
-        if compare["compare_timeout"] == true {
+        if compare["compare_timeout"] == true || diffs.len() >= DIFF_FILES {
             s.warnings.push(
-                "GitLab timed out computing this compare, so its file list may be incomplete"
+                "GitLab timed out computing this compare or reached its file limit, so its file list may be incomplete"
                     .into(),
             );
         }
@@ -458,64 +460,77 @@ impl GitlabReader {
                 .map_err(|_| "Clock error")?
                 .as_secs(),
         );
-        let t = s.remote.as_ref().expect("set above");
-        // Release metadata only adds to the compare, so failing to read it never fails the open.
-        match self.releases(a, &h, &path, &t.target_tip, &t.head, &compare, c) {
-            Ok((releases, warnings)) => {
-                s.overview.releases = releases;
-                s.warnings.extend(warnings);
-            }
-            Err(e) => s.warnings.push(format!(
-                "The releases in this range could not be listed: {e}"
-            )),
-        }
         Ok(s)
     }
     /// The release tags on a compare's range and what each changed since the one before.
-    /// `compare` is the response for `from...to`, whose commits cover the whole range.
-    #[allow(clippy::too_many_arguments)]
-    fn releases(
+    /// Read after the compare opens, since a long range takes many more requests.
+    pub fn releases(
         &self,
-        a: &GitlabCompare,
-        h: &MrAddress,
-        path: &str,
-        from: &str,
-        to: &str,
-        compare: &Value,
+        t: &RemoteTarget,
         c: Cancellation,
     ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
         use crate::releases::{TAG_PAGES, bounded, folded_warning, steps};
         use diffz_core::review_details::{Release, ReleaseFile};
-        let project = format!("projects/{}", a.project.replace('/', "%2F"));
-        let commits = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
+        let refs = t.compare.as_ref().ok_or("only a compare has releases")?;
+        let path = format!("{}/{}", t.repository.owner, t.repository.name);
+        let h = MrAddress {
+            host: t.repository.host.clone(),
+            project: path.clone(),
+            number: 0,
+        };
+        let project = format!("projects/{}", path.replace('/', "%2F"));
+        let (from, to) = (t.target_tip.as_str(), t.head.as_str());
+        // Every step uses the compare's own mode. Later steps start at an ancestor of where they
+        // end, where both modes agree; the first starts at FROM, like the compare itself.
+        let straight = refs.direct;
         let mut warnings = vec![];
-        // A tag lists its release's notes, so no separate release call is needed.
-        let mut tags = vec![];
-        let mut notes = std::collections::HashMap::new();
-        for page in 1..=TAG_PAGES {
-            let v = self.get(
-                h,
-                &format!("{project}/repository/tags?per_page=100&page={page}"),
-                c.clone(),
-            )?;
-            let rows = v.as_array().ok_or("Expected a GitLab tag list")?;
-            for t in rows {
-                let name = string(t, "/name")?;
-                if let Some(body) = t["release"]["description"].as_str() {
-                    notes.insert(name.clone(), body.to_owned());
+        let (compare, listed) = std::thread::scope(|s| {
+            let compare = s.spawn(|| {
+                self.get(
+                    &h,
+                    &format!(
+                        "{project}/repository/compare?from={from}&to={to}&straight={straight}"
+                    ),
+                    c.clone(),
+                )
+            });
+            // A tag lists its release's notes, so no separate release call is needed.
+            let listed = (|| {
+                let (mut tags, mut notes) = (vec![], std::collections::HashMap::new());
+                for page in 1..=TAG_PAGES {
+                    let v = self.get(
+                        &h,
+                        &format!("{project}/repository/tags?per_page=100&page={page}"),
+                        c.clone(),
+                    )?;
+                    let rows = v.as_array().ok_or("Expected a GitLab tag list")?;
+                    for t in rows {
+                        // A tag on a tree or blob names no commit.
+                        let Ok(commit) = sha(t, "/commit/id") else {
+                            continue;
+                        };
+                        let name = string(t, "/name")?;
+                        if let Some(body) = t["release"]["description"].as_str() {
+                            notes.insert(name.clone(), body.to_owned());
+                        }
+                        tags.push((name, commit));
+                    }
+                    if rows.len() < 100 {
+                        return Ok((tags, notes, false));
+                    }
                 }
-                tags.push((name, sha(t, "/commit/id")?));
-            }
-            if rows.len() < 100 {
-                break;
-            }
-            if page == TAG_PAGES {
-                warnings.push(format!(
-                    "Only the first {} tags were checked for releases in this range.",
-                    TAG_PAGES * 100
-                ));
-            }
+                Ok::<_, crate::AdapterError>((tags, notes, true))
+            })();
+            (joined(compare), listed)
+        });
+        let (compare, (tags, notes, truncated)) = (compare?, listed?);
+        if truncated {
+            warnings.push(format!(
+                "Only the first {} tags were checked for releases in this range.",
+                TAG_PAGES * 100
+            ));
         }
+        let commits = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
         let range = commits
             .iter()
             .map(|v| Ok((sha(v, "/id")?, sha(v, "/parent_ids/0").ok())))
@@ -526,6 +541,7 @@ impl GitlabReader {
         let stats = |v: &Value| {
             let diffs = v["diffs"].as_array().map_or(&[][..], Vec::as_slice);
             (
+                v["compare_timeout"] == true || diffs.len() >= DIFF_FILES,
                 v["commits"].as_array().map_or(0, |c| c.len() as u64),
                 diffs
                     .iter()
@@ -550,12 +566,16 @@ impl GitlabReader {
         };
         // A single step spanning the whole compare is the compare already read.
         let stats = match &steps[..] {
-            [only] if only.from == from && only.to == to => vec![stats(compare)],
+            // The compare's own warnings already say when its file list was cut.
+            [only] if only.from == from && only.to == to => {
+                let (_, commits, files) = stats(&compare);
+                vec![(false, commits, files)]
+            }
             _ => bounded(&steps, |step| {
                 self.get(
-                    h,
+                    &h,
                     &format!(
-                        "{project}/repository/compare?from={}&to={}&straight=false",
+                        "{project}/repository/compare?from={}&to={}&straight={straight}",
                         step.from, step.to
                     ),
                     c.clone(),
@@ -570,13 +590,19 @@ impl GitlabReader {
         let releases = steps
             .into_iter()
             .zip(stats)
-            .map(|(step, (commits, files))| {
+            .map(|(step, (cut, commits, files))| {
+                if cut {
+                    warnings.push(format!(
+                        "GitLab timed out or reached its file limit comparing {}, so the file tree may leave some of its files out.",
+                        step.tag.as_deref().unwrap_or(&refs.head)
+                    ));
+                }
                 let notes = step.tag.as_ref().and_then(|t| notes.get(t));
                 Release {
                     url: step.tag.as_deref().map(|t| {
                         format!(
                             "https://{}/{path}/-/{}/{}",
-                            a.host,
+                            h.host,
                             if notes.is_some() { "releases" } else { "tags" },
                             crate::github::encode_path(t)
                         )
@@ -1148,6 +1174,13 @@ impl ReviewProvider for GitlabProvider {
     }
     fn remote(&self) -> Result<Arc<dyn ReviewRemote>> {
         Ok(Arc::new(GitlabWriter::new(self.reader()?.clone())))
+    }
+    fn releases(
+        &self,
+        t: &RemoteTarget,
+        cancel: Cancellation,
+    ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
+        self.reader()?.releases(t, cancel)
     }
 }
 
