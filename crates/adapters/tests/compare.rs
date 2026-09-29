@@ -199,7 +199,11 @@ mod fake_cli;
 mod loaded {
     use super::fake_cli;
     use super::*;
-    use diffz_core::{provider::Cancellation, review_details::Release};
+    use diffz_core::{
+        patch::RowKind,
+        provider::Cancellation,
+        review_details::{Release, attribute, blame_span},
+    };
     use std::{path::Path, sync::Arc};
 
     const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/compare");
@@ -477,9 +481,204 @@ mod loaded {
             r#"{"description":null,"checks":[],"notices":[],"captured_at":null,"conversation":[]}"#,
         )
         .unwrap();
-        assert!(old.releases.is_empty());
+        assert!(old.releases.is_empty() && old.blame.is_empty());
         let json = serde_json::to_string(&old).unwrap();
-        assert!(!json.contains("releases"), "{json}");
+        assert!(
+            !json.contains("releases") && !json.contains("blame"),
+            "{json}"
+        );
+        // Releases saved before attribution have no commits or renames; they read as empty.
+        let release: diffz_core::review_details::Release = serde_json::from_str(
+            r#"{"tag":"v1","commit":"c1","date":null,"commits":1,"files":[{"path":"a","additions":1,"deletions":0}],"notes":null,"url":null}"#,
+        )
+        .unwrap();
+        assert!(release.shas.is_empty() && release.files[0].previous.is_none());
+    }
+
+    const GH_BLAMED: [&str; 3] = ["src/lib.rs", "src/wrapper.rs", "build.rs"];
+    fn spans(s: &Snapshot, paths: &[&str]) -> Vec<(String, u32, u32)> {
+        paths
+            .iter()
+            .map(|path| {
+                let file = s
+                    .patch
+                    .files
+                    .iter()
+                    .find(|f| f.display_path() == *path)
+                    .unwrap();
+                let (first, last) = blame_span(&s.overview, file).unwrap();
+                (path.to_string(), first, last)
+            })
+            .collect()
+    }
+    fn keep(s: &mut Snapshot, paths: &[&str], found: Vec<Option<Vec<(u32, u32, String)>>>) {
+        for (path, ranges) in paths.iter().zip(found) {
+            let attributed = ranges.map(|r| attribute(&s.overview.releases, &r));
+            s.overview.blame.insert(path.to_string(), attributed);
+        }
+    }
+    /// Every row of `path` that is not context, with the release attributed to it.
+    fn attributed(s: &Snapshot, path: &str) -> Vec<(char, u32, Option<usize>)> {
+        let file = s
+            .patch
+            .files
+            .iter()
+            .find(|f| f.display_path() == path)
+            .unwrap();
+        file.hunks
+            .iter()
+            .flat_map(|h| &h.rows)
+            .filter_map(|row| {
+                let release = s.overview.row_release(path, row).map(|b| b.release);
+                match row.kind {
+                    RowKind::Added => Some(('+', row.new_line?, release)),
+                    RowKind::Removed => Some(('-', row.old_line?, release)),
+                    RowKind::Context => {
+                        assert_eq!(release, None, "context line {:?}", row.new_line);
+                        None
+                    }
+                }
+            })
+            .collect()
+    }
+    fn blame_calls(dir: &Path, marker: &str) -> usize {
+        calls(dir).iter().filter(|c| c.contains(marker)).count()
+    }
+
+    #[test]
+    fn github_blame_names_the_release_of_each_added_line() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut s = github(temp.path(), GH_RANGE).unwrap();
+        let t = s.remote.clone().unwrap();
+        let found = GithubReader::new(program(temp.path()))
+            .blame(&t, &spans(&s, &GH_BLAMED), Cancellation::default())
+            .unwrap();
+        keep(&mut s, &GH_BLAMED, found);
+        // 17e252bf and a2eb7dd5 sit on merged branches; each counts for the release that merged it.
+        assert_eq!(
+            attributed(&s, "build.rs"),
+            [
+                ('-', 124, None),
+                ('+', 124, Some(0)),
+                ('+', 125, Some(2)),
+                ('-', 149, None),
+                ('+', 150, Some(0))
+            ]
+        );
+        assert_eq!(
+            attributed(&s, "src/wrapper.rs"),
+            [('+', 4, Some(1)), ('+', 5, Some(1)), ('+', 6, Some(1))]
+        );
+        let lib = attributed(&s, "src/lib.rs");
+        let added: Vec<_> = lib.iter().filter(|(kind, ..)| *kind == '+').collect();
+        assert_eq!(added.len(), 13);
+        assert_eq!(*added[0], ('+', 209, Some(2)));
+        assert!(added.iter().all(|(_, _, r)| r.is_some()), "{lib:?}");
+        // Only the range's commits are kept, so blamed context that predates it is dropped.
+        let kept = s.overview.blame["src/lib.rs"].as_ref().unwrap();
+        assert_eq!(kept.len(), 5);
+        assert!(kept.iter().all(|b| b.commit.len() == 40));
+        // Three files fit one GraphQL query.
+        assert_eq!(blame_calls(temp.path(), "graphql"), 1);
+    }
+
+    #[test]
+    fn github_blame_batches_its_queries() {
+        let temp = tempfile::tempdir().unwrap();
+        let s = github(temp.path(), GH_RANGE).unwrap();
+        let t = s.remote.clone().unwrap();
+        let paths = [&GH_BLAMED[..], &["src/fmt.rs", "src/kind.rs"]].concat();
+        let found = GithubReader::new(program(temp.path()))
+            .blame(&t, &spans(&s, &paths), Cancellation::default())
+            .unwrap();
+        assert_eq!(
+            blame_calls(temp.path(), "graphql"),
+            paths.len().div_ceil(diffz_adapters::github::BLAME_BATCH)
+        );
+        // Order is kept across batches; files not recorded come back with no ranges.
+        assert_eq!(found.len(), 5);
+        assert!(
+            found[..3]
+                .iter()
+                .all(|r| r.as_ref().is_some_and(|r| !r.is_empty()))
+        );
+        assert_eq!(found[3..], [Some(vec![]), Some(vec![])]);
+    }
+
+    #[test]
+    fn github_blame_failures_leave_the_other_files_attributed() {
+        let temp = tempfile::tempdir().unwrap();
+        let s = github(temp.path(), GH_RANGE).unwrap();
+        let t = s.remote.clone().unwrap();
+        let reader = GithubReader::new(program(temp.path()));
+        std::fs::write(temp.path().join("blame-fails"), "src/wrapper.rs").unwrap();
+        let mut partial = s.clone();
+        let found = reader
+            .blame(&t, &spans(&s, &GH_BLAMED), Cancellation::default())
+            .unwrap();
+        keep(&mut partial, &GH_BLAMED, found);
+        assert!(partial.overview.blame["src/wrapper.rs"].is_none());
+        assert!(partial.overview.blamed("src/lib.rs", 209).is_some());
+        let warning = partial.overview.unblamed_warning().unwrap();
+        assert!(warning.contains("src/wrapper.rs"), "{warning}");
+        // A query that fails outright costs its files their attribution, not the compare.
+        std::fs::write(temp.path().join("blame-down"), "").unwrap();
+        let mut down = s.clone();
+        let found = reader
+            .blame(&t, &spans(&s, &GH_BLAMED), Cancellation::default())
+            .unwrap();
+        keep(&mut down, &GH_BLAMED, found);
+        assert!(down.overview.blame.values().all(Option::is_none));
+        let warning = down.overview.unblamed_warning().unwrap();
+        assert!(warning.contains("3 files"), "{warning}");
+        assert!(
+            attributed(&down, "build.rs")
+                .iter()
+                .all(|(.., r)| r.is_none())
+        );
+    }
+
+    #[test]
+    fn gitlab_blame_reads_only_the_lines_it_needs() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut s = gitlab(
+            temp.path(),
+            "https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/compare/13.1.0...14.1.0",
+        )
+        .unwrap();
+        let t = s.remote.clone().unwrap();
+        let paths = [
+            "gitlab-styles.gemspec",
+            "lib/gitlab/styles/version.rb",
+            "README.md",
+        ];
+        let wanted = spans(&s, &paths);
+        let found = GitlabReader::new(program(temp.path()))
+            .blame(&t, &wanted, Cancellation::default())
+            .unwrap();
+        // README.md was not recorded, so GitLab's 404 stands in for a file it cannot blame.
+        assert!(found[2].is_none());
+        keep(&mut s, &paths, found);
+        let calls = calls(temp.path());
+        let blamed: Vec<_> = calls.iter().filter(|c| c.contains("/blame?")).collect();
+        assert_eq!(blamed.len(), 3);
+        let (_, first, last) = &wanted[0];
+        assert!(blamed.iter().any(|c| c.ends_with(&format!(
+            "/files/gitlab-styles.gemspec/blame?ref={GL_TO}&range[start]={first}&range[end]={last}"
+        ))));
+        assert_eq!(
+            attributed(&s, "lib/gitlab/styles/version.rb"),
+            [('-', 5, None), ('+', 5, Some(1))]
+        );
+        // The version moved in 14.1.0, while the gemspec's dependencies moved in 14.0.0.
+        let gemspec = attributed(&s, "gitlab-styles.gemspec");
+        assert_eq!(gemspec.len(), 16);
+        assert!(
+            gemspec
+                .iter()
+                .all(|(kind, _, r)| *r == (*kind == '+').then_some(0)),
+            "{gemspec:?}"
+        );
     }
 
     #[test]
@@ -679,12 +878,16 @@ mod loaded {
     #[test]
     fn compares_survive_the_store_and_are_not_pull_requests() {
         let temp = tempfile::tempdir().unwrap();
-        let s = github(temp.path(), GH_URL).unwrap();
+        let mut s = github(temp.path(), GH_URL).unwrap();
+        // Blame read once is kept, failures included, so a resumed compare needs no network.
+        s.overview.blame.insert("src/lib.rs".into(), Some(vec![]));
+        s.overview.blame.insert("build.rs".into(), None);
         let store = Arc::new(Store::open(&temp.path().join("db")).unwrap());
         store.put_snapshot(&s).unwrap();
         let back = store.snapshot(&s.id).unwrap();
         assert_eq!(back.remote, s.remote);
         assert_eq!(back.overview.releases, s.overview.releases);
+        assert_eq!(back.overview.blame, s.overview.blame);
         assert!(back.verify_identity());
         assert_ne!(gitlab(temp.path(), GL_URL).unwrap().id, s.id);
     }

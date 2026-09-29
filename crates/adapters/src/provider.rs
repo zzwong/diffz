@@ -23,7 +23,22 @@ pub trait ReviewProvider: Send + Sync {
     ) -> Result<(Vec<Release>, Vec<String>)> {
         Ok((vec![], vec![]))
     }
+    /// Who last changed lines `first..=last` of each path at the head, one entry per path.
+    /// A path whose blame could not be read is `None`; the rest still count.
+    fn blame(
+        &self,
+        _target: &RemoteTarget,
+        _spans: &[Span],
+        _cancel: Cancellation,
+    ) -> Result<Vec<Option<Blame>>> {
+        Err("This provider cannot read blame".into())
+    }
 }
+
+/// A path and the head lines `first..=last` whose blame is wanted.
+pub type Span = (String, u32, u32);
+/// Blamed `(first line, last line, commit)` ranges, in line order.
+pub type Blame = Vec<(u32, u32, String)>;
 
 pub enum SendOutcome {
     Accepted(Value),

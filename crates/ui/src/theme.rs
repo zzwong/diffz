@@ -73,6 +73,11 @@ impl Skin {
             Severity::Note => self.muted,
         }
     }
+    /// The gutter color of a compare's release `index`, cycling through the palette so that
+    /// neighboring releases differ; the diff's own added and removed colors are left out.
+    pub fn release(self, index: usize) -> Hsla {
+        [self.accent, self.function, self.warning, self.symbol][index % 4]
+    }
 }
 
 pub fn ui_font() -> &'static str {

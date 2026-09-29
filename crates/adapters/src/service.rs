@@ -211,6 +211,44 @@ impl WorkbenchServices for Services {
             .collect())
     }
 
+    fn blame(
+        &self,
+        mut s: Snapshot,
+        paths: Vec<String>,
+        cancel: Cancellation,
+    ) -> std::result::Result<Snapshot, ServiceError> {
+        use diffz_core::review_details::{UNBLAMED, attribute, blame_span};
+        let target = s
+            .remote
+            .clone()
+            .ok_or("Release attribution needs a hosted compare")?;
+        let spans: Vec<_> = paths
+            .into_iter()
+            .filter_map(|path| {
+                let file = s.patch.files.iter().find(|f| f.display_path() == path)?;
+                let (first, last) = blame_span(&s.overview, file)?;
+                Some((path, first, last))
+            })
+            .collect();
+        let found = {
+            let _permit = self
+                .permit(&cancel)
+                .map_err(|e| ServiceError::from(e.to_string()))?;
+            self.provider_for(&target.provider)
+                .and_then(|p| p.blame(&target, &spans, cancel))
+                .unwrap_or_else(|_| vec![None; spans.len()])
+        };
+        for ((path, _, _), ranges) in spans.into_iter().zip(found) {
+            let attributed = ranges.map(|r| attribute(&s.overview.releases, &r));
+            s.overview.blame.insert(path, attributed);
+        }
+        s.warnings.retain(|w| !w.starts_with(UNBLAMED));
+        s.warnings.extend(s.overview.unblamed_warning());
+        self.store
+            .put_snapshot(&s)
+            .map_err(|e| ServiceError::from(e.to_string()))?;
+        Ok(s)
+    }
     fn open(&self, r: OpenRequest, c: Cancellation) -> std::result::Result<Opened, ServiceError> {
         self.load(r, c).map_err(Into::into)
     }
@@ -760,6 +798,7 @@ mod tests {
                 path: path.into(),
                 additions: 1,
                 deletions: 0,
+                previous: None,
             }
         }
         fn release(tag: &str, files: Vec<ReleaseFile>) -> Release {
@@ -771,6 +810,7 @@ mod tests {
                 files,
                 notes: None,
                 url: None,
+                shas: vec![],
             }
         }
         impl ReviewProvider for Fake {

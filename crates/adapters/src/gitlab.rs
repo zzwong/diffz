@@ -3,7 +3,7 @@ use crate::{
     Result,
     github::{HttpResponse, decode_http, decode_path, quote_path, ref_name},
     process::{ProcessRequest, Runner},
-    provider::{ReviewProvider, ReviewRemote, SendOutcome},
+    provider::{Blame, ReviewProvider, ReviewRemote, SendOutcome, Span},
 };
 use diffz_core::{
     domain::*,
@@ -469,7 +469,7 @@ impl GitlabReader {
         t: &RemoteTarget,
         c: Cancellation,
     ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
-        use crate::releases::{TAG_PAGES, bounded, folded_warning, steps};
+        use crate::releases::{TAG_PAGES, bounded, folded_warning, members, steps};
         use diffz_core::review_details::{Release, ReleaseFile};
         let refs = t.compare.as_ref().ok_or("only a compare has releases")?;
         let path = format!("{}/{}", t.repository.owner, t.repository.name);
@@ -538,6 +538,20 @@ impl GitlabReader {
         let released = notes.keys().cloned().collect();
         let (steps, folded) = steps(&range, from, to, &tags, &released);
         warnings.extend(folded_warning(&folded));
+        let graph: Vec<(String, Vec<String>)> = commits
+            .iter()
+            .zip(&range)
+            .map(|(v, (id, _))| {
+                let parents = v["parent_ids"].as_array().map_or(&[][..], Vec::as_slice);
+                (
+                    id.clone(),
+                    (0..parents.len())
+                        .filter_map(|i| sha(v, &format!("/parent_ids/{i}")).ok())
+                        .collect(),
+                )
+            })
+            .collect();
+        let shas = members(&graph, &steps);
         let stats = |v: &Value| {
             let diffs = v["diffs"].as_array().map_or(&[][..], Vec::as_slice);
             (
@@ -559,6 +573,10 @@ impl GitlabReader {
                             path: d["new_path"].as_str().unwrap_or_default().into(),
                             additions,
                             deletions,
+                            previous: d["old_path"]
+                                .as_str()
+                                .filter(|_| d["renamed_file"] == true)
+                                .map(str::to_owned),
                         }
                     })
                     .collect::<Vec<_>>(),
@@ -590,7 +608,8 @@ impl GitlabReader {
         let releases = steps
             .into_iter()
             .zip(stats)
-            .map(|(step, (cut, commits, files))| {
+            .zip(shas)
+            .map(|((step, (cut, commits, files)), shas)| {
                 if cut {
                     warnings.push(format!(
                         "GitLab timed out or reached its file limit comparing {}, so the file tree may leave some of its files out.",
@@ -613,6 +632,7 @@ impl GitlabReader {
                     commit: step.to,
                     commits,
                     files,
+                    shas,
                 }
             })
             .collect();
@@ -755,6 +775,47 @@ impl GitlabReader {
         );
         s.overview = overview;
         Ok(s)
+    }
+}
+impl GitlabReader {
+    /// Head blame for each span, one call per file asking only for the span's lines.
+    /// A file that cannot be read is `None`.
+    pub fn blame(
+        &self,
+        t: &RemoteTarget,
+        spans: &[Span],
+        cancel: Cancellation,
+    ) -> Result<Vec<Option<Blame>>> {
+        let a = MrAddress::from_target(t);
+        let project = crate::github::encode_path(&a.project).replace('/', "%2F");
+        crate::releases::bounded(spans, |(path, first, last)| {
+            let v = self.get(
+                &a,
+                &format!(
+                    "projects/{project}/repository/files/{}/blame?ref={}&range[start]={first}&range[end]={last}",
+                    crate::github::encode_path(path).replace('/', "%2F"),
+                    t.head
+                ),
+                cancel.clone(),
+            );
+            // GitLab groups consecutive lines by commit, numbered from the span's first line.
+            let mut line = *first;
+            Ok(v.ok().and_then(|v| {
+                v.as_array()?
+                    .iter()
+                    .map(|group| {
+                        let n = u32::try_from(group["lines"].as_array()?.len()).ok()?;
+                        let range = (
+                            line,
+                            line + n.checked_sub(1)?,
+                            sha(group, "/commit/id").ok()?,
+                        );
+                        line += n;
+                        Some(range)
+                    })
+                    .collect()
+            }))
+        })
     }
 }
 fn string(v: &Value, key: &str) -> Result<String> {
@@ -1181,6 +1242,14 @@ impl ReviewProvider for GitlabProvider {
         cancel: Cancellation,
     ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
         self.reader()?.releases(t, cancel)
+    }
+    fn blame(
+        &self,
+        t: &RemoteTarget,
+        spans: &[Span],
+        cancel: Cancellation,
+    ) -> Result<Vec<Option<Blame>>> {
+        self.reader()?.blame(t, spans, cancel)
     }
 }
 

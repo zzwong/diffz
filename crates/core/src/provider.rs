@@ -140,6 +140,17 @@ pub trait WorkbenchServices: Send + Sync {
     ) -> Result<Vec<String>, ServiceError> {
         Err("Provider source context cannot be retrieved".into())
     }
+    /// Reads the head blame of `paths` in a compare of releases, attributes their added lines
+    /// to those releases, and saves the snapshot with the result, which comes back. A file
+    /// whose blame could not be read is kept as `None` and named in one warning.
+    fn blame(
+        &self,
+        _snapshot: Snapshot,
+        _paths: Vec<String>,
+        _cancel: Cancellation,
+    ) -> Result<Snapshot, ServiceError> {
+        Err("Release attribution cannot be read here".into())
+    }
     fn save_draft(&self, draft: Draft) -> Result<u64, ServiceError>;
     fn discard_draft(&self, id: DraftId, version: u64) -> Result<(), ServiceError>;
     fn save_view(&self, snapshot: &SnapshotId, view: SavedView) -> Result<(), ServiceError>;

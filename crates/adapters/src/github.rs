@@ -2,7 +2,7 @@
 use crate::{
     AdapterError, Result,
     process::{ProcessOutput, ProcessRequest, Runner, stderr_excerpt},
-    provider::{ReviewProvider, ReviewRemote, SendOutcome},
+    provider::{Blame, ReviewProvider, ReviewRemote, SendOutcome, Span},
 };
 use diffz_core::{
     domain::*,
@@ -920,7 +920,7 @@ impl GithubReader {
         t: &RemoteTarget,
         cancel: Cancellation,
     ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
-        use crate::releases::{TAG_PAGES, bounded, folded_warning, steps};
+        use crate::releases::{TAG_PAGES, bounded, folded_warning, members, steps};
         use diffz_core::review_details::{Release, ReleaseFile};
         let refs = t.compare.as_ref().ok_or("only a compare has releases")?;
         let (base, head, target) = (t.target_tip.as_str(), t.head.as_str(), &t.repository);
@@ -1010,6 +1010,18 @@ impl GithubReader {
         let released = notes.keys().map(|t| t.to_string()).collect();
         let (steps, folded) = steps(&range, base, head, &tags, &released);
         warnings.extend(folded_warning(&folded));
+        let graph: Vec<(String, Vec<String>)> = commits
+            .iter()
+            .zip(&range)
+            .map(|(c, (sha, _))| {
+                let parents = c["parents"].as_array().map_or(&[][..], Vec::as_slice);
+                (
+                    sha.clone(),
+                    parents.iter().filter_map(|p| oid(p, "/sha").ok()).collect(),
+                )
+            })
+            .collect();
+        let shas = members(&graph, &steps);
         let stats = |v: &Value| {
             let files = v["files"].as_array().map_or(&[][..], Vec::as_slice);
             (
@@ -1020,6 +1032,7 @@ impl GithubReader {
                         path: f["filename"].as_str().unwrap_or_default().into(),
                         additions: f["additions"].as_u64().unwrap_or(0),
                         deletions: f["deletions"].as_u64().unwrap_or(0),
+                        previous: f["previous_filename"].as_str().map(str::to_owned),
                     })
                     .collect::<Vec<_>>(),
             )
@@ -1048,7 +1061,8 @@ impl GithubReader {
         let releases = steps
             .into_iter()
             .zip(stats)
-            .map(|(step, (commits, files))| {
+            .zip(shas)
+            .map(|((step, (commits, files)), shas)| {
                 let name = step.tag.as_deref().unwrap_or(&refs.head);
                 if files.len() >= 300 {
                     warnings.push(format!(
@@ -1081,10 +1095,92 @@ impl GithubReader {
                     commit: step.to,
                     commits,
                     files,
+                    shas,
                 }
             })
             .collect();
         Ok((releases, warnings))
+    }
+}
+/// Blame is expensive for GitHub to compute, so one GraphQL query asks for this many files.
+pub const BLAME_BATCH: usize = 4;
+impl GithubReader {
+    /// Head blame for each span, [`BLAME_BATCH`] files to a GraphQL query. A query that fails
+    /// leaves its files `None`; ranges outside a span are dropped.
+    pub fn blame(
+        &self,
+        t: &RemoteTarget,
+        spans: &[Span],
+        cancel: Cancellation,
+    ) -> Result<Vec<Option<Blame>>> {
+        let batches: Vec<&[Span]> = spans.chunks(BLAME_BATCH).collect();
+        let found = crate::releases::bounded(&batches, |batch| {
+            Ok(self
+                .blame_batch(t, batch, cancel.clone())
+                .unwrap_or_else(|_| vec![None; batch.len()]))
+        })?;
+        Ok(found.into_iter().flatten().collect())
+    }
+    fn blame_batch(
+        &self,
+        t: &RemoteTarget,
+        batch: &[Span],
+        cancel: Cancellation,
+    ) -> Result<Vec<Option<Blame>>> {
+        // Paths travel as variables, so none is ever quoted into the query text.
+        let (params, fields): (String, String) = (0..batch.len())
+            .map(|i| {
+                (
+                    format!(", $p{i}: String!"),
+                    format!(
+                        " f{i}: blame(path: $p{i}) {{ ranges {{ startingLine endingLine commit {{ oid }} }} }}"
+                    ),
+                )
+            })
+            .unzip();
+        let mut variables = serde_json::json!({
+            "owner": t.repository.owner,
+            "name": t.repository.name,
+            "head": t.head,
+        });
+        for (i, (path, _, _)) in batch.iter().enumerate() {
+            variables[format!("p{i}")] = path.as_str().into();
+        }
+        let query = format!(
+            "query($owner: String!, $name: String!, $head: String!{params}) {{ repository(owner: $owner, name: $name) {{ object(expression: $head) {{ ... on Commit {{{fields} }} }} }} }}"
+        );
+        let r = self.request(
+            &t.repository.host,
+            "graphql",
+            "POST",
+            Some(&serde_json::json!({ "query": query, "variables": variables })),
+            "Accept: application/vnd.github+json",
+            cancel,
+        )?;
+        if r.status != 200 {
+            return Err(format!("GitHub blame failed with HTTP {}", r.status).into());
+        }
+        let v: Value = serde_json::from_slice(&r.body)?;
+        let commit = &v["data"]["repository"]["object"];
+        // A file GitHub could not blame comes back null beside an error; the others still count.
+        Ok(batch
+            .iter()
+            .enumerate()
+            .map(|(i, (_, first, last))| {
+                commit[format!("f{i}")]["ranges"]
+                    .as_array()?
+                    .iter()
+                    .map(|r| {
+                        Some((
+                            u32::try_from(r["startingLine"].as_u64()?).ok()?,
+                            u32::try_from(r["endingLine"].as_u64()?).ok()?,
+                            oid(r, "/commit/oid").ok()?,
+                        ))
+                    })
+                    .filter(|r| r.as_ref().is_none_or(|(s, e, _)| s <= last && e >= first))
+                    .collect()
+            })
+            .collect())
     }
 }
 pub fn check_row(v: &Value, kind: &str) -> diffz_core::review_details::Check {
@@ -1319,6 +1415,14 @@ impl ReviewProvider for GithubProvider {
         cancel: Cancellation,
     ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
         self.reader()?.releases(t, cancel)
+    }
+    fn blame(
+        &self,
+        t: &RemoteTarget,
+        spans: &[Span],
+        cancel: Cancellation,
+    ) -> Result<Vec<Option<Blame>>> {
+        self.reader()?.blame(t, spans, cancel)
     }
 }
 

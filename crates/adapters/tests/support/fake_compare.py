@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # Local-only transport fixture standing in for gh and glab: replays real compare responses
 # recorded from public repositories (tests/fixtures/compare) and never touches a network.
-import sys, json, pathlib
+import sys, json, pathlib, urllib.parse
 root = pathlib.Path(__file__).parent
 fixtures = pathlib.Path('FIXTURES')
 args = sys.argv[1:]
-endpoint = args[-1]
+# A request body follows the endpoint as `--input -`.
+endpoint = args[-3] if args[-2:] == ['--input', '-'] else args[-1]
 with (root / 'calls.log').open('a') as log:
     log.write(endpoint + '\n')
 host = args[args.index('--hostname') + 1]
@@ -23,7 +24,20 @@ if host == 'github.com':
     wide = load('github_range.json')
     wide_base, wide_head = wide['base_commit']['sha'], wide['commits'][-1]['sha']
     prefix = 'repos/dtolnay/anyhow'
-    if endpoint == prefix:
+    if endpoint == 'graphql':
+        # Blame queries name each path as a variable $pN, answered under the alias fN.
+        body = json.loads(sys.stdin.read())
+        blame = load('github_blame.json')
+        paths = {k[1:]: v for k, v in body['variables'].items() if k.startswith('p')}
+        failing = (root / 'blame-fails').read_text().split() if (root / 'blame-fails').exists() else []
+        if (root / 'blame-down').exists():
+            code = 502; value = {'message': 'Server Error'}
+        else:
+            found = {f'f{i}': None if p in failing else {'ranges': blame.get(p, [])} for i, p in paths.items()}
+            value = {'data': {'repository': {'object': found}}}
+            if any(p in failing for p in paths.values()):
+                value['errors'] = [{'message': 'blame timed out'}]
+    elif endpoint == prefix:
         value = load('github_repo.json')
     elif endpoint in (f'{prefix}/compare/1.0.80...1.0.81', f'{prefix}/compare/dtolnay%3A1.0.80...fork%3A1.0.81', f'{prefix}/compare/{base}...{head}'):
         if (root / 'diverged').exists():
@@ -99,6 +113,23 @@ else:
         value = load('gitlab_tags.json')
         if (root / 'blob-tag').exists():
             value.insert(0, {'name': 'gpg-pub', 'commit': None, 'release': None})
+    elif endpoint.startswith(f'{prefix}/repository/files/') and '/blame?' in endpoint:
+        # Recorded whole; a range is cut from it the way GitLab numbers it.
+        path, query = endpoint[len(prefix) + 18:].split('/blame?')
+        path = urllib.parse.unquote(path)
+        q = dict(urllib.parse.parse_qsl(query))
+        assert q['ref'] == to['id'], query
+        blame = load('gitlab_blame.json')
+        if path not in blame:
+            code = 404; value = {'message': '404 File Not Found'}
+        else:
+            lines = [(g['commit'], l) for g in blame[path] for l in g['lines']]
+            value = []
+            for commit, line in lines[int(q['range[start]']) - 1:int(q['range[end]'])]:
+                if value and value[-1]['commit'] == commit:
+                    value[-1]['lines'].append(line)
+                else:
+                    value.append({'commit': commit, 'lines': [line]})
     else:
         raise AssertionError(endpoint)
 sys.stdout.write('HTTP/1.1 %d Mock\r\nContent-Type: application/json\r\n\r\n' % code)
