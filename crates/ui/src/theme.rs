@@ -74,9 +74,17 @@ impl Skin {
         }
     }
     /// The gutter color of a compare's release `index`, cycling through the palette so that
-    /// neighboring releases differ; the diff's own added and removed colors are left out.
+    /// neighboring releases differ. The diff's own added and removed colors are left out, and
+    /// so is `muted`, which marks a line whose release is unknown.
     pub fn release(self, index: usize) -> Hsla {
-        [self.accent, self.function, self.warning, self.symbol][index % 4]
+        let colors = [
+            self.accent,
+            self.function,
+            self.warning,
+            self.symbol,
+            self.text,
+        ];
+        colors[index % colors.len()]
     }
 }
 

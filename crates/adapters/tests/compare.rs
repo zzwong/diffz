@@ -202,7 +202,7 @@ mod loaded {
     use diffz_core::{
         patch::RowKind,
         provider::Cancellation,
-        review_details::{Release, attribute, blame_span},
+        review_details::{Release, attribute, blame_span, with_blame},
     };
     use std::{path::Path, sync::Arc};
 
@@ -595,7 +595,8 @@ mod loaded {
             blame_calls(temp.path(), "graphql"),
             paths.len().div_ceil(diffz_adapters::github::BLAME_BATCH)
         );
-        // Order is kept across batches; files not recorded come back with no ranges.
+        // Order is kept across batches; files not recorded come back with no ranges, which the
+        // service counts as unavailable (see `blame_that_failed_or_was_cancelled_is_read_again`).
         assert_eq!(found.len(), 5);
         assert!(
             found[..3]
@@ -635,6 +636,60 @@ mod loaded {
             attributed(&down, "build.rs")
                 .iter()
                 .all(|(.., r)| r.is_none())
+        );
+    }
+
+    #[test]
+    fn blame_that_failed_or_was_cancelled_is_read_again() {
+        use diffz_adapters::{github::GithubProvider, service::Services};
+        use diffz_core::provider::WorkbenchServices;
+        let temp = tempfile::tempdir().unwrap();
+        let mut services = Services::new(&temp.path().join("state"), false).unwrap();
+        let reader = GithubReader::new(program(temp.path()));
+        services.register(Arc::new(GithubProvider::new(Some(Arc::new(reader)))), false);
+        let open = |request| {
+            let opened = services.open(request, Cancellation::default()).unwrap();
+            Arc::new(opened.snapshot)
+        };
+        let s = open(OpenRequest::Remote {
+            provider: ProviderId::GITHUB,
+            address: GH_RANGE.into(),
+        });
+        let resume = || OpenRequest::Resume(s.id.clone());
+        let paths: Vec<String> = GH_BLAMED
+            .iter()
+            .chain(&["src/fmt.rs"])
+            .map(|p| p.to_string())
+            .collect();
+        // A cancelled read is an error rather than files that failed, so there is nothing to keep.
+        let cancel = Cancellation::default();
+        cancel.cancel();
+        assert!(services.blame(s.clone(), paths.clone(), cancel).is_err());
+        // A read that fails outright counts against its files for this session only.
+        std::fs::write(temp.path().join("blame-down"), "").unwrap();
+        let found = services
+            .blame(s.clone(), paths.clone(), Cancellation::default())
+            .unwrap();
+        assert_eq!(found.len(), 4);
+        assert!(found.values().all(Option::is_none));
+        services.save_blame(&with_blame(&s, found)).unwrap();
+        let back = open(resume());
+        assert!(back.overview.blame.is_empty());
+        // The next session reads them again. A path GitHub answers with no ranges is unavailable.
+        std::fs::remove_file(temp.path().join("blame-down")).unwrap();
+        let found = services
+            .blame(back.clone(), paths, Cancellation::default())
+            .unwrap();
+        assert!(found["src/lib.rs"].as_ref().is_some_and(|b| !b.is_empty()));
+        assert!(found["src/fmt.rs"].is_none());
+        let merged = with_blame(&back, found);
+        let warning = merged.overview.unblamed_warning().unwrap();
+        assert!(warning.contains("src/fmt.rs"), "{warning}");
+        services.save_blame(&merged).unwrap();
+        let saved = open(resume()).overview.blame.clone();
+        assert_eq!(
+            saved.keys().collect::<Vec<_>>(),
+            ["build.rs", "src/lib.rs", "src/wrapper.rs"]
         );
     }
 
@@ -841,6 +896,7 @@ mod loaded {
         assert_eq!(s.patch.files.len(), 11);
         assert_eq!(s.warnings.len(), 2, "{:?}", s.warnings);
         assert!(s.warnings[0].contains("timed out"));
+        assert!(s.warnings[0].contains("release attribution"));
         assert!(s.warnings[1].contains("too large or collapsed"));
     }
 
@@ -879,7 +935,7 @@ mod loaded {
     fn compares_survive_the_store_and_are_not_pull_requests() {
         let temp = tempfile::tempdir().unwrap();
         let mut s = github(temp.path(), GH_URL).unwrap();
-        // Blame read once is kept, failures included, so a resumed compare needs no network.
+        // Blame read once is kept, so a resumed compare needs no network; failures are not.
         s.overview.blame.insert("src/lib.rs".into(), Some(vec![]));
         s.overview.blame.insert("build.rs".into(), None);
         let store = Arc::new(Store::open(&temp.path().join("db")).unwrap());
@@ -887,7 +943,10 @@ mod loaded {
         let back = store.snapshot(&s.id).unwrap();
         assert_eq!(back.remote, s.remote);
         assert_eq!(back.overview.releases, s.overview.releases);
-        assert_eq!(back.overview.blame, s.overview.blame);
+        assert_eq!(
+            back.overview.blame.keys().collect::<Vec<_>>(),
+            ["src/lib.rs"]
+        );
         assert!(back.verify_identity());
         assert_ne!(gitlab(temp.path(), GL_URL).unwrap().id, s.id);
     }

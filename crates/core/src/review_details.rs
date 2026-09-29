@@ -17,9 +17,19 @@ pub struct Overview {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub releases: Vec<Release>,
     /// Head-side lines per path, attributed to the releases that last changed them. Filled one
-    /// file at a time as files are shown; `None` where the blame could not be read.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub blame: std::collections::BTreeMap<String, Option<Vec<Blamed>>>,
+    /// file at a time as files are shown; `None` where the blame could not be read, which is
+    /// kept for this session only, so a later one reads it again.
+    #[serde(
+        default,
+        skip_serializing_if = "BlameRead::is_empty",
+        serialize_with = "read_blame"
+    )]
+    pub blame: BlameRead,
+}
+/// Per path, the attributed head lines, or `None` where the blame could not be read.
+pub type BlameRead = std::collections::BTreeMap<String, Option<Vec<Blamed>>>;
+fn read_blame<S: serde::Serializer>(blame: &BlameRead, s: S) -> Result<S::Ok, S::Error> {
+    s.collect_map(blame.iter().filter(|(_, b)| b.is_some()))
 }
 /// One step of a compare: from the previous release (or the merge base) to `commit`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,9 +117,13 @@ pub fn attribute(releases: &[Release], ranges: &[(u32, u32, String)]) -> Vec<Bla
 /// Opens the one warning that names every file whose blame could not be read.
 pub const UNBLAMED: &str = "Release attribution is unavailable for";
 /// Head lines `first..=last` around `file`'s added lines, while a compare of two releases or
-/// more has not yet read that file's blame. Files without added lines need none.
+/// more has not yet read that file's blame. Files without added lines need none, and neither
+/// do releases saved before they carried their commits, since no line could be attributed.
 pub fn blame_span(overview: &Overview, file: &crate::patch::FileChange) -> Option<(u32, u32)> {
-    if overview.releases.len() < 2 || overview.blame.contains_key(&file.display_path()) {
+    if overview.releases.len() < 2
+        || overview.releases.iter().all(|r| r.shas.is_empty())
+        || overview.blame.contains_key(&file.display_path())
+    {
         return None;
     }
     file.hunks
@@ -122,6 +136,20 @@ pub fn blame_span(overview: &Overview, file: &crate::patch::FileChange) -> Optio
                 (first.min(n), last.max(n))
             }))
         })
+}
+/// `from` with `found` laid over its blame. It copies the snapshot, so it belongs off the UI thread.
+pub fn with_blame(from: &crate::domain::Snapshot, found: BlameRead) -> crate::domain::Snapshot {
+    let mut s = from.clone();
+    s.overview.blame.extend(found);
+    s
+}
+/// Whether blame read from `from` may still be laid over `current`: only while `current` is
+/// `from` itself. A reload replaces it even under the same id, and may number the releases anew.
+pub fn blame_applies(
+    current: &std::sync::Arc<crate::domain::Snapshot>,
+    from: &std::sync::Arc<crate::domain::Snapshot>,
+) -> bool {
+    std::sync::Arc::ptr_eq(current, from)
 }
 impl Overview {
     /// Names the files whose blame could not be read, if any.

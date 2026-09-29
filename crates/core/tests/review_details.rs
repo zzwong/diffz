@@ -312,9 +312,11 @@ fn blame_is_wanted_once_per_file_and_only_across_releases() {
         ..Default::default()
     };
     assert_eq!(blame_span(&overview, file), None);
-    overview
-        .releases
-        .push(release("v2", &["b"], &[(&path, None)]));
+    // Releases saved before they carried their commits could attribute nothing.
+    overview.releases.push(release("v2", &[], &[(&path, None)]));
+    overview.releases[0].shas.clear();
+    assert_eq!(blame_span(&overview, file), None);
+    overview.releases[1] = release("v2", &["b"], &[(&path, None)]);
     let added: Vec<u32> = file
         .hunks
         .iter()
@@ -337,4 +339,31 @@ fn blame_is_wanted_once_per_file_and_only_across_releases() {
         warning.starts_with(UNBLAMED) && warning.contains("2 files"),
         "{warning}"
     );
+    // Failures last only the session, so a snapshot saved and read back asks for them again.
+    let back: Overview = serde_json::from_str(&serde_json::to_string(&overview).unwrap()).unwrap();
+    assert_eq!(back.blame.keys().collect::<Vec<_>>(), ["c.rs"]);
+    assert!(back.unblamed_warning().is_none());
+    assert!(blame_span(&back, file).is_some());
+}
+#[test]
+fn blame_lands_only_on_the_snapshot_it_was_read_from() {
+    use std::sync::Arc;
+    let from = Arc::new(Snapshot::new(
+        "test".into(),
+        parse_patch(
+            include_bytes!("../../../fixtures/split-asymmetric/change.patch"),
+            ParseLimits::default(),
+        )
+        .unwrap(),
+        None,
+        vec![],
+    ));
+    let found: BlameRead = [("a.rs".to_string(), Some(vec![]))].into();
+    let merged = with_blame(&from, found);
+    assert!(merged.overview.blame.contains_key("a.rs") && from.overview.blame.is_empty());
+    assert!(blame_applies(&from, &from));
+    // A reload in between keeps the id but replaces the snapshot, so the read is dropped.
+    let reloaded = Arc::new((*from).clone());
+    assert_eq!(reloaded.id, from.id);
+    assert!(!blame_applies(&reloaded, &from));
 }

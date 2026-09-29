@@ -119,7 +119,7 @@ impl Workbench {
                     else if refresh{let snapshot=Arc::new(opened.snapshot);if let Some(a)=&mut app.active{a.snapshot=snapshot.clone();}
 if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}
 // The release list is read again, so indexes into the old one no longer hold.
-app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);
+app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);app.mark_releases();app.fetch_blame(cx);
 app.status="Source unchanged; comment list and review state refreshed without moving the view.".into();}
                     else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>app.status=e.message,
             }cx.notify();});
@@ -350,7 +350,7 @@ app.status="Source unchanged; comment list and review state refreshed without mo
         .detach();
     }
     /// Reads release attribution for the shown file and the few after it in the tree. One read
-    /// runs at a time, and each starts from the snapshot the last one returned.
+    /// runs at a time, and its result is shown and saved only if no reload came in between.
     fn fetch_blame(&mut self, cx: &mut Context<Self>) {
         /// The shown file and this many after it are read together.
         const AHEAD: usize = 3;
@@ -375,30 +375,52 @@ app.status="Source unchanged; comment list and review state refreshed without mo
             return;
         }
         self.blame_busy = true;
-        let snapshot = (*a.snapshot).clone();
+        let from = a.snapshot.clone();
         let services = self.services.clone();
         let cancel = self.open_cancel.clone();
         cx.spawn(async move |this, cx| {
+            let read = from.clone();
+            let cancelled = cancel.clone();
             let result = cx
-                .background_spawn(async move { services.blame(snapshot, paths, cancel) })
+                .background_spawn(async move {
+                    let found = services.blame(read.clone(), paths, cancel)?;
+                    Ok::<_, ServiceError>(Arc::new(diffz_core::review_details::with_blame(
+                        &read, found,
+                    )))
+                })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.blame_busy = false;
-                let current =
-                    |id: &SnapshotId| app.active.as_ref().is_some_and(|a| a.snapshot.id == *id);
                 match result {
-                    Ok(s) if current(&s.id) => {
-                        let snapshot = Arc::new(s);
+                    Ok(s)
+                        if app.active.as_ref().is_some_and(|a| {
+                            diffz_core::review_details::blame_applies(&a.snapshot, &from)
+                        }) =>
+                    {
                         if let Some(v) = &app.viewport {
-                            v.borrow_mut().snapshot = snapshot.clone();
+                            v.borrow_mut().snapshot = s.clone();
                         }
                         if let Some(a) = &mut app.active {
-                            a.snapshot = snapshot;
+                            a.snapshot = s.clone();
                         }
                         app.mark_releases();
+                        let services = app.services.clone();
+                        cx.spawn(async move |this, cx| {
+                            let saved = cx
+                                .background_spawn(async move { services.save_blame(&s) })
+                                .await;
+                            if let Err(e) = saved {
+                                let _ = this.update(cx, |app, cx| {
+                                    app.status = e.message;
+                                    cx.notify();
+                                });
+                            }
+                        })
+                        .detach();
                     }
+                    // A reload replaced the snapshot, or cancelled the read, while it ran.
                     Ok(_) => {}
-                    // Unreadable blame already comes back as a warning; this is the store failing.
+                    Err(_) if cancelled.cancelled() => {}
                     Err(e) => {
                         app.status = e.message;
                         cx.notify();

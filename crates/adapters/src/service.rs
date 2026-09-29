@@ -79,6 +79,7 @@ impl Services {
         services.register(Arc::new(GitlabProvider::new(glab)), gitlab_writes);
         Ok(services)
     }
+    /// Adds a provider; one registered later for the same id takes the place of the first.
     pub fn register(&mut self, provider: Arc<dyn ReviewProvider>, writes: bool) {
         let rules = provider.rules();
         if writes && let Ok(remote) = provider.remote() {
@@ -90,6 +91,7 @@ impl Services {
     fn provider_for(&self, id: &ProviderId) -> Result<&Arc<dyn ReviewProvider>> {
         self.providers
             .iter()
+            .rev()
             .find(|p| p.rules().id() == *id)
             .ok_or_else(|| format!("No review provider named {id} is available").into())
     }
@@ -213,14 +215,14 @@ impl WorkbenchServices for Services {
 
     fn blame(
         &self,
-        mut s: Snapshot,
+        s: Arc<Snapshot>,
         paths: Vec<String>,
         cancel: Cancellation,
-    ) -> std::result::Result<Snapshot, ServiceError> {
-        use diffz_core::review_details::{UNBLAMED, attribute, blame_span};
+    ) -> std::result::Result<diffz_core::review_details::BlameRead, ServiceError> {
+        use diffz_core::review_details::{attribute, blame_span};
         let target = s
             .remote
-            .clone()
+            .as_ref()
             .ok_or("Release attribution needs a hosted compare")?;
         let spans: Vec<_> = paths
             .into_iter()
@@ -235,19 +237,28 @@ impl WorkbenchServices for Services {
                 .permit(&cancel)
                 .map_err(|e| ServiceError::from(e.to_string()))?;
             self.provider_for(&target.provider)
-                .and_then(|p| p.blame(&target, &spans, cancel))
+                .and_then(|p| p.blame(target, &spans, cancel.clone()))
                 .unwrap_or_else(|_| vec![None; spans.len()])
         };
-        for ((path, _, _), ranges) in spans.into_iter().zip(found) {
-            let attributed = ranges.map(|r| attribute(&s.overview.releases, &r));
-            s.overview.blame.insert(path, attributed);
+        // A cancelled read fails its files for no reason of theirs, so none of it counts.
+        if cancel.cancelled() {
+            return Err("Release attribution was cancelled".into());
         }
-        s.warnings.retain(|w| !w.starts_with(UNBLAMED));
-        s.warnings.extend(s.overview.unblamed_warning());
+        Ok(spans
+            .into_iter()
+            .zip(found)
+            .map(|((path, _, _), ranges)| {
+                // Added lines always blame to some commit, so no ranges at all is a path the
+                // provider could not resolve.
+                let ranges = ranges.filter(|r| !r.is_empty());
+                (path, ranges.map(|r| attribute(&s.overview.releases, &r)))
+            })
+            .collect())
+    }
+    fn save_blame(&self, s: &Snapshot) -> std::result::Result<(), ServiceError> {
         self.store
-            .put_snapshot(&s)
-            .map_err(|e| ServiceError::from(e.to_string()))?;
-        Ok(s)
+            .put_snapshot(s)
+            .map_err(|e| ServiceError::from(e.to_string()))
     }
     fn open(&self, r: OpenRequest, c: Cancellation) -> std::result::Result<Opened, ServiceError> {
         self.load(r, c).map_err(Into::into)

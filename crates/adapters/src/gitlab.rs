@@ -421,7 +421,7 @@ impl GitlabReader {
         );
         if compare["compare_timeout"] == true || diffs.len() >= DIFF_FILES {
             s.warnings.push(
-                "GitLab timed out computing this compare or reached its file limit, so its file list may be incomplete"
+                "GitLab timed out computing this compare or reached its file limit, so its file list, release timeline, and release attribution may be incomplete"
                     .into(),
             );
         }
