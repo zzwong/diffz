@@ -38,6 +38,10 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The timer that stops a runaway extension annotator ticks only while one is
   running. Before, once any extension had annotated, it woke diffz about 100
   times a second for the rest of the session.
+- A text field's cursor stops blinking, and stays visible, after 5 seconds
+  without input, and stops while the window is inactive; typing or clicking
+  resumes it. Before, a focused field such as the Open panel's woke diffz
+  twice a second for as long as it kept focus.
 
 ### Fixed
 
