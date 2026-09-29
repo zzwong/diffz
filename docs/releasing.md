@@ -13,7 +13,11 @@ Arch pin.
 
 After that PR merges, compute the source archive from its tested merge commit
 with the same Arch Linux Git tooling used by CI and record its SHA-256. A
-macOS-generated Git archive can have a different checksum. Then open a small
+macOS-generated Git archive can have a different checksum, so run
+`scripts/arch-source-sha256.sh <commit> <version>`. It builds the archive in a
+`linux/amd64` Arch container, since the Arch image has no arm64 variant and an
+unchecked pipeline in an arm64 container hashes an empty archive, and it refuses
+implausibly small output. Then open a small
 Arch-pin PR that sets
 `pkgver`, `pkgrel`, `_commit`, and `sha256sums` in
 `packaging/arch/PKGBUILD`; `_commit` must point to the tested release-preparation
