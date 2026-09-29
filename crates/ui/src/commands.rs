@@ -2,6 +2,7 @@ use gpui_kit::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Open,
+    PasteOpen,
     Recent,
     Find,
     Files,
@@ -31,6 +32,11 @@ pub enum Command {
 pub const COMMANDS: &[(Command, &str, &str)] = &[
     (Command::Recent, "Switch recent review", "primary-shift-o"),
     (Command::Open, "Open source", "primary-o"),
+    (
+        Command::PasteOpen,
+        "Open address from clipboard",
+        "primary-v",
+    ),
     (Command::Find, "Find in loaded diff", "primary-f"),
     (Command::Files, "Toggle files", "primary-b"),
     (Command::Inspector, "Toggle review overview", "primary-i"),
@@ -72,6 +78,7 @@ actions!(
     workbench,
     [
         Open,
+        PasteOpen,
         Recent,
         Find,
         Files,
@@ -190,6 +197,7 @@ pub const SHEET: &[SheetGroup] = &[
             run(&[Command::Palette], "command palette"),
             run(&[Command::Keys], "this list of keys"),
             run(&[Command::Open], "open a source"),
+            run(&[Command::PasteOpen], "open address from clipboard"),
             run(&[Command::Recent], "switch recent review"),
             fixed(&[("", "Tab")], "move focus"),
             run(&[Command::Cancel], "close / clear selection"),
@@ -215,6 +223,7 @@ pub fn menus() -> Vec<Menu> {
         Menu::new("diffz").items([MenuItem::action("Quit diffz", Quit)]),
         Menu::new("File").items([
             MenuItem::action("Open Source…", Open),
+            MenuItem::action("Open Address from Clipboard", PasteOpen),
             MenuItem::action("Switch Recent Review…", Recent),
             MenuItem::separator(),
             MenuItem::action("Check for New Revision", Refresh),
@@ -255,6 +264,9 @@ pub fn bind(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new(&key("primary-shift-o"), Recent, Some("Workbench")),
         KeyBinding::new(&key("primary-o"), Open, Some("Workbench")),
+        // A focused text field binds paste in its own, deeper context, so this one applies
+        // only outside inputs.
+        KeyBinding::new(&key("primary-v"), PasteOpen, Some("Workbench")),
         KeyBinding::new(&key("primary-f"), Find, Some("Workbench")),
         KeyBinding::new(&key("primary-b"), Files, Some("Workbench")),
         KeyBinding::new(&key("primary-i"), Inspector, Some("Workbench")),

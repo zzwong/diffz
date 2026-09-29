@@ -37,6 +37,34 @@ impl Workbench {
             self.panel == Panel::Preview && self.prepared.is_some(),
         )
     }
+    /// Follows the Open panel's text: a recognized source selects its tab and is named beside the
+    /// field. Text that is not recognized leaves the tab as it was chosen.
+    pub(crate) fn detect_source_mode(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.detected = None;
+        if let Some(found) = self.services.detect(text) {
+            let (mode, hint) = match &found.request {
+                OpenRequest::Remote { provider, .. } => (
+                    SourceMode::Remote(provider.clone()),
+                    self.services
+                        .provider(provider)
+                        .map(|p| p.address_hint().to_string()),
+                ),
+                _ => (SourceMode::Patch, Some("/path/to/change.patch".to_string())),
+            };
+            if let Some(hint) = hint.filter(|_| mode != self.source_mode) {
+                self.open_input
+                    .update(cx, |input, cx| input.set_placeholder(hint, window, cx));
+            }
+            self.source_mode = mode;
+            self.detected = Some(found.label);
+        }
+        cx.notify();
+    }
     pub(super) fn open_pending(
         &mut self,
         request: OpenRequest,

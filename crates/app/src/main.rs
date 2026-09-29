@@ -4,7 +4,7 @@ use diffz_adapters::{
     github::GithubTarget,
     gitlab::GitlabTarget,
     process::{read_bounded, resolve_program},
-    service::{Services, default_state_dir, remote_provider},
+    service::{Services, default_state_dir, detect_source},
 };
 use diffz_core::{
     domain::ProviderId,
@@ -69,19 +69,18 @@ request and comes to the front; otherwise a new window starts in the background.
 exit status says whether the request was taken. --help, --version, --doctor, --inspect,
 and --probe never hand off or detach.
 
-Run with no arguments and diffz shows the fixture named F01. Repositories are only read:
+Run with no arguments and diffz shows the Open panel. Repositories are only read:
 diffz will not check out, stage, or alter anything in them. All network access
 happens inside gh or glab; writes additionally need an --allow-*-writes flag.
 "#;
 #[derive(Debug)]
 struct Options {
-    request: OpenRequest,
+    /// `None` when the command line named no source.
+    request: Option<OpenRequest>,
     state: Option<PathBuf>,
     writes: bool,
     gitlab_writes: bool,
     inspect: bool,
-    /// Whether the command line named a source; otherwise `request` is the default fixture.
-    requested: bool,
     foreground: bool,
     json: bool,
     font: Option<String>,
@@ -164,14 +163,13 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
             _ => bail!("unknown argument {arg:?}; use --help"),
         }
     }
-    let requested = source.is_some();
     let mut request = match source {
-        Some(OpenRequest::Patch(path)) if positional => detect(path)?,
-        source => source.unwrap_or(OpenRequest::Fixture("F01".into())),
+        Some(OpenRequest::Patch(path)) if positional => Some(detect(path)?),
+        source => source,
     };
-    if let OpenRequest::LocalGit {
+    if let Some(OpenRequest::LocalGit {
         base: b, head: h, ..
-    } = &mut request
+    }) = &mut request
     {
         *b = base;
         *h = head;
@@ -185,7 +183,6 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
         writes,
         gitlab_writes,
         inspect,
-        requested,
         foreground,
         json,
         font,
@@ -194,19 +191,13 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
         probe_output,
     })
 }
-/// A lone argument is a patch when that path exists, and otherwise the address of whichever
+/// A lone argument is a patch when that path is a file, and otherwise the address of whichever
 /// review provider's parser accepts it, passed on unchanged.
 fn detect(path: PathBuf) -> Result<OpenRequest> {
-    if path.exists() {
-        return Ok(OpenRequest::Patch(path));
-    }
-    if let Some(address) = path.to_str()
-        && let Some(provider) = remote_provider(address)
+    if let Some(input) = path.to_str()
+        && let Some(detected) = detect_source(input)
     {
-        return Ok(OpenRequest::Remote {
-            provider,
-            address: address.to_string(),
-        });
+        return Ok(detected.request);
     }
     bail!(
         "{:?} is neither a file nor a review address; pass a patch file, owner/repo#N or a \
@@ -434,10 +425,7 @@ fn hand_off(options: &Options, state: &Path) -> Result<()> {
 /// The request a later invocation hands over; `None` when the command line named no source.
 #[cfg(all(unix, feature = "desktop"))]
 fn handed_request(options: &Options) -> Result<Option<OpenRequest>> {
-    Ok(match options.requested {
-        true => Some(absolute(options.request.clone())?),
-        false => None,
-    })
+    options.request.clone().map(absolute).transpose()
 }
 /// Prints the outcome of a handoff as one JSON line. The outcome alone sets the exit status: a
 /// request the window took stays taken when stdout is gone.
@@ -538,7 +526,7 @@ fn run() -> Result<()> {
     #[cfg(not(feature = "desktop"))]
     let _ = &options.font;
     #[cfg(not(all(unix, feature = "desktop")))]
-    let _ = (options.requested, options.foreground, options.json);
+    let _ = (options.foreground, options.json);
     let _ = &options.theme;
     if let (Some(source), Some(output)) = (options.probe.take(), options.probe_output.take()) {
         let source = String::from_utf8(read_bounded(&source, 1024 * 1024)?)
@@ -587,7 +575,10 @@ fn run() -> Result<()> {
     let services: Arc<dyn WorkbenchServices> = Arc::new(services);
     diffz_core::timing::mark("services");
     if options.inspect {
-        let opened = services.open(options.request, Cancellation::default())?;
+        let request = options
+            .request
+            .context("--inspect needs a source; use --help")?;
+        let opened = services.open(request, Cancellation::default())?;
         return print(&serde_json::to_string_pretty(&opened.snapshot)?);
     }
     #[cfg(feature = "desktop")]
@@ -634,11 +625,17 @@ fn run() -> Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn default_is_offline() {
-        assert!(matches!(
-            parse(Vec::<String>::new()).unwrap().request,
-            OpenRequest::Fixture(_)
-        ));
+    fn no_arguments_name_no_source() {
+        assert!(parse(Vec::<String>::new()).unwrap().request.is_none());
+    }
+    #[test]
+    fn a_fixture_is_only_opened_when_named() {
+        assert_eq!(
+            parse(["--fixture", "F01"].map(str::to_string))
+                .unwrap()
+                .request,
+            Some(OpenRequest::Fixture("F01".into()))
+        );
     }
     /// An existing patch file whose path contains a space.
     fn patch_file() -> (tempfile::TempDir, String) {
@@ -654,7 +651,7 @@ mod tests {
         let (_dir, path) = patch_file();
         assert!(matches!(
             parse([path.clone(), "--inspect".into()]).unwrap().request,
-            OpenRequest::Patch(p) if p == std::path::Path::new(&path)
+            Some(OpenRequest::Patch(p)) if p == std::path::Path::new(&path)
         ));
     }
     #[test]
@@ -677,13 +674,12 @@ mod tests {
             ),
         ] {
             let options = parse([address.to_string()]).unwrap();
-            assert!(options.requested);
             assert_eq!(
                 options.request,
-                OpenRequest::Remote {
+                Some(OpenRequest::Remote {
                     provider,
                     address: address.into()
-                }
+                })
             );
         }
     }
@@ -711,7 +707,7 @@ mod tests {
     #[test]
     fn launch_flags_are_parsed() {
         let options = parse(["--foreground", "--json"].map(str::to_string)).unwrap();
-        assert!(options.foreground && options.json && !options.requested);
+        assert!(options.foreground && options.json && options.request.is_none());
         let options = parse(Vec::<String>::new()).unwrap();
         assert!(!options.foreground && !options.json);
     }
@@ -720,7 +716,7 @@ mod tests {
         let options =
             parse(["--git", "repo", "--base", "v1", "--allow-gitlab-writes"].map(str::to_string))
                 .unwrap();
-        let request = absolute(options.request.clone()).unwrap();
+        let request = absolute(options.request.clone().unwrap()).unwrap();
         let args = launch_args(&options, Path::new("state"), Some(&request)).unwrap();
         let cwd = std::env::current_dir().unwrap();
         let expected: Vec<std::ffi::OsString> = vec![
@@ -737,14 +733,14 @@ mod tests {
         ];
         assert_eq!(args, expected);
         let options = parse(["group/project!4".to_string()]).unwrap();
-        let args = launch_args(&options, Path::new("/state"), Some(&options.request)).unwrap();
+        let args = launch_args(&options, Path::new("/state"), options.request.as_ref()).unwrap();
         assert_eq!(
             args[3..],
             ["--mr", "group/project!4"].map(std::ffi::OsString::from)
         );
         let compare = "https://gitlab.com/g/p/-/compare/v1...v2";
         let options = parse([compare.to_string()]).unwrap();
-        let args = launch_args(&options, Path::new("/state"), Some(&options.request)).unwrap();
+        let args = launch_args(&options, Path::new("/state"), options.request.as_ref()).unwrap();
         assert_eq!(
             args[3..],
             ["--compare", compare].map(std::ffi::OsString::from)
@@ -795,10 +791,10 @@ mod tests {
             match file {
                 Some(path) => {
                     assert!(
-                        matches!(request, OpenRequest::Patch(p) if p == std::path::Path::new(path))
+                        matches!(request, Some(OpenRequest::Patch(p)) if p == std::path::Path::new(path))
                     )
                 }
-                None => assert!(matches!(request, OpenRequest::Fixture(id) if id == "F01")),
+                None => assert!(request.is_none()),
             }
         }
     }
@@ -832,10 +828,10 @@ mod tests {
                 .request;
             assert_eq!(
                 request,
-                OpenRequest::Remote {
+                Some(OpenRequest::Remote {
                     provider: expected,
                     address: url.into()
-                }
+                })
             );
         }
     }

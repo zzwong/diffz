@@ -114,7 +114,11 @@ diffz --resume <snapshot id>           # reopen a saved review
 ```
 
 A lone argument opens the patch file at that path if there is one, and is
-otherwise read as a pull or merge request address.
+otherwise read as a pull or merge request address. With no argument, diffz
+shows the Open panel, which lists recent reviews; `--fixture F01` opens the
+bundled sample. The Open field recognizes the same addresses and patch files
+as you type or paste them and selects the matching tab, and `Ctrl+V` (`Cmd+V`
+on macOS) outside a text field opens an address on the clipboard.
 
 `diffz` returns as soon as the request is on its way, so scripts and coding
 agents can call it. When a diffz window is already open on the same state

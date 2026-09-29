@@ -37,6 +37,12 @@ pub enum OpenRequest {
     LocalWorktree(PathBuf),
     Resume(SnapshotId),
 }
+/// A source recognized in free text, with the name to show for what was recognized.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Detected {
+    pub request: OpenRequest,
+    pub label: String,
+}
 pub trait ReviewRules: Send + Sync {
     fn id(&self) -> ProviderId;
     fn name(&self) -> &str;
@@ -171,6 +177,10 @@ pub trait WorkbenchServices: Send + Sync {
     }
     fn provider(&self, id: &ProviderId) -> Option<Arc<dyn ReviewRules>> {
         self.providers().into_iter().find(|p| p.id() == *id)
+    }
+    /// What `input` opens, when it names a patch file or a review address.
+    fn detect(&self, _input: &str) -> Option<Detected> {
+        None
     }
     fn fresh_id(&self) -> String;
 }

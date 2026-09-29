@@ -49,13 +49,14 @@ help:
 		'make check-native  Run native checks with local Kache' \
 		'make package-macos Package the macOS DMG with local Kache' \
 		'make run ARGS=...  Build and run diffz with development state' \
-		'make install-dev   Install diffz-dev and a "Diffz (dev)" launcher' \
+		'make install-dev   Install diffz-dev and a "Diffz (dev)" launcher (Diffz Dev.app on macOS)' \
 		'make uninstall-dev Remove what install-dev installed' \
 		'make help          List development commands' \
 		'' \
 		'run and install-dev take RELEASE=1, KACHE=0 (regular Cargo) and' \
 		'DEV_STATE_DIR (default $$XDG_STATE_HOME/diffz-dev); install-dev and' \
-		'uninstall-dev take absolute PREFIX (default ~/.local) and DATADIR paths;' \
+		'uninstall-dev take absolute PREFIX (default ~/.local) and DATADIR paths' \
+		'(macOS installs into APPLICATIONS_DIR, default ~/Applications);' \
 		'install-dev takes BIN=FILE to install a binary that is already built.'
 
 kache:

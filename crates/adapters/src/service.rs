@@ -1,8 +1,8 @@
 //! Application service wiring. Provider access, storage, and publication meet here.
 use crate::{
     Result, fixtures,
-    github::{GithubProvider, GithubReader},
-    gitlab::{GitlabProvider, GitlabReader},
+    github::{GithubProvider, GithubReader, GithubTarget},
+    gitlab::{GitlabProvider, GitlabReader, GitlabTarget},
     local_git::{LocalGit, LocalMode},
     outbox::Outbox,
     process::{read_bounded, resolve_program},
@@ -297,6 +297,9 @@ impl WorkbenchServices for Services {
     fn providers(&self) -> Vec<Arc<dyn ReviewRules>> {
         self.providers.iter().map(|p| p.rules()).collect()
     }
+    fn detect(&self, input: &str) -> Option<Detected> {
+        detect_source(input)
+    }
     fn fresh_id(&self) -> String {
         format!(
             "{}-{}",
@@ -305,19 +308,59 @@ impl WorkbenchServices for Services {
         )
     }
 }
-/// The provider whose own address parser takes `address`, so new address forms need no caller
-/// changes. Nothing runs and no store is opened.
-pub fn remote_provider(address: &str) -> Option<ProviderId> {
-    let providers: [Arc<dyn ReviewProvider>; 2] = [
-        Arc::new(GithubProvider::new(None)),
-        Arc::new(GitlabProvider::new(None)),
-    ];
-    providers
-        .iter()
-        .find(|p| p.accepts(address))
-        .map(|p| p.rules().id())
+const MAX_DETECTED: usize = 4096;
+/// What free text names: a patch file that exists, or an address one provider's own parser
+/// takes, passed on unchanged. Nothing runs and no store is opened. Multi-line and oversized
+/// text is never a source.
+pub fn detect_source(input: &str) -> Option<Detected> {
+    let input = input.trim();
+    if input.is_empty() || input.len() > MAX_DETECTED || input.contains('\n') {
+        return None;
+    }
+    if Path::new(input).is_file() {
+        return Some(Detected {
+            request: OpenRequest::Patch(PathBuf::from(input)),
+            label: "Patch file".into(),
+        });
+    }
+    let (provider, label) = match (GithubTarget::parse(input), GitlabTarget::parse(input)) {
+        (Ok(GithubTarget::Pr(_)), _) => (ProviderId::GITHUB, "GitHub pull request"),
+        (Ok(GithubTarget::Compare(_)), _) => (ProviderId::GITHUB, "GitHub compare"),
+        (_, Ok(GitlabTarget::Mr(_))) => (ProviderId::GITLAB, "GitLab merge request"),
+        (_, Ok(GitlabTarget::Compare(_))) => (ProviderId::GITLAB, "GitLab compare"),
+        _ => return None,
+    };
+    Some(Detected {
+        request: OpenRequest::Remote {
+            provider,
+            address: input.into(),
+        },
+        label: label.into(),
+    })
+}
+/// The state directory an app bundle carries in `Contents/Resources/state-dir`, so a development
+/// bundle keeps its own handoff socket and lock however it is started: from the Dock, through
+/// `open`, or from a symlink to its executable.
+#[cfg(target_os = "macos")]
+fn bundled_state_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let macos = exe.parent()?;
+    let contents = macos.parent()?;
+    if macos.file_name()? != "MacOS" || contents.file_name()? != "Contents" {
+        return None;
+    }
+    let dir = PathBuf::from(
+        std::fs::read_to_string(contents.join("Resources/state-dir"))
+            .ok()?
+            .trim(),
+    );
+    dir.is_absolute().then_some(dir)
 }
 pub fn default_state_dir() -> Result<PathBuf> {
+    #[cfg(target_os = "macos")]
+    if let Some(dir) = bundled_state_dir() {
+        return Ok(dir);
+    }
     #[cfg(target_os = "macos")]
     if let Some(home) = std::env::var_os("HOME") {
         let support = PathBuf::from(home).join("Library/Application Support");
@@ -356,6 +399,7 @@ fn migrated_state_dir(new: PathBuf, old: PathBuf) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use diffz_core::provider::OpenRequest;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -387,21 +431,72 @@ mod tests {
     #[test]
     fn remote_addresses_go_to_the_provider_that_parses_them() {
         use diffz_core::domain::ProviderId;
-        for (address, provider) in [
-            ("owner/repo#12", Some(ProviderId::GITHUB)),
+        for (address, provider, label) in [
+            ("owner/repo#12", ProviderId::GITHUB, "GitHub pull request"),
             (
                 "https://github.com/owner/repo/pull/12/files",
-                Some(ProviderId::GITHUB),
+                ProviderId::GITHUB,
+                "GitHub pull request",
             ),
-            ("group/sub/project!7", Some(ProviderId::GITLAB)),
+            (
+                "https://github.com/owner/repo/compare/v1.0...v2.0",
+                ProviderId::GITHUB,
+                "GitHub compare",
+            ),
+            (
+                "group/sub/project!7",
+                ProviderId::GITLAB,
+                "GitLab merge request",
+            ),
             (
                 "https://gitlab.example.com/group/project/-/merge_requests/7",
-                Some(ProviderId::GITLAB),
+                ProviderId::GITLAB,
+                "GitLab merge request",
             ),
-            ("change.patch", None),
-            ("owner/repo", None),
+            (
+                "https://gitlab.com/group/project/-/compare/v1.0...v2.0",
+                ProviderId::GITLAB,
+                "GitLab compare",
+            ),
         ] {
-            assert_eq!(super::remote_provider(address), provider, "{address}");
+            let detected = super::detect_source(&format!("  {address}\n")).expect(address);
+            assert_eq!(
+                detected.request,
+                OpenRequest::Remote {
+                    provider,
+                    address: address.into()
+                },
+                "{address}"
+            );
+            assert_eq!(detected.label, label, "{address}");
         }
+    }
+
+    #[test]
+    fn existing_files_are_patches_and_other_text_is_nothing() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("change.patch");
+        std::fs::write(&file, "").unwrap();
+        let path = file.to_str().unwrap();
+
+        let detected = super::detect_source(path).unwrap();
+        assert_eq!(detected.request, OpenRequest::Patch(file.clone()));
+        assert_eq!(detected.label, "Patch file");
+        // A directory is a repository for the local modes, never a patch.
+        assert!(super::detect_source(dir.to_str().unwrap()).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        for text in [
+            "change.patch",
+            "owner/repo",
+            "",
+            "   ",
+            "owner/repo#1\nowner/repo#2",
+            "https://example.com/",
+        ] {
+            assert!(super::detect_source(text).is_none(), "{text:?}");
+        }
+        assert!(super::detect_source(&format!("owner/repo#1 {}", "x".repeat(5000))).is_none());
     }
 }

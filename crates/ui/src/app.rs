@@ -30,7 +30,8 @@ use std::{
 };
 
 pub struct LaunchOptions {
-    pub initial: OpenRequest,
+    /// `None` starts on the Open panel.
+    pub initial: Option<OpenRequest>,
     pub registry: Arc<Registry>,
     pub font_family: Option<String>,
     pub theme: Option<String>,
@@ -100,6 +101,8 @@ pub(crate) struct Workbench {
     pub root_focus: FocusHandle,
     pub panel: Panel,
     pub source_mode: SourceMode,
+    /// What the Open panel's input was recognized as, until a tab is chosen by hand.
+    pub(crate) detected: Option<String>,
     pub files_visible: bool,
     /// The collapsed file panel floating over the diff while its toggle or itself is hovered.
     pub files_peek: FilesPeek,
@@ -249,6 +252,16 @@ impl Workbench {
                 }
             },
         ));
+        subscriptions.push(cx.subscribe_in(
+            &open_input,
+            window,
+            |this: &mut Self, state, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = state.read(cx).value().to_string();
+                    this.detect_source_mode(&text, window, cx);
+                }
+            },
+        ));
         subscriptions.push(cx.subscribe(
             &draft_input,
             |this: &mut Self, state, event: &InputEvent, cx| {
@@ -345,6 +358,7 @@ impl Workbench {
             root_focus: cx.focus_handle(),
             panel: Panel::None,
             source_mode,
+            detected: None,
             files_visible: true,
             files_peek: FilesPeek::default(),
             files_peek_close: None,
@@ -676,10 +690,10 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
             let initial_cancel = Cancellation::default();
             let cancel = initial_cancel.clone();
             let initial_services = services.clone();
-            let request = options.initial.clone();
-            let initial_task = cx
-                .background_executor()
-                .spawn(async move { initial_services.open(request, cancel) });
+            let initial_task = options.initial.clone().map(|request| {
+                cx.background_executor()
+                    .spawn(async move { initial_services.open(request, cancel) })
+            });
             gpui_kit::init(cx);
             commands::bind(cx);
             cx.on_action(|_: &commands::Quit, cx| cx.quit());
@@ -715,15 +729,18 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                             cx,
                         )
                     });
-                    view.update(cx, |app, cx| {
-                        app.open_pending(
-                            options.initial,
-                            false,
-                            Some((initial_cancel, initial_task)),
-                            cx,
-                        );
-                    });
-                    view.read(cx).diff_focus.clone().focus(window, cx);
+                    match options.initial.zip(initial_task) {
+                        Some((request, task)) => {
+                            view.update(cx, |app, cx| {
+                                app.open_pending(request, false, Some((initial_cancel, task)), cx);
+                            });
+                            view.read(cx).diff_focus.clone().focus(window, cx);
+                        }
+                        None => view.update(cx, |app, cx| {
+                            app.command(commands::Command::Open, window, cx);
+                            app.refresh_recent(cx);
+                        }),
+                    }
                     workbench = Some(view.clone());
                     cx.new(|cx| Root::new(view, window, cx))
                 });

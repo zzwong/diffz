@@ -16,6 +16,20 @@ impl Workbench {
                 self.panel = Panel::Open;
                 self.open_input.read(cx).focus_handle(cx).focus(window, cx);
             }
+            Command::PasteOpen => {
+                let text = cx.read_from_clipboard().and_then(|item| item.text());
+                match text.and_then(|text| self.services.detect(&text)) {
+                    Some(found) => {
+                        if let Err(refused) = self.take_handoff(Some(found.request), cx) {
+                            self.status = refused;
+                        }
+                    }
+                    None => {
+                        self.status = "The clipboard holds no pull request, merge request, compare address, or patch file.".into()
+                    }
+                }
+                cx.notify();
+            }
             Command::Palette => {
                 self.panel = Panel::Palette;
                 self.palette_index = 0;

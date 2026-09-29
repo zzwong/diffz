@@ -303,6 +303,7 @@ impl Workbench {
                             .label(label)
                             .on_click(cx.listener(move |a, _, w, c| {
                                 a.source_mode = mode.clone();
+                                a.detected = None;
                                 a.open_input.update(c, |input, c| {
                                     input.set_placeholder(placeholder.clone(), w, c)
                                 });
@@ -339,7 +340,13 @@ impl Workbench {
                     .child(modes)
                     .child(div().mt_2().text_size(px(12.)).child(label))
                     .child(Input::new(&self.open_input))
-                    .child(div().text_size(px(11.)).text_color(skin.muted).child(help));
+                    .child(match &self.detected {
+                        Some(found) => div()
+                            .text_size(px(11.))
+                            .text_color(skin.accent)
+                            .child(format!("Detected: {found}")),
+                        None => div().text_size(px(11.)).text_color(skin.muted).child(help),
+                    });
                 if self.source_mode == SourceMode::Compare {
                     card = card.child(
                         div()
