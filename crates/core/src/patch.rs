@@ -98,6 +98,61 @@ impl FileChange {
     pub fn display_path(&self) -> String {
         self.path().display()
     }
+    fn header_percent(&self, name: &str) -> Option<u8> {
+        let n: u8 = self
+            .metadata
+            .iter()
+            .find_map(|l| l.strip_prefix(name))?
+            .trim()
+            .strip_suffix('%')?
+            .parse()
+            .ok()?;
+        (n <= 100).then_some(n)
+    }
+    /// Git's `similarity index`, percent. Read from the kept header lines, not stored apart from
+    /// them, so a snapshot's identity does not depend on it.
+    pub fn similarity(&self) -> Option<u8> {
+        self.header_percent("similarity index ")
+    }
+    /// Git's `dissimilarity index`, percent, for a file rewritten by a break.
+    pub fn dissimilarity(&self) -> Option<u8> {
+        self.header_percent("dissimilarity index ")
+    }
+    /// The path this file came from, when it was renamed or copied.
+    pub fn moved_from(&self) -> Option<&RepoPath> {
+        match self.kind {
+            ChangeKind::Renamed | ChangeKind::Copied => self.old_path.as_ref(),
+            _ => None,
+        }
+    }
+    /// Why the reader has no lines to show for this file, if that is so.
+    pub fn empty_note(&self) -> Option<String> {
+        if !self.hunks.is_empty() {
+            return None;
+        }
+        if self.content == ContentKind::Binary {
+            return Some("Binary file changed".into());
+        }
+        if self.content == ContentKind::Submodule {
+            return Some("Submodule changed".into());
+        }
+        let similar = self
+            .similarity()
+            .map_or(String::new(), |n| format!(" ({n}% similar)"));
+        let from = self.moved_from().map(RepoPath::display);
+        match (self.kind, from) {
+            (ChangeKind::Renamed, Some(p)) => {
+                Some(format!("Renamed from {p}, contents unchanged{similar}"))
+            }
+            (ChangeKind::Copied, Some(p)) => {
+                Some(format!("Copied from {p}, contents unchanged{similar}"))
+            }
+            _ => match (&self.old_mode, &self.new_mode) {
+                (Some(a), Some(b)) if a != b => Some(format!("Mode changed {a} → {b}")),
+                _ => None,
+            },
+        }
+    }
     pub fn line(&self, side: Side, line: u32) -> Option<&PatchRow> {
         self.hunks
             .iter()
@@ -127,6 +182,69 @@ impl FileChange {
                 .hunks
                 .iter()
                 .any(|h| (start..=end).all(|n| h.rows.iter().any(|r| r.number(side) == Some(n))))
+    }
+}
+/// A moved file's two paths with what they share folded away, like a diffstat:
+/// `crates/ui/src/{panels.rs → panels/mod.rs}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveLabel {
+    pub prefix: String,
+    pub old: String,
+    pub new: String,
+    pub suffix: String,
+}
+impl MoveLabel {
+    pub fn new(old: &str, new: &str) -> Self {
+        // Share only whole folders, so a name is never split mid-word.
+        let common = old
+            .bytes()
+            .zip(new.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let cut = old.as_bytes()[..common]
+            .iter()
+            .rposition(|b| *b == b'/')
+            .map_or(0, |i| i + 1);
+        let (old_rest, new_rest) = (&old[cut..], &new[cut..]);
+        let shared = old_rest
+            .bytes()
+            .rev()
+            .zip(new_rest.bytes().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        // The shared tail starts at its first `/`; a bare shared file name is not folded.
+        let tail = &old_rest.as_bytes()[old_rest.len() - shared..];
+        let keep = tail
+            .iter()
+            .position(|b| *b == b'/')
+            .map_or(0, |i| shared - i);
+        Self {
+            prefix: old[..cut].into(),
+            old: old_rest[..old_rest.len() - keep].into(),
+            new: new_rest[..new_rest.len() - keep].into(),
+            suffix: old_rest[old_rest.len() - keep..].into(),
+        }
+    }
+    /// Whether shared parts were folded out, so the changed part needs braces to be read.
+    pub fn folded(&self) -> bool {
+        !self.prefix.is_empty() || !self.suffix.is_empty()
+    }
+    /// The whole label as one string, for tooltips and accessibility.
+    pub fn plain(&self) -> String {
+        let (p, o, n, s) = (&self.prefix, &self.old, &self.new, &self.suffix);
+        if self.folded() {
+            format!("{p}{{{o} → {n}}}{s}")
+        } else {
+            format!("{o} → {n}")
+        }
+    }
+}
+impl FileChange {
+    /// The folded path pair for a renamed or copied file.
+    pub fn move_label(&self) -> Option<MoveLabel> {
+        let old = self.moved_from()?.display();
+        let new = self.new_path.as_ref()?.display();
+        (old != new).then(|| MoveLabel::new(&old, &new))
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

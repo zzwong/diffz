@@ -22,6 +22,7 @@ fn remote(provider: ProviderId, host: &str, owner: &str, name: &str, pr: u64) ->
         head: "c".into(),
         open: true,
         draft: false,
+        merged: false,
         pending_review: false,
         compare: None,
     }
@@ -101,6 +102,7 @@ fn snapshot() -> Snapshot {
             head: "b".repeat(40),
             open: true,
             draft: false,
+            merged: false,
             pending_review: false,
             compare: None,
         }),

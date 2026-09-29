@@ -51,6 +51,7 @@ fn setup() -> (tempfile::TempDir, Arc<Store>, Arc<Fake>, PreparedReview) {
         head: "b".repeat(40),
         open: true,
         draft: false,
+        merged: false,
         pending_review: false,
         compare: None,
     };

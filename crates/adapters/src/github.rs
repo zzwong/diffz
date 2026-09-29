@@ -678,6 +678,7 @@ impl GithubReader {
             }
             remote.open = after["state"] == "open";
             remote.draft = after["draft"] == true;
+            remote.merged = is_merged(&after);
             // Which account was used is frozen into the review identity too.
             if still? != account {
                 return Err("the GitHub account changed while the snapshot was captured".into());
@@ -842,6 +843,7 @@ impl GithubReader {
             head,
             open: true,
             draft: false,
+            merged: false,
             pending_review: false,
             compare: Some(a.refs.clone()),
         };
@@ -1242,9 +1244,14 @@ fn target(
         head: oid(m, "/head/sha")?,
         open: m["state"] == "open",
         draft: m["draft"] == true,
+        merged: is_merged(m),
         pending_review: false,
         compare: None,
     })
+}
+/// REST reports a merged pull request as `closed` with `merged` set.
+fn is_merged(m: &Value) -> bool {
+    m["merged"] == true || m["merged_at"].is_string()
 }
 fn thread(v: &Value) -> Result<ThreadComment> {
     let id = number(v, "/id")?;
@@ -1652,5 +1659,43 @@ mod tests {
         assert!(draft_pr.draft);
         let ready_pr = target(&address(), &meta(false), "me".into(), pledge).unwrap();
         assert!(!ready_pr.draft);
+    }
+
+    #[test]
+    fn target_tells_merged_from_closed_prs() {
+        let address = PrAddress {
+            host: "github.com".into(),
+            owner: "o".into(),
+            repo: "r".into(),
+            number: 1,
+        };
+        let meta = |state: &str, merged: bool, merged_at: serde_json::Value| {
+            serde_json::json!({
+                "base": {
+                    "repo": {"owner": {"login": "o"}, "name": "r", "id": 1},
+                    "sha": "a".repeat(40),
+                },
+                "head": {"sha": "b".repeat(40)},
+                "state": state,
+                "merged": merged,
+                "merged_at": merged_at,
+            })
+        };
+        let pledge = "c".repeat(40);
+        let t = |m| target(&address, &m, "me".into(), pledge.clone()).unwrap();
+        let merged = t(meta("closed", true, "2026-01-01T00:00:00Z".into()));
+        assert!(merged.merged && !merged.open);
+        let closed = t(meta("closed", false, serde_json::Value::Null));
+        assert!(!closed.merged && !closed.open);
+        let open = t(meta("open", false, serde_json::Value::Null));
+        assert!(!open.merged && open.open);
+        // The list endpoint omits `merged` but still carries `merged_at`.
+        let by_date = t(serde_json::json!({
+            "base": {"repo": {"owner": {"login": "o"}, "name": "r", "id": 1}, "sha": "a".repeat(40)},
+            "head": {"sha": "b".repeat(40)},
+            "state": "closed",
+            "merged_at": "2026-01-01T00:00:00Z",
+        }));
+        assert!(by_date.merged);
     }
 }

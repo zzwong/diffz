@@ -408,6 +408,7 @@ impl GitlabReader {
             head: to,
             open: true,
             draft: false,
+            merged: false,
             pending_review: false,
             compare: Some(a.refs.clone()),
         };
@@ -913,6 +914,7 @@ fn target(a: &MrAddress, m: &Value, user: &Value) -> Result<RemoteTarget> {
         head: string(m, "/diff_refs/head_sha")?,
         open: m["state"] == "opened",
         draft: m["draft"] == true || m["work_in_progress"] == true,
+        merged: m["state"] == "merged",
         pending_review: false,
         compare: None,
     };
@@ -1535,6 +1537,34 @@ mod tests {
         assert_eq!(comments[0].file_level, Some(true));
         assert_eq!(comments[0].line, None);
     }
+    #[test]
+    fn target_tells_merged_from_closed_mrs() {
+        let address = MrAddress {
+            host: "git.example.com".into(),
+            project: "o/r".into(),
+            number: 7,
+        };
+        let meta = |state: &str| {
+            serde_json::json!({
+                "iid": 7,
+                "project_id": 11,
+                "state": state,
+                "diff_refs": {
+                    "start_sha": "a".repeat(40),
+                    "base_sha": "b".repeat(40),
+                    "head_sha": "c".repeat(40),
+                },
+            })
+        };
+        let user = serde_json::json!({ "username": "alice" });
+        let merged = target(&address, &meta("merged"), &user).unwrap();
+        assert!(merged.merged && !merged.open);
+        let closed = target(&address, &meta("closed"), &user).unwrap();
+        assert!(!closed.merged && !closed.open);
+        let opened = target(&address, &meta("opened"), &user).unwrap();
+        assert!(!opened.merged && opened.open);
+    }
+
     #[test]
     fn target_marks_draft_and_work_in_progress_mrs() {
         fn address() -> MrAddress {

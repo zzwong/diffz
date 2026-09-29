@@ -249,6 +249,10 @@ impl Workbench {
         let measure = v.clone();
         let paint = v.clone();
         let skin = self.skin();
+        let note = {
+            let v = v.borrow();
+            v.snapshot.file(&v.file).and_then(|f| f.empty_note())
+        };
         div()
             .id("source-viewport")
             .cursor(v.borrow().hover_cursor)
@@ -394,6 +398,21 @@ impl Workbench {
                 )
                 .size_full(),
             )
+            .when_some(note, |d, note| {
+                d.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .px_8()
+                        .text_size(px(13.))
+                        .text_color(skin.muted)
+                        .text_center()
+                        .child(note),
+                )
+            })
             .into_any_element()
     }
 }

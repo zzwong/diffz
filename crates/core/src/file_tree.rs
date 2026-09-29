@@ -1,6 +1,6 @@
 //! A small directory tree where filters keep ancestors and file identity unchanged.
 use crate::domain::FileId;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub struct TreeRow {
     pub path: String,
@@ -10,6 +10,8 @@ pub struct TreeRow {
     pub depth: usize,
     pub file: Option<FileId>,
     pub expanded: bool,
+    /// Full path a renamed or copied file came from.
+    pub old_path: Option<String>,
 }
 #[derive(Default, Debug)]
 struct Directory {
@@ -19,16 +21,28 @@ struct Directory {
 #[derive(Default, Debug)]
 pub struct FileTree {
     entries: Vec<(FileId, String)>,
+    old_paths: HashMap<FileId, String>,
 }
 impl FileTree {
     pub fn new(entries: Vec<(FileId, String)>) -> Self {
-        Self { entries }
+        Self {
+            entries,
+            old_paths: HashMap::new(),
+        }
+    }
+    /// Where renamed or copied files came from; a filter also matches these paths.
+    pub fn with_old_paths(mut self, old_paths: HashMap<FileId, String>) -> Self {
+        self.old_paths = old_paths;
+        self
     }
     pub fn rows(&self, collapsed: &HashSet<String>, query: &str) -> Vec<TreeRow> {
         let query = query.to_lowercase();
         let mut root = Directory::default();
         for (id, path) in &self.entries {
-            if !path.to_lowercase().contains(&query) {
+            let old = self.old_paths.get(id);
+            if !path.to_lowercase().contains(&query)
+                && !old.is_some_and(|o| o.to_lowercase().contains(&query))
+            {
                 continue;
             }
             let mut parts = path.split('/').peekable();
@@ -42,7 +56,15 @@ impl FileTree {
             }
         }
         let mut rows = vec![];
-        flatten(&root, "", 0, collapsed, !query.is_empty(), &mut rows);
+        flatten(
+            &root,
+            "",
+            0,
+            collapsed,
+            !query.is_empty(),
+            &self.old_paths,
+            &mut rows,
+        );
         rows
     }
 }
@@ -52,6 +74,7 @@ fn flatten(
     depth: usize,
     collapsed: &HashSet<String>,
     filtering: bool,
+    old: &HashMap<FileId, String>,
     rows: &mut Vec<TreeRow>,
 ) {
     for (name, child) in &dir.dirs {
@@ -79,6 +102,7 @@ fn flatten(
                 depth,
                 file: Some(id.clone()),
                 expanded: false,
+                old_path: old.get(id).cloned(),
             });
             continue;
         }
@@ -90,9 +114,10 @@ fn flatten(
             depth,
             file: None,
             expanded,
+            old_path: None,
         });
         if expanded {
-            flatten(node, &path, depth + 1, collapsed, filtering, rows);
+            flatten(node, &path, depth + 1, collapsed, filtering, old, rows);
         }
     }
     for (name, (id, path)) in &dir.files {
@@ -103,6 +128,7 @@ fn flatten(
             depth,
             file: Some(id.clone()),
             expanded: false,
+            old_path: old.get(id).cloned(),
         });
     }
 }

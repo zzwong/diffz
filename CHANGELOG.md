@@ -16,6 +16,15 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after the window opens and steps through N files after the source loads, so
   the script needs no keystrokes.
 
+- Renamed and copied files show where they came from. The toolbar folds the shared
+  parts of the two paths, as in `crates/ui/src/{panels.rs → panels/mod.rs}`; the
+  tree row appends the old file name dimmed when the name changed, and its tooltip
+  gives both full paths. The file filter also matches the old path. diffz now reads
+  the `similarity index` and `dissimilarity index` headers.
+- A file with no lines to show says why instead of leaving the reader blank: a
+  pure rename or copy (with its similarity), a mode change, a binary change, or a
+  submodule change.
+
 ### Changed
 
 - The file tree folds a folder that holds a single changed file into that file's
@@ -29,6 +38,12 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The timer that stops a runaway extension annotator ticks only while one is
   running. Before, once any extension had annotated, it woke diffz about 100
   times a second for the rest of the session.
+
+### Fixed
+
+- The title-bar pill says "Merged" for a merged pull request or merge request
+  instead of "Closed". A review saved before this shows "Closed" until it is
+  refreshed.
 
 ## [0.3.1] - 2026-09-29
 

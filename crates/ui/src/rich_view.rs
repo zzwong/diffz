@@ -150,14 +150,27 @@ impl Workbench {
             );
         let pull = self.gesture.pull();
         if items.is_empty() {
-            return container
-                .p_4()
-                .child(
+            let note = self.viewport.as_ref().and_then(|v| {
+                let v = v.borrow();
+                v.snapshot.file(&v.file).and_then(|f| f.empty_note())
+            });
+            return match note {
+                Some(note) => container
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .px_8()
+                    .text_size(px(13.))
+                    .text_color(skin.muted)
+                    .text_center()
+                    .child(note),
+                None => container.p_4().child(
                     div()
                         .text_color(skin.muted)
                         .child("This file has nothing to render."),
-                )
-                .into_any_element();
+                ),
+            }
+            .into_any_element();
         }
         let bar_state = state.clone();
         let thumb = self

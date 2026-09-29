@@ -211,6 +211,17 @@ impl Workbench {
                         .as_ref()
                         .and_then(|id| snapshot.as_ref()?.file(id))
                         .and_then(|f| marks.get(&f.display_path()).copied());
+                    // Old and new full paths, for a file that moved; the tooltip and label show both.
+                    let moved = row.old_path.clone().filter(|old| *old != row.path);
+                    let old_name = moved
+                        .as_deref()
+                        .and_then(|old| old.rsplit('/').next())
+                        .filter(|name| *name != row.label)
+                        .map(str::to_owned);
+                    let full_path = match &moved {
+                        Some(old) => format!("{old} → {}", row.path),
+                        None => row.path.clone(),
+                    };
                     let release = row
                         .file
                         .as_ref()
@@ -267,10 +278,10 @@ impl Workbench {
                                 .justify_start()
                                 .tab_stop(false)
                                 .tooltip(match &release {
-                                    Some((_, names)) => format!("{}\nReleases: {names}", row.path),
-                                    None => row.path.clone(),
+                                    Some((_, names)) => format!("{full_path}\nReleases: {names}"),
+                                    None => full_path.clone(),
                                 })
-                                .accessibility_label(row.path.clone())
+                                .accessibility_label(full_path.clone())
                                 .child(icon)
                                 .child(
                                     div()
@@ -304,7 +315,17 @@ impl Workbench {
                                                 .flex_shrink_0()
                                                 .truncate()
                                                 .child(row.label.clone()),
-                                        ),
+                                        )
+                                        .when_some(old_name, |d, name| {
+                                            d.child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .ml_1()
+                                                    .text_color(skin.muted.opacity(0.6))
+                                                    .child(format!("← {name}")),
+                                            )
+                                        }),
                                 )
                                 .when_some(release, |b, (badge, _)| {
                                     b.child(

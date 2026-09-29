@@ -22,6 +22,7 @@ fn snapshot(i: usize) -> Snapshot {
         head: "b".repeat(40),
         open: true,
         draft: false,
+        merged: false,
         pending_review: false,
         compare: None,
     };
