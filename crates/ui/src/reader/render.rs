@@ -309,6 +309,9 @@ impl Render for Workbench {
                 cx.listener(|a, _: &commands::Themes, w, c| a.command(Command::Themes, w, c)),
             )
             .on_action(cx.listener(|a, _: &commands::Open, w, c| a.command(Command::Open, w, c)))
+            .on_action(
+                cx.listener(|a, _: &commands::PasteOpen, w, c| a.command(Command::PasteOpen, w, c)),
+            )
             .on_action(cx.listener(|a, _: &commands::Find, w, c| a.command(Command::Find, w, c)))
             .on_action(cx.listener(|a, _: &commands::Files, w, c| a.command(Command::Files, w, c)))
             .on_action(

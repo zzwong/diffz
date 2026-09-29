@@ -21,9 +21,25 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `--json` prints whether a request was handed off or launched, or why it
   failed, as one JSON line. `--foreground` keeps the window attached to the
   terminal.
+- The Open panel recognizes what is typed or pasted into its main field, with
+  the same rules as `diffz <target>`: pull request, merge request and compare
+  addresses, and existing patch files. It selects the matching tab and names
+  what it found, and Enter opens it. The tabs still work for choosing a source
+  by hand, and Branches keeps its base and head fields.
+- Cmd+V (Ctrl+V elsewhere), outside a text field, opens a pull request, merge
+  request, compare address, or patch file path from the clipboard, as a later
+  `diffz` invocation would. It is listed in the palette, the menus and the key
+  sheet, and says why in the status line when it declines.
+- On macOS, `make install-dev` installs `Diffz Dev.app` to `~/Applications` and
+  links `~/.local/bin/diffz-dev` to it. The Dev app has its own bundle ID and
+  development state directory, so it runs beside the release app without
+  sharing its handoff socket or lock. `make uninstall-dev` removes both.
 
 ### Changed
 
+- `diffz` with no arguments, and a launch from the Dock or Finder, opens the
+  Open panel with recent reviews instead of the sample fixture named F01.
+  `--fixture F01` still opens it. `--inspect` now needs a source.
 - `diffz` returns right away instead of waiting for the window to close. When
   diffz is already running on the same state directory, the open window
   switches to the new review and comes to the front, instead of the second

@@ -852,10 +852,10 @@ impl ReviewRules for GitlabRules {
         "GitLab"
     }
     fn open_label(&self) -> &str {
-        "GitLab MR"
+        "GitLab"
     }
     fn address_label(&self) -> &str {
-        "Merge request"
+        "Merge request or compare URL"
     }
     fn address_hint(&self) -> &str {
         "Enter group/project!123, a GitLab merge request URL, or a compare URL"

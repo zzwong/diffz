@@ -2,13 +2,16 @@
 # Installs or removes a development build beside the release package; `make install-dev` and
 # `make uninstall-dev` call this. It writes only diffz-dev and io.github.zzwong.Diffz.Dev files
 # under PREFIX and DATADIR, never the release package's diffz or io.github.zzwong.Diffz files.
+# On macOS it installs "Diffz Dev.app" into APPLICATIONS_DIR (default ~/Applications) instead of
+# a desktop entry, and diffz-dev is a symlink to the executable inside it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 usage() { echo 'Usage: PREFIX=DIR DATADIR=DIR DEV_STATE_DIR=DIR [DEV_BIN=FILE] scripts/install-dev.sh install|uninstall' >&2; exit 2; }
 action="${1:-}"
 case "$action" in install|uninstall) ;; *) usage ;; esac
-for var in PREFIX DATADIR DEV_STATE_DIR; do
+APPLICATIONS_DIR="${APPLICATIONS_DIR:-$HOME/Applications}"
+for var in PREFIX DATADIR DEV_STATE_DIR APPLICATIONS_DIR; do
   value="${!var:-}"
   [[ "$value" == /* ]] || { echo "$var must be an absolute path, got '$value'" >&2; exit 2; }
   # The Exec key would need escaping for these, and Make cannot pass them reliably anyway.
@@ -18,6 +21,7 @@ done
 
 app_id=io.github.zzwong.Diffz.Dev
 bin="$PREFIX/bin/diffz-dev"
+app="$APPLICATIONS_DIR/Diffz Dev.app"
 desktop="$DATADIR/applications/$app_id.desktop"
 hicolor="$DATADIR/icons/hicolor"
 icon="$hicolor/scalable/apps/$app_id.svg"
@@ -34,7 +38,16 @@ refresh_caches() {
 }
 
 if [[ "$action" == uninstall ]]; then
-  for file in "$bin" "$desktop" "$icon"; do
+  if [[ "$(uname -s)" == Darwin ]]; then
+    files=("$bin")
+    if [[ -e "$app" || -L "$app" ]]; then
+      rm -rf -- "$app"
+      echo "removed $app"
+    fi
+  else
+    files=("$bin" "$desktop" "$icon")
+  fi
+  for file in "${files[@]}"; do
     if [[ -e "$file" || -L "$file" ]]; then
       rm -f -- "$file"
       echo "removed $file"
@@ -47,6 +60,50 @@ fi
 
 src="${DEV_BIN:?DEV_BIN must name the diffz binary to install}"
 [[ -x "$src" ]] || { echo "no executable diffz binary at $src" >&2; exit 1; }
+
+if [[ "$(uname -s)" == Darwin ]]; then
+  # The handoff socket lives in the state directory, and a socket path must fit in 104 bytes.
+  (( $(printf %s "$DEV_STATE_DIR" | wc -c) + 14 <= 104 )) ||
+    { echo "DEV_STATE_DIR is too long for a handoff socket path: '$DEV_STATE_DIR'" >&2; exit 2; }
+  work=target/install-dev
+  mkdir -p "$work"
+  stage="$work/Diffz Dev.app"
+  rm -rf -- "$stage"
+  python3 - "$src" "$stage" "$app_id" "$DEV_STATE_DIR" <<'PYTHON'
+import pathlib, plistlib, shutil, subprocess, sys
+src, stage, app_id, state = sys.argv[1:]
+version = subprocess.check_output([src, "--version"], text=True).split()[-1]
+contents = pathlib.Path(stage) / "Contents"
+(contents / "MacOS").mkdir(parents=True)
+shutil.copy2(src, contents / "MacOS" / "diffz")
+resources = contents / "Resources"
+resources.mkdir()
+shutil.copy2("LICENSE", resources / "LICENSE")
+shutil.copy2("THIRD_PARTY_NOTICES.md", resources / "THIRD_PARTY_NOTICES.md")
+# Read at startup, so this bundle never shares the release app's handoff socket and lock.
+(resources / "state-dir").write_text(state + "\n")
+(contents / "Info.plist").write_bytes(plistlib.dumps({
+    "CFBundleExecutable": "diffz",
+    "CFBundleIdentifier": app_id,
+    "CFBundleName": "Diffz Dev",
+    "CFBundleDisplayName": "Diffz Dev",
+    "CFBundlePackageType": "APPL",
+    "CFBundleVersion": "1",
+    "CFBundleShortVersionString": version,
+    "LSMinimumSystemVersion": "15.0",
+    "NSHighResolutionCapable": True,
+}))
+PYTHON
+  codesign --force --deep --sign - "$stage"
+  mkdir -p "$(dirname "$app")" "$(dirname "$bin")"
+  rm -rf -- "$app"
+  cp -R "$stage" "$app"
+  ln -sfn "$app/Contents/MacOS/diffz" "$bin"
+  printf 'installed %s\n' "$app" "$bin"
+  echo "Diffz Dev.app and diffz-dev use state in $DEV_STATE_DIR"
+  case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) echo "note: $PREFIX/bin is not on PATH" ;; esac
+  exit 0
+fi
 
 # Desktop Entry Exec quoting: plain arguments stay bare, others are wrapped in double quotes.
 exec_arg() {

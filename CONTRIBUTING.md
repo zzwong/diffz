@@ -56,6 +56,18 @@ the state directory. Both take absolute `PREFIX` and `DATADIR` (default
 Cargo, or `BIN=target/debug/diffz` to install a binary that is already built.
 Windows opened by either build share the `io.github.zzwong.Diffz` app ID.
 
+On macOS, `make install-dev` builds `Diffz Dev.app` (bundle ID
+`io.github.zzwong.Diffz.Dev`) and installs it to `~/Applications`, replacing an
+earlier copy, and links `~/.local/bin/diffz-dev` to its executable, so
+`diffz-dev URL` hands off to the Dev app and starts it when it is not running.
+The Dev app runs beside the release `Diffz.app`. The build writes the
+development state directory into the bundle (`Contents/Resources/state-dir`),
+which diffz reads when no `--state-dir` is given, so the Dock, `open`, and the
+`diffz-dev` link all use `~/.local/state/diffz-dev` (or `DEV_STATE_DIR`) with a
+handoff socket and lock of their own; a path over 104 bytes is refused, as a
+socket cannot bind it. `APPLICATIONS_DIR` changes the install directory, and
+`make uninstall-dev` removes the app and the link, keeping the state directory.
+
 ### Debug info in development builds
 
 Workspace crates build with `debug = 1`. Dependencies build without debug info,

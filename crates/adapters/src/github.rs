@@ -1035,10 +1035,10 @@ impl ReviewRules for GithubRules {
         "GitHub"
     }
     fn open_label(&self) -> &str {
-        "GitHub PR"
+        "GitHub"
     }
     fn address_label(&self) -> &str {
-        "Pull request"
+        "Pull request or compare URL"
     }
     fn address_hint(&self) -> &str {
         "Enter owner/repo#123, a GitHub pull request URL, or a compare URL"

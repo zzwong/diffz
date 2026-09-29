@@ -197,6 +197,7 @@ impl Workbench {
     fn reader(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let Some(v) = self.viewport.clone() else {
             return div()
+                .track_focus(&self.diff_focus)
                 .v_flex()
                 .size_full()
                 .p_8()
