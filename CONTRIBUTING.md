@@ -28,10 +28,12 @@ again. A package-scoped clean such as `cargo clean -p diffz` preserves Kache.
 
 ### Development builds beside an installed release
 
-A second diffz using the release's state directory fails on its lock, and a
-development build could migrate the database past what the release reads. So
-`make run` passes `--state-dir $XDG_STATE_HOME/diffz-dev` (default
-`~/.local/state/diffz-dev`; set `DEV_STATE_DIR` to change it) before `ARGS`:
+A second diffz using the release's state directory hands its request to the
+running release or fails on its lock, and a development build could migrate the
+database past what the release reads. So `make run` passes
+`--state-dir $XDG_STATE_HOME/diffz-dev` (default `~/.local/state/diffz-dev`; set
+`DEV_STATE_DIR` to change it) before `ARGS`, along with `--foreground` so the
+window stays attached to the terminal:
 
 ```sh
 make run ARGS="--git . --base main"
@@ -40,7 +42,8 @@ make run RELEASE=1 ARGS=--inspect                 # release profile (slow: thin 
 ```
 
 A `--state-dir` in `ARGS` takes precedence. `--doctor` must be the only
-argument, so `make run ARGS=--doctor` omits the state directory.
+argument, so `make run ARGS=--doctor` omits `--foreground` and the state
+directory.
 
 On Linux, `make install-dev` builds the same way and installs
 `~/.local/bin/diffz-dev`, a "Diffz (dev)" launcher

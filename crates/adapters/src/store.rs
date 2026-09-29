@@ -41,6 +41,20 @@ fn private_file(path: &Path) -> Result<File> {
     }
     Ok(o.open(path)?)
 }
+/// Whether a live `Store` holds the writer lock of `dir`. Probing holds the lock for an instant,
+/// so a `Store::open` racing the probe can fail as if another instance were running.
+pub fn in_use(dir: &Path) -> Result<bool> {
+    let lock = match File::open(dir.join("writer.lock")) {
+        Ok(lock) => lock,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    if lock.try_lock_exclusive().is_err() {
+        return Ok(true);
+    }
+    FileExt::unlock(&lock)?;
+    Ok(false)
+}
 impl Store {
     pub fn open(dir: &Path) -> Result<Self> {
         if dir.exists() && dir.symlink_metadata()?.file_type().is_symlink() {

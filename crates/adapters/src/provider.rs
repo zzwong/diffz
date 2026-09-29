@@ -10,6 +10,8 @@ use std::sync::Arc;
 pub trait ReviewProvider: Send + Sync {
     fn rules(&self) -> Arc<dyn ReviewRules>;
     fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot>;
+    /// Whether `open` would take this address. Only parses; nothing runs.
+    fn accepts(&self, address: &str) -> bool;
     fn source(&self, target: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>>;
     fn remote(&self) -> Result<Arc<dyn ReviewRemote>>;
 }

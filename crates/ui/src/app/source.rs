@@ -4,6 +4,22 @@ impl Workbench {
     pub fn open(&mut self, request: OpenRequest, refresh: bool, cx: &mut Context<Self>) {
         self.open_pending(request, refresh, None, cx);
     }
+    /// Opens a request from a later `diffz` invocation the way the Open panel does. Without one,
+    /// the window only comes forward.
+    pub fn take_handoff(
+        &mut self,
+        request: Option<OpenRequest>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let Some(request) = request else {
+            return Ok(());
+        };
+        if self.unsaved() || self.busy {
+            return Err("diffz is still saving or publishing; try again in a moment".into());
+        }
+        self.open(request, false, cx);
+        Ok(())
+    }
     pub(super) fn open_pending(
         &mut self,
         request: OpenRequest,

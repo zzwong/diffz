@@ -2,12 +2,14 @@
 use anyhow::{Context, Result, bail};
 use diffz_adapters::{
     process::{read_bounded, resolve_program},
-    service::{Services, default_state_dir},
+    service::{Services, default_state_dir, remote_provider},
 };
 use diffz_core::{
     domain::ProviderId,
     provider::{Cancellation, OpenRequest, WorkbenchServices},
 };
+#[cfg(any(test, all(unix, feature = "desktop")))]
+use std::path::Path;
 use std::{
     io::{ErrorKind, Write},
     path::PathBuf,
@@ -19,9 +21,12 @@ mod code_font;
 const HELP: &str = r#"diffz: review diffs and pull requests on your desktop
 
 Usage:
+  diffz owner/repo#123
+  diffz group/project!123
+  diffz https://github.com/owner/repo/pull/123
+  diffz /path/to/change.patch
   diffz --pr owner/repo#123
   diffz --mr group/project!123
-  diffz /path/to/change.patch
   diffz --patch /path/to/change.patch
   diffz --git /repo --base main --head HEAD
   diffz --staged /repo
@@ -42,12 +47,22 @@ Options:
   --theme REF               "current" (Omarchy), a theme name, or a path to one theme's colors.toml or its folder
   --allow-github-writes     Let reviews be published to GitHub after a preview
   --allow-gitlab-writes     Let comments and approvals go to GitLab after a preview
+  --foreground              Run the window in this process and wait until it closes
+  --json                    Report the handoff or launch as one JSON line on stdout
   --inspect                 Print the snapshot currently loaded as JSON and stop
   --doctor                  Check which external tools exist, then exit
   --probe FILE              Write a report on native text measurement; requires --probe-output
   --probe-output PATH       Destination for the JSON report written by --probe
   --version                 Show the version, then exit
   --help                    Show this help
+
+A lone argument opens the patch file at that path when one exists; otherwise it is a
+pull or merge request address, in any form --pr or --mr accepts.
+
+diffz returns at once. A window already running on the same state directory takes the
+request and comes to the front; otherwise a new window starts in the background. The
+exit status says whether the request was taken. --help, --version, --doctor, --inspect,
+and --probe never hand off or detach.
 
 Run with no arguments and diffz shows the fixture named F01. Repositories are only read:
 diffz will not check out, stage, or alter anything in them. All network access
@@ -60,6 +75,10 @@ struct Options {
     writes: bool,
     gitlab_writes: bool,
     inspect: bool,
+    /// Whether the command line named a source; otherwise `request` is the default fixture.
+    requested: bool,
+    foreground: bool,
+    json: bool,
     font: Option<String>,
     theme: Option<String>,
     probe: Option<PathBuf>,
@@ -72,6 +91,9 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
     let mut writes = false;
     let mut gitlab_writes = false;
     let mut inspect = false;
+    let mut positional = false;
+    let mut foreground = false;
+    let mut json = false;
     let mut font = None;
     let mut theme = None;
     let mut base = "main".to_string();
@@ -123,17 +145,24 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
                 },
             )?,
             "--inspect" => inspect = true,
+            "--foreground" => foreground = true,
+            "--json" => json = true,
             "--font" => font = Some(next()?),
             "--theme" => theme = Some(next()?),
             "--probe" => probe = Some(PathBuf::from(next()?)),
             "--probe-output" => probe_output = Some(PathBuf::from(next()?)),
             _ if !arg.starts_with('-') => {
+                positional = true;
                 set_source(&mut source, OpenRequest::Patch(PathBuf::from(arg)))?
             }
             _ => bail!("unknown argument {arg:?}; use --help"),
         }
     }
-    let mut request = source.unwrap_or(OpenRequest::Fixture("F01".into()));
+    let requested = source.is_some();
+    let mut request = match source {
+        Some(OpenRequest::Patch(path)) if positional => detect(path)?,
+        source => source.unwrap_or(OpenRequest::Fixture("F01".into())),
+    };
     if let OpenRequest::LocalGit {
         base: b, head: h, ..
     } = &mut request
@@ -150,11 +179,34 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
         writes,
         gitlab_writes,
         inspect,
+        requested,
+        foreground,
+        json,
         font,
         theme,
         probe,
         probe_output,
     })
+}
+/// A lone argument is a patch when that path exists, and otherwise the address of whichever
+/// review provider's parser accepts it, passed on unchanged.
+fn detect(path: PathBuf) -> Result<OpenRequest> {
+    if path.exists() {
+        return Ok(OpenRequest::Patch(path));
+    }
+    if let Some(address) = path.to_str()
+        && let Some(provider) = remote_provider(address)
+    {
+        return Ok(OpenRequest::Remote {
+            provider,
+            address: address.to_string(),
+        });
+    }
+    bail!(
+        "{:?} is neither a file nor a review address; pass a patch file, owner/repo#N or a \
+         GitHub pull request URL, or group/project!N or a GitLab merge request URL",
+        path
+    )
 }
 fn set_source(source: &mut Option<OpenRequest>, request: OpenRequest) -> Result<()> {
     if source.is_some() {
@@ -198,6 +250,177 @@ fn desktop_font(requested: Option<String>) -> Result<Option<String>> {
     {
         Ok(requested)
     }
+}
+/// Makes paths in `request` independent of this process's working directory.
+#[cfg(any(test, all(unix, feature = "desktop")))]
+fn absolute(request: OpenRequest) -> Result<OpenRequest> {
+    Ok(match request {
+        OpenRequest::Patch(path) => OpenRequest::Patch(std::path::absolute(path)?),
+        OpenRequest::LocalGit { root, base, head } => OpenRequest::LocalGit {
+            root: std::path::absolute(root)?,
+            base,
+            head,
+        },
+        OpenRequest::LocalIndex(root) => OpenRequest::LocalIndex(std::path::absolute(root)?),
+        OpenRequest::LocalWorktree(root) => OpenRequest::LocalWorktree(std::path::absolute(root)?),
+        request => request,
+    })
+}
+/// The arguments that start a foreground window on `request`, from any working directory.
+#[cfg(any(test, all(unix, feature = "desktop")))]
+fn launch_args(
+    options: &Options,
+    state: &Path,
+    request: Option<&OpenRequest>,
+) -> Result<Vec<std::ffi::OsString>> {
+    let mut args: Vec<std::ffi::OsString> = vec![
+        "--foreground".into(),
+        "--state-dir".into(),
+        std::path::absolute(state)?.into(),
+    ];
+    match request {
+        None => {}
+        Some(OpenRequest::Fixture(id)) => args.extend(["--fixture".into(), id.into()]),
+        Some(OpenRequest::Patch(path)) => args.extend(["--patch".into(), path.into()]),
+        Some(OpenRequest::Remote { provider, address }) => {
+            let flag = if *provider == ProviderId::GITHUB {
+                "--pr"
+            } else if *provider == ProviderId::GITLAB {
+                "--mr"
+            } else {
+                bail!("no command-line flag opens a {provider} address")
+            };
+            args.extend([flag.into(), address.into()]);
+        }
+        Some(OpenRequest::LocalGit { root, base, head }) => args.extend([
+            "--git".into(),
+            root.into(),
+            "--base".into(),
+            base.into(),
+            "--head".into(),
+            head.into(),
+        ]),
+        Some(OpenRequest::LocalIndex(root)) => args.extend(["--staged".into(), root.into()]),
+        Some(OpenRequest::LocalWorktree(root)) => args.extend(["--worktree".into(), root.into()]),
+        Some(OpenRequest::Resume(id)) => args.extend(["--resume".into(), (&id.0).into()]),
+    }
+    if options.writes {
+        args.push("--allow-github-writes".into());
+    }
+    if options.gitlab_writes {
+        args.push("--allow-gitlab-writes".into());
+    }
+    if let Some(font) = &options.font {
+        args.extend(["--font".into(), font.into()]);
+    }
+    if let Some(theme) = &options.theme {
+        // A theme may be a relative path to its folder or colors.toml.
+        let theme = Path::new(theme);
+        let theme = match theme.exists() {
+            true => std::path::absolute(theme)?,
+            false => theme.to_path_buf(),
+        };
+        args.extend(["--theme".into(), theme.into()]);
+    }
+    Ok(args)
+}
+/// The `.app` bundle holding `exe`, which macOS should start through LaunchServices.
+#[cfg(all(target_os = "macos", any(test, feature = "desktop")))]
+fn app_bundle(exe: &Path) -> Option<&Path> {
+    let macos = exe.parent()?;
+    let contents = macos.parent()?;
+    let bundle = contents.parent()?;
+    (macos.file_name()? == "MacOS"
+        && contents.file_name()? == "Contents"
+        && bundle.extension()? == "app")
+        .then_some(bundle)
+}
+/// Starts a window in the background: through LaunchServices from an app bundle, so the Dock
+/// shows the app, and otherwise as this executable in a session of its own.
+#[cfg(all(unix, feature = "desktop"))]
+fn launch(args: Vec<std::ffi::OsString>) -> Result<()> {
+    let exe = std::env::current_exe()?.canonicalize()?;
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = app_bundle(&exe) {
+        use diffz_adapters::process::{ProcessRequest, Runner, stderr_excerpt};
+        // -n: an app already running on another state directory must not swallow the request.
+        let open = ProcessRequest::new("/usr/bin/open".into()).args(
+            [
+                "-n".into(),
+                "-a".into(),
+                bundle.as_os_str().to_owned(),
+                "--args".into(),
+            ]
+            .into_iter()
+            .chain(args),
+        );
+        let output = Runner::run(open, Cancellation::default())?;
+        if !output.status.success() {
+            bail!(
+                "LaunchServices could not start {}: {}",
+                bundle.display(),
+                stderr_excerpt(&output.stderr).unwrap_or_default()
+            )
+        }
+        return Ok(());
+    }
+    diffz_adapters::process::spawn_detached(&exe, &args)?;
+    Ok(())
+}
+/// Gives the request to the window running on `state`, or starts one in the background. Either
+/// way this returns without waiting for the window.
+#[cfg(all(unix, feature = "desktop"))]
+fn hand_off(options: &Options, state: &Path) -> Result<()> {
+    use diffz_adapters::handoff::{Outcome, send};
+    let request = match options.requested {
+        true => Some(absolute(options.request.clone())?),
+        false => None,
+    };
+    let result = match send(state, request.as_ref()) {
+        Ok(Outcome::Accepted) => Ok("handed_off"),
+        Ok(Outcome::Refused(message)) => Err(anyhow::anyhow!(message)),
+        Ok(Outcome::NotRunning) => launch_args(options, state, request.as_ref())
+            .and_then(launch)
+            .map(|()| "launched"),
+        Err(e) => Err(e.into()),
+    };
+    if matches!(result, Ok("handed_off"))
+        && (options.writes
+            || options.gitlab_writes
+            || options.font.is_some()
+            || options.theme.is_some())
+    {
+        eprintln!(
+            "diffz: the running window keeps the write permissions, font, and theme it started with"
+        );
+    }
+    if options.json {
+        let line = match &result {
+            Ok(status) => serde_json::json!({ "status": status, "source": request }),
+            Err(e) => serde_json::json!({ "status": "error", "message": format!("{e:#}") }),
+        };
+        print(&line.to_string())?;
+    }
+    result.map(|_| ())
+}
+/// Forwards requests from later invocations to the window, one at a time.
+#[cfg(all(unix, feature = "desktop"))]
+fn serve(
+    listener: diffz_adapters::handoff::Listener,
+) -> smol::channel::Receiver<diffz_ui::Handoff> {
+    let (tx, rx) = smol::channel::unbounded();
+    std::thread::spawn(move || {
+        while let Ok(mut incoming) = listener.accept() {
+            let handoff = diffz_ui::Handoff {
+                request: incoming.request.take(),
+                reply: Box::new(move |result| incoming.reply(result)),
+            };
+            if tx.send_blocking(handoff).is_err() {
+                break;
+            }
+        }
+    });
+    rx
 }
 
 fn main() {
@@ -255,11 +478,13 @@ fn run() -> Result<()> {
         report.push_str("This report implies no native runtime and no credential capability.");
         return print(&report);
     }
-    let options = parse(args)?;
+    let mut options = parse(args)?;
     #[cfg(not(feature = "desktop"))]
     let _ = &options.font;
+    #[cfg(not(all(unix, feature = "desktop")))]
+    let _ = (options.requested, options.foreground, options.json);
     let _ = &options.theme;
-    if let (Some(source), Some(output)) = (options.probe, options.probe_output) {
+    if let (Some(source), Some(output)) = (options.probe.take(), options.probe_output.take()) {
         let source = String::from_utf8(read_bounded(&source, 1024 * 1024)?)
             .context("probe source is not UTF-8")?;
         #[cfg(feature = "desktop")]
@@ -273,10 +498,15 @@ fn run() -> Result<()> {
             bail!("native probe requires --features desktop")
         }
     }
-    let state = match options.state {
+    let state = match options.state.clone() {
         Some(path) => path,
         None => default_state_dir()?,
     };
+    // A launch from the Dock or Finder has launchd as its parent and is the window itself.
+    #[cfg(all(unix, feature = "desktop"))]
+    if !options.inspect && !options.foreground && std::os::unix::process::parent_id() != 1 {
+        return hand_off(&options, &state);
+    }
     let services: Arc<dyn WorkbenchServices> = Arc::new(Services::new_with_providers(
         &state,
         options.writes,
@@ -293,6 +523,16 @@ fn run() -> Result<()> {
     for problem in registry.problems() {
         eprintln!("diffz: extension skipped: {problem}");
     }
+    #[cfg(all(unix, feature = "desktop"))]
+    let handoffs = match diffz_adapters::handoff::Listener::bind(&state) {
+        Ok(listener) => Some(serve(listener)),
+        Err(e) => {
+            eprintln!("diffz: later invocations cannot hand requests to this window: {e}");
+            None
+        }
+    };
+    #[cfg(all(not(unix), feature = "desktop"))]
+    let handoffs = None;
     #[cfg(feature = "desktop")]
     {
         if diffz_ui::launch(
@@ -302,6 +542,7 @@ fn run() -> Result<()> {
                 registry: std::sync::Arc::new(registry),
                 font_family: desktop_font(options.font)?,
                 theme: options.theme,
+                handoffs,
             },
         ) {
             Ok(())
@@ -326,13 +567,112 @@ mod tests {
             OpenRequest::Fixture(_)
         ));
     }
+    /// An existing patch file whose path contains a space.
+    fn patch_file() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("review files");
+        std::fs::create_dir(&path).unwrap();
+        let path = path.join("change.patch");
+        std::fs::write(&path, "").unwrap();
+        (dir, path.to_str().unwrap().to_string())
+    }
     #[test]
     fn positional_patch_preserves_the_file_path() {
-        let path = "/tmp/review files/change.patch";
+        let (_dir, path) = patch_file();
         assert!(matches!(
-            parse([path.to_string(), "--inspect".into()]).unwrap().request,
-            OpenRequest::Patch(p) if p == std::path::Path::new(path)
+            parse([path.clone(), "--inspect".into()]).unwrap().request,
+            OpenRequest::Patch(p) if p == std::path::Path::new(&path)
         ));
+    }
+    #[test]
+    fn positional_review_addresses_pass_through_unchanged() {
+        for (address, provider) in [
+            ("owner/repo#123", ProviderId::GITHUB),
+            ("https://github.com/owner/repo/pull/123", ProviderId::GITHUB),
+            ("group/project!123", ProviderId::GITLAB),
+            (
+                "https://gitlab.com/group/sub/project/-/merge_requests/123/diffs",
+                ProviderId::GITLAB,
+            ),
+        ] {
+            let options = parse([address.to_string()]).unwrap();
+            assert!(options.requested);
+            assert_eq!(
+                options.request,
+                OpenRequest::Remote {
+                    provider,
+                    address: address.into()
+                }
+            );
+        }
+    }
+    #[test]
+    fn unrecognized_positional_lists_what_is_accepted() {
+        let error = parse(["no/such/change.patch".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("neither a file nor a review address"),
+            "{error}"
+        );
+        assert!(error.contains("owner/repo#N") && error.contains("group/project!N"));
+    }
+    #[test]
+    fn positional_address_conflicts_with_other_sources() {
+        for args in [
+            vec!["owner/repo#1", "--fixture", "F01"],
+            vec!["--mr", "group/project!1", "owner/repo#1"],
+        ] {
+            let error = parse(args.into_iter().map(str::to_string)).unwrap_err();
+            assert_eq!(error.to_string(), "pass a single source per launch");
+        }
+    }
+    #[test]
+    fn launch_flags_are_parsed() {
+        let options = parse(["--foreground", "--json"].map(str::to_string)).unwrap();
+        assert!(options.foreground && options.json && !options.requested);
+        let options = parse(Vec::<String>::new()).unwrap();
+        assert!(!options.foreground && !options.json);
+    }
+    #[test]
+    fn launched_windows_get_absolute_paths_and_run_in_the_foreground() {
+        let options =
+            parse(["--git", "repo", "--base", "v1", "--allow-gitlab-writes"].map(str::to_string))
+                .unwrap();
+        let request = absolute(options.request.clone()).unwrap();
+        let args = launch_args(&options, Path::new("state"), Some(&request)).unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let expected: Vec<std::ffi::OsString> = vec![
+            "--foreground".into(),
+            "--state-dir".into(),
+            cwd.join("state").into(),
+            "--git".into(),
+            cwd.join("repo").into(),
+            "--base".into(),
+            "v1".into(),
+            "--head".into(),
+            "HEAD".into(),
+            "--allow-gitlab-writes".into(),
+        ];
+        assert_eq!(args, expected);
+        let options = parse(["group/project!4".to_string()]).unwrap();
+        let args = launch_args(&options, Path::new("/state"), Some(&options.request)).unwrap();
+        assert_eq!(
+            args[3..],
+            ["--mr", "group/project!4"].map(std::ffi::OsString::from)
+        );
+        let args = launch_args(&options, Path::new("/state"), None).unwrap();
+        assert_eq!(args.len(), 3);
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn app_bundles_are_found_from_their_executable() {
+        assert_eq!(
+            app_bundle(Path::new("/Applications/Diffz.app/Contents/MacOS/diffz")),
+            Some(Path::new("/Applications/Diffz.app"))
+        );
+        assert_eq!(app_bundle(Path::new("/repo/target/debug/diffz")), None);
+        assert_eq!(app_bundle(Path::new("/opt/MacOS/diffz")), None);
     }
     #[test]
     fn positional_patch_conflicts_with_other_sources() {
@@ -354,7 +694,8 @@ mod tests {
             .unwrap();
         // This entry uses unquoted tokens; the file field expands to one argument,
         // even when its path contains spaces, and disappears for a menu launch.
-        for file in [None, Some("/tmp/review files/change.patch")] {
+        let (_dir, path) = patch_file();
+        for file in [None, Some(path.as_str())] {
             let args = exec.split_whitespace().skip(1).filter_map(|arg| {
                 if arg == "%f" {
                     file.map(str::to_string)

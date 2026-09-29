@@ -34,6 +34,13 @@ pub struct LaunchOptions {
     pub registry: Arc<Registry>,
     pub font_family: Option<String>,
     pub theme: Option<String>,
+    pub handoffs: Option<smol::channel::Receiver<Handoff>>,
+}
+/// A request from a later `diffz` invocation. `request` is `None` when it named no source, and
+/// `reply` learns whether the window took the request.
+pub struct Handoff {
+    pub request: Option<OpenRequest>,
+    pub reply: Box<dyn FnOnce(Result<(), String>) + Send>,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Panel {
@@ -692,7 +699,9 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                 app_id: Some("io.github.zzwong.Diffz".to_string()),
                 ..gpui_kit::component::TitleBar::window_options()
             };
+            let handoffs = options.handoffs;
             cx.spawn(async move |cx| {
+                let mut workbench = None;
                 let result = cx.open_window(options_window, |window, cx| {
                     diffz_core::timing::mark("window");
                     window.set_window_title("diffz");
@@ -715,12 +724,38 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                         );
                     });
                     view.read(cx).diff_focus.clone().focus(window, cx);
+                    workbench = Some(view.clone());
                     cx.new(|cx| Root::new(view, window, cx))
                 });
-                if let Err(e) = result {
-                    eprintln!("could not create native window: {e}");
-                    WINDOW_FAILED.store(true, std::sync::atomic::Ordering::Release);
-                    cx.update(|cx| cx.quit());
+                let window = match result {
+                    Ok(window) => window,
+                    Err(e) => {
+                        eprintln!("could not create native window: {e}");
+                        WINDOW_FAILED.store(true, std::sync::atomic::Ordering::Release);
+                        cx.update(|cx| cx.quit());
+                        return;
+                    }
+                };
+                let (Some(handoffs), Some(workbench)) = (handoffs, workbench) else {
+                    return;
+                };
+                while let Ok(handoff) = handoffs.recv().await {
+                    // The view of a review just opened saves a moment later; wait for saves
+                    // like that instead of refusing the request.
+                    for _ in 0..50 {
+                        if workbench.read_with(cx, |app, _| !app.unsaved() && !app.busy) {
+                            break;
+                        }
+                        smol::Timer::after(Duration::from_millis(100)).await;
+                    }
+                    let result = window
+                        .update(cx, |_, window, cx| {
+                            window.activate_window();
+                            cx.activate(true);
+                            workbench.update(cx, |app, cx| app.take_handoff(handoff.request, cx))
+                        })
+                        .unwrap_or_else(|_| Err("the diffz window has closed".into()));
+                    (handoff.reply)(result);
                 }
             })
             .detach();

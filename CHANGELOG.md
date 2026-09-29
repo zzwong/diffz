@@ -7,6 +7,22 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `diffz <target>` detects what it was given: a patch file, a GitHub pull
+  request (`owner/repo#123` or a URL), or a GitLab merge request
+  (`group/project!123` or a URL). `--pr`, `--mr` and `--patch` still work.
+- `--json` prints whether a request was handed off or launched, or why it
+  failed, as one JSON line. `--foreground` keeps the window attached to the
+  terminal.
+
+### Changed
+
+- `diffz` returns right away instead of waiting for the window to close. When
+  diffz is already running on the same state directory, the open window
+  switches to the new review and comes to the front, instead of the second
+  launch failing because the state directory is in use.
+
 ## [0.2.0] - 2026-09-26
 
 ### Added

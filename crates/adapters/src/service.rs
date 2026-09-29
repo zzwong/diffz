@@ -305,6 +305,18 @@ impl WorkbenchServices for Services {
         )
     }
 }
+/// The provider whose own address parser takes `address`, so new address forms need no caller
+/// changes. Nothing runs and no store is opened.
+pub fn remote_provider(address: &str) -> Option<ProviderId> {
+    let providers: [Arc<dyn ReviewProvider>; 2] = [
+        Arc::new(GithubProvider::new(None)),
+        Arc::new(GitlabProvider::new(None)),
+    ];
+    providers
+        .iter()
+        .find(|p| p.accepts(address))
+        .map(|p| p.rules().id())
+}
 pub fn default_state_dir() -> Result<PathBuf> {
     #[cfg(target_os = "macos")]
     if let Some(home) = std::env::var_os("HOME") {
@@ -370,5 +382,26 @@ mod tests {
         assert!(!root.join("diffr").exists());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remote_addresses_go_to_the_provider_that_parses_them() {
+        use diffz_core::domain::ProviderId;
+        for (address, provider) in [
+            ("owner/repo#12", Some(ProviderId::GITHUB)),
+            (
+                "https://github.com/owner/repo/pull/12/files",
+                Some(ProviderId::GITHUB),
+            ),
+            ("group/sub/project!7", Some(ProviderId::GITLAB)),
+            (
+                "https://gitlab.example.com/group/project/-/merge_requests/7",
+                Some(ProviderId::GITLAB),
+            ),
+            ("change.patch", None),
+            ("owner/repo", None),
+        ] {
+            assert_eq!(super::remote_provider(address), provider, "{address}");
+        }
     }
 }

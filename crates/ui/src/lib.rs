@@ -8,7 +8,7 @@ pub mod probe;
 mod reader;
 pub mod theme;
 pub mod viewport;
-pub use app::{LaunchOptions, launch};
+pub use app::{Handoff, LaunchOptions, launch};
 
 mod chrome;
 mod comment_editor;

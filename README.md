@@ -99,14 +99,29 @@ not Developer ID signed or notarized.
 ## Usage
 
 ```sh
-diffz --pr owner/repo#123              # GitHub pull request
-diffz --mr group/project!123           # GitLab merge request (or a full URL)
-diffz --patch change.patch             # unified diff file
+diffz owner/repo#123                   # GitHub pull request (or a full URL)
+diffz group/project!123                # GitLab merge request (or a full URL)
+diffz change.patch                     # unified diff file
+diffz --pr owner/repo#123              # the same, naming the source explicitly
+diffz --mr group/project!123
+diffz --patch change.patch
 diffz --git /repo --base main          # main..HEAD in a local repository
 diffz --staged /repo                   # the index against HEAD
 diffz --worktree /repo                 # unstaged and untracked changes
 diffz --resume <snapshot id>           # reopen a saved review
 ```
+
+A lone argument opens the patch file at that path if there is one, and is
+otherwise read as a pull or merge request address.
+
+`diffz` returns as soon as the request is on its way, so scripts and coding
+agents can call it. When a diffz window is already open on the same state
+directory, it switches to the new review and comes to the front; your drafts
+for the previous one stay saved. Otherwise a new window starts in the
+background. The exit status says whether the request was taken, and `--json`
+prints the outcome as one line, such as
+`{"status":"handed_off","source":...}`. `--foreground` runs the window in the
+terminal and waits for it to close, as earlier versions did.
 
 The complete option list is `diffz --help`; `diffz --doctor` reports which
 external tools the machine has.

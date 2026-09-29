@@ -1,6 +1,6 @@
 //! Process execution has fixed limits and no shell. Errors omit arguments; captured stderr is only
 //! shown through the bounded, redacted `stderr_excerpt`.
-//! On Unix, the process group is this component's sole unsafe boundary.
+//! On Unix, the process group and the detached session are this component's unsafe boundaries.
 use crate::{AdapterError, Result};
 use diffz_core::provider::Cancellation;
 use std::{
@@ -212,6 +212,33 @@ impl Runner {
             thread::sleep(Duration::from_millis(5));
         }
     }
+}
+/// Starts `executable` in a session of its own with null stdio and does not wait for it, so it
+/// outlives the terminal that started it.
+pub fn spawn_detached(executable: &Path, args: &[OsString]) -> Result<()> {
+    let mut cmd = Command::new(executable);
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: the hook runs in the forked child and only calls setsid, which is
+        // async-signal-safe and touches no memory shared with the parent.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    cmd.spawn().map_err(|e| {
+        AdapterError::Message(format!("configured executable could not start: {e}"))
+    })?;
+    Ok(())
 }
 /// Search only absolute PATH entries. LocalGit also rejects tools found inside its repository.
 ///
