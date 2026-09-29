@@ -3,3 +3,4 @@
 *.sh text eol=lf
 fixtures/** -text
 *.wasm binary
+patches/gpui-pre-linux-0.3.3-x11-demand.patch whitespace=-blank-at-eol,-blank-at-eof
