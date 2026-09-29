@@ -201,11 +201,11 @@ impl Workbench {
                                     a.files_peek_hovered(close, w, c);
                                 }))
                                 .child(
-                                    Button::new("files")
-                                        .cursor_pointer()
-                                        .ghost()
-                                        .small()
+                                    // Active only while pinned open: a hover peek
+                                    // is transient, and a click there pins it.
+                                    toolbar_toggle(Button::new("files"), self.files_visible, skin)
                                         .icon(IconName::PanelLeft)
+                                        .toggled(self.files_visible)
                                         .accessibility_label("Toggle file tree")
                                         .tooltip(tip("Toggle file tree", Command::Files))
                                         .on_click(cx.listener(|a, _, w, c| {
