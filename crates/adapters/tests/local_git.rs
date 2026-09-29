@@ -4,6 +4,9 @@ use diffz_adapters::{
 };
 use diffz_core::provider::Cancellation;
 use std::process::Command;
+#[cfg(unix)]
+#[path = "support/fake_cli.rs"]
+mod fake_cli;
 fn git(p: &std::path::Path, args: &[&str]) {
     let o = Command::new("git")
         .arg("-C")
@@ -59,12 +62,10 @@ fn unborn_staged_repository() {
 #[test]
 #[cfg(unix)]
 fn symlinked_git_that_points_into_the_repository_is_rejected() {
-    use std::os::unix::fs::PermissionsExt;
     let repo = tempfile::tempdir().unwrap();
     git(repo.path(), &["init", "-b", "main"]);
     let inner = repo.path().join("git");
-    std::fs::write(&inner, "#!/bin/sh\nexec git \"$@\"\n").unwrap();
-    std::fs::set_permissions(&inner, std::fs::Permissions::from_mode(0o700)).unwrap();
+    fake_cli::write_executable(&inner, "#!/bin/sh\nexec git \"$@\"\n");
     let bin = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink(&inner, bin.path().join("git")).unwrap();
     let err = LocalGit::new(bin.path().canonicalize().unwrap().join("git"))

@@ -343,14 +343,15 @@ pub fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
+#[cfg(all(test, unix))]
+#[path = "../tests/support/fake_cli.rs"]
+mod fake_cli;
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(unix)]
     fn executable(path: &Path, script: &str) {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::write(path, script).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        super::fake_cli::write_executable(path, script);
     }
     #[test]
     #[cfg(unix)]

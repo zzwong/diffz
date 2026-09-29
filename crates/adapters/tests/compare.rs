@@ -192,10 +192,15 @@ fn each_provider_only_claims_its_own_compare() {
 }
 
 #[cfg(unix)]
+#[path = "support/fake_cli.rs"]
+mod fake_cli;
+
+#[cfg(unix)]
 mod loaded {
+    use super::fake_cli;
     use super::*;
     use diffz_core::provider::Cancellation;
-    use std::{os::unix::fs::PermissionsExt, path::Path, sync::Arc};
+    use std::{path::Path, sync::Arc};
 
     const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/compare");
     const GH_BASE: &str = "54437197ee79c20678db433d98616fab7ddff1a5";
@@ -209,8 +214,7 @@ mod loaded {
     fn program(dir: &Path) -> std::path::PathBuf {
         let path = dir.join("fake-cli");
         let script = include_str!("support/fake_compare.py").replace("FIXTURES", FIXTURES);
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        fake_cli::write_executable(&path, &script);
         path
     }
     fn calls(dir: &Path) -> Vec<String> {

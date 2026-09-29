@@ -5,6 +5,9 @@ use diffz_adapters::{
 };
 use diffz_core::{domain::*, provider::Cancellation, review::*};
 use std::sync::Arc;
+#[cfg(unix)]
+#[path = "support/fake_cli.rs"]
+mod fake_cli;
 fn position(p: &PreparedReview) -> GitlabPosition {
     serde_json::from_str(p.comments[0].position.as_ref().unwrap().get()).unwrap()
 }
@@ -29,24 +32,19 @@ fn nested_projects_and_strict_addresses() {
 }
 #[cfg(unix)]
 fn reader(dir: &std::path::Path) -> Arc<GitlabReader> {
-    use std::os::unix::fs::PermissionsExt;
     let path = dir.join("fake-glab");
-    std::fs::write(&path, include_str!("support/fake_glab.py")).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    fake_cli::write_executable(&path, include_str!("support/fake_glab.py"));
     Arc::new(GitlabReader::new(path))
 }
 #[test]
 #[cfg(unix)]
 fn failed_glab_run_reports_its_stderr() {
-    use std::os::unix::fs::PermissionsExt;
     let temp = tempfile::tempdir().unwrap();
     let glab = temp.path().join("glab");
-    std::fs::write(
+    fake_cli::write_executable(
         &glab,
         "#!/bin/sh\necho 'glab: 401 Unauthorized' >&2\nexit 1\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&glab, std::fs::Permissions::from_mode(0o700)).unwrap();
+    );
     let err = GitlabReader::new(glab)
         .snapshot(
             &MrAddress::parse("team/repo!7").unwrap(),
