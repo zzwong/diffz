@@ -177,6 +177,8 @@ def summarise(out):
         dr = s["metrics"]["drawables"]
         cells.append("–" if dr is None else f"{dr['min']:g}–{dr['max']:g}" if dr["min"] != dr["max"] else f"{dr['median']:g}")
         flags = []
+        if dr and dr["min"] < env.get("frame_buffers", 3):
+            flags.append("frame buffers short")
         if not s["iosurface_ok"]:
             flags.append("IOSurface size unexpected")
         if s["settle_timeouts"]:
@@ -347,7 +349,7 @@ json.dump({
     "binary_bytes": $(stat -f %z "$bin"), "binary_version": "$("$bin" --version 2>/dev/null | head -1)",
     "macos": "$(sw_vers -productVersion) ($(sw_vers -buildVersion))", "cpus": $ncpu,
     "memory_bytes": $(sysctl -n hw.memsize), "display_scale": $scale, "window_points": "1360x900",
-    "drawable_bytes": $drawable_bytes, "low_power_mode": "${low_power:-unknown}", "thermal_state": "$thermal",
+    "drawable_bytes": $drawable_bytes, "frame_buffers": $frame_buffers, "low_power_mode": "${low_power:-unknown}", "thermal_state": "$thermal",
     "repeat": $repeat, "idle_seconds": $idle_seconds, "offline": $offline == 1,
     "forced": $([[ -n "$failures" ]] && echo True || echo False),
     "gate_failures": [l for l in """$failures""".splitlines() if l],
@@ -394,7 +396,7 @@ settle() {
 }
 
 run_scenario() {
-  local name="$1" source="$2" steps="$3" after="$4" dir="$5" msl="$6" pid state log settled
+  local name="$1" source="$2" steps="$3" after="$4" dir="$5" msl="$6" last_try="$7" pid state log settled
   state="/tmp/dzp/$name"
   rm -rf "$state"
   mkdir -p "$state" "$dir"
@@ -411,9 +413,10 @@ run_scenario() {
   pids+=("$pid")
   settled="$(settle "$pid" "$state" "$log" "$steps")" || { echo "  $name: diffz exited; see $log" >&2; return 1; }
   # A window that was covered while it opened never drew enough frames to fill the pool.
+  # The last attempt is sampled anyway, and the summary shows the frame-buffer count.
   local buffers
   buffers="$(footprint_now /tmp/dzp/settle.json "$pid" | awk -v f="$drawable_bytes" '{printf "%d", $2 / f + 0.5}')"
-  if [[ "$buffers" -lt "$frame_buffers" ]]; then
+  if [[ "$buffers" -lt "$frame_buffers" && "$last_try" == 0 ]]; then
     echo "  $name: $buffers of $frame_buffers frame buffers; was the window covered? retrying" >&2
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
@@ -470,9 +473,9 @@ for run in $(seq 1 "$repeat"); do
   echo "run $run of $repeat"
   while read -r -u 3 name net source steps after; do
     [[ -n "$name" ]] || continue
-    for _ in 1 2 3; do
+    for try in 1 2 3; do
       status=0
-      run_scenario "$name" "$source" "$steps" "$after" "$out/raw/$name-run$run" 0 || status=$?
+      run_scenario "$name" "$source" "$steps" "$after" "$out/raw/$name-run$run" 0 "$((try == 3))" || status=$?
       [[ "$status" == 2 ]] || break
       rm -rf "$out/raw/$name-run$run"
     done
@@ -482,7 +485,7 @@ if [[ "$attribute" == 1 ]]; then
   echo "attribution"
   while read -r -u 3 name net source steps after; do
     [[ -n "$name" ]] || continue
-    run_scenario "$name" "$source" "$steps" "$after" "$out/raw/attribute/$name" 1 || true
+    run_scenario "$name" "$source" "$steps" "$after" "$out/raw/attribute/$name" 1 1 || true
   done 3<<< "$scenario_table"
 fi
 echo "measured in $(((SECONDS - started) / 60)) min $(((SECONDS - started) % 60)) s"

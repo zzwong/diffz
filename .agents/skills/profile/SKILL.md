@@ -31,5 +31,5 @@ caveats. Read it before interpreting numbers. The script is
    beyond the old run's min–max spread (unmarked by ≈) and no other scenario
    regresses by more than its spread.
 
-A full pass takes about an hour; `--scenarios` and `--repeat` narrow it while
+A full pass takes about 40 minutes; `--scenarios` and `--repeat` narrow it while
 iterating, but the PR's table comes from a full `--repeat 3` run.
