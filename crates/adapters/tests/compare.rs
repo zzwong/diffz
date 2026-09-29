@@ -655,6 +655,8 @@ mod loaded {
             provider: ProviderId::GITHUB,
             address: GH_RANGE.into(),
         });
+        // Releases are read after the compare shows, as the window does, and saved with it.
+        let s = Arc::new(services.releases(&s, Cancellation::default()).unwrap());
         let resume = || OpenRequest::Resume(s.id.clone());
         let paths: Vec<String> = GH_BLAMED
             .iter()
