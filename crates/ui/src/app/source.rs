@@ -355,10 +355,12 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
                 }
                 app.releases_pending = None;
                 match result {
-                    Ok(snapshot) => {
+                    Ok(mut snapshot) => {
+                        let blame = std::mem::take(&mut snapshot.overview.blame);
                         let snapshot = Arc::new(snapshot);
                         if let Some(a) = &mut app.active {
                             a.snapshot = snapshot.clone();
+                            a.blame = blame;
                         }
                         if let Some(v) = &app.viewport {
                             v.borrow_mut().snapshot = snapshot;
@@ -488,13 +490,16 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
                     else {
                         continue;
                     };
+                    let Some(release) = releases.get(b.release) else {
+                        continue;
+                    };
                     (
                         (Side::Right, line),
                         crate::viewport::ReleaseMark {
                             release: Some(b.release),
                             label: format!(
                                 "Changed in {} · {}",
-                                releases[b.release].name(head),
+                                release.name(head),
                                 &b.commit[..b.commit.len().min(7)]
                             ),
                             dim: focus.is_some_and(|f| f != b.release),

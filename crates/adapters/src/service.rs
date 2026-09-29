@@ -410,6 +410,10 @@ impl WorkbenchServices for Services {
         for r in &mut releases {
             r.files.retain(|f| paths.contains(&f.path));
         }
+        if s.overview.releases != releases {
+            // Embedded blame from older databases uses indexes into the old list.
+            s.overview.blame.clear();
+        }
         s.overview.releases = releases;
         for w in warnings {
             if !s.warnings.contains(&w) {
@@ -925,9 +929,20 @@ mod tests {
             let (_temp, services) = services(Fake::default());
             let opened = open(&services);
             assert!(opened.snapshot.overview.releases.is_empty());
+            let mut with_legacy_blame = opened.snapshot.clone();
+            with_legacy_blame.overview.blame.insert(
+                "a.rs".into(),
+                Some(vec![diffz_core::review_details::Blamed {
+                    start: 1,
+                    end: 1,
+                    release: 999,
+                    commit: "old".into(),
+                }]),
+            );
             let s = services
-                .releases(&opened.snapshot, Cancellation::default())
+                .releases(&with_legacy_blame, Cancellation::default())
                 .unwrap();
+            assert!(s.overview.blame.is_empty());
             assert_eq!(s.id, opened.snapshot.id);
             // Files outside the compare are dropped, leaving v3 with none to narrow the tree to.
             let files: Vec<Vec<&str>> = s
