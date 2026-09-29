@@ -75,6 +75,11 @@ impl PreparedReview {
         if rules.id() != target.provider {
             return Err(fail("this review belongs to another provider"));
         }
+        if target.compare.is_some() {
+            return Err(fail(
+                "a compare is read-only; reviews can only be sent on a pull or merge request",
+            ));
+        }
         rules.check(verdict, &summary, &drafts)?;
         if !s.verify_identity() {
             return Err(fail("snapshot identity failed verification"));

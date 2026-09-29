@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+# Local-only transport fixture standing in for gh and glab: replays real compare responses
+# recorded from public repositories (tests/fixtures/compare) and never touches a network.
+import sys, json, pathlib
+root = pathlib.Path(__file__).parent
+fixtures = pathlib.Path('FIXTURES')
+args = sys.argv[1:]
+endpoint = args[-1]
+with (root / 'calls.log').open('a') as log:
+    log.write(endpoint + '\n')
+host = args[args.index('--hostname') + 1]
+want_diff = 'Accept: application/vnd.github.diff' in args
+def load(name):
+    return json.loads((fixtures / name).read_text())
+code = 200; raw = None; value = None
+if host == 'github.com':
+    gh = load('github_compare.json')
+    base, head = gh['base_commit']['sha'], gh['commits'][-1]['sha']
+    prefix = 'repos/dtolnay/anyhow'
+    if endpoint == prefix:
+        value = load('github_repo.json')
+    elif endpoint in (f'{prefix}/compare/1.0.80...1.0.81', f'{prefix}/compare/{base}...{head}'):
+        if (root / 'diverged').exists():
+            gh['merge_base_commit']['sha'] = '0' * 40
+        if (root / 'many-commits').exists():
+            gh['total_commits'] = 297
+        if want_diff and (root / 'no-diff').exists():
+            code = 406; value = {'message': 'Sorry, this diff is taking too long to generate.'}
+        elif want_diff:
+            raw = (fixtures / 'github_compare.diff').read_text()
+        else:
+            value = gh
+    else:
+        raise AssertionError(endpoint)
+else:
+    assert host == 'gitlab.com'
+    prefix = 'projects/gitlab-org%2Fruby%2Fgems%2Fgitlab-styles'
+    frm, to, mb = load('gitlab_from.json'), load('gitlab_to.json'), load('gitlab_merge_base.json')
+    if endpoint == prefix:
+        value = load('gitlab_project.json')
+    elif endpoint in (f'{prefix}/repository/commits/14.0.0', f'{prefix}/repository/commits/{frm["id"]}'):
+        value = frm
+    elif endpoint in (f'{prefix}/repository/commits/14.1.0', f'{prefix}/repository/commits/{to["id"]}'):
+        value = to
+    elif endpoint == f'{prefix}/repository/merge_base?refs[]={frm["id"]}&refs[]={to["id"]}':
+        value = mb
+    elif endpoint.startswith(f'{prefix}/repository/compare?from={frm["id"]}&to={to["id"]}&straight='):
+        value = load('gitlab_compare.json')
+        if (root / 'timeout').exists():
+            value['compare_timeout'] = True
+        if (root / 'collapsed').exists():
+            value['diffs'][0].update(collapsed=True, diff='')
+    else:
+        raise AssertionError(endpoint)
+sys.stdout.write('HTTP/1.1 %d Mock\r\nContent-Type: application/json\r\n\r\n' % code)
+sys.stdout.write(raw if raw is not None else json.dumps(value))

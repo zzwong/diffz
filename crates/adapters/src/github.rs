@@ -100,6 +100,142 @@ impl PrAddress {
         format!("repos/{}/{}/pulls/{}", self.owner, self.repo, self.number)
     }
 }
+/// What a GitHub address names: a pull request, or a read-only compare of two refs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GithubTarget {
+    Pr(PrAddress),
+    Compare(CompareAddress),
+}
+impl GithubTarget {
+    pub fn parse(value: &str) -> Result<Self> {
+        let value = value.trim();
+        let compare = value.starts_with("https://")
+            && url::Url::parse(value)
+                .ok()
+                .and_then(|u| u.path_segments()?.nth(2).map(|p| p == "compare"))
+                == Some(true);
+        if compare {
+            CompareAddress::parse(value).map(Self::Compare)
+        } else {
+            PrAddress::parse(value).map(Self::Pr)
+        }
+    }
+}
+/// `https://HOST/OWNER/REPO/compare/BASE...HEAD`; `BASE..HEAD` asks for a direct comparison.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompareAddress {
+    pub host: String,
+    pub owner: String,
+    pub repo: String,
+    pub refs: CompareRefs,
+}
+impl CompareAddress {
+    pub fn parse(value: &str) -> Result<Self> {
+        let value = value.trim();
+        if value.split('/').any(|p| p == ".." || p == ".") {
+            return Err("relative URL segments are not accepted as a compare identity".into());
+        }
+        let u = url::Url::parse(value)
+            .map_err(|_| AdapterError::Message("invalid compare URL".into()))?;
+        if u.scheme() != "https"
+            || !u.username().is_empty()
+            || u.password().is_some()
+            || u.port().is_some()
+            // GitHub's own compare page appends expand=1; nothing else belongs in the address.
+            || u.query().is_some_and(|q| q != "expand=1")
+        {
+            return Err(
+                "a compare URL must be HTTPS, without credentials, ports, or query strings".into(),
+            );
+        }
+        let host = u
+            .host_str()
+            .ok_or("compare URL has no host")?
+            .to_ascii_lowercase();
+        let parts: Vec<&str> = u
+            .path()
+            .trim_end_matches('/')
+            .splitn(5, '/')
+            .skip(1)
+            .collect();
+        if parts.len() != 4
+            || parts[2] != "compare"
+            || !identifier(parts[0])
+            || !identifier(parts[1])
+        {
+            return Err(
+                "the URL must look like https://HOST/OWNER/REPO/compare/BASE...HEAD".into(),
+            );
+        }
+        let range = decode_path(parts[3])?;
+        let (base, head, direct) = match range.split_once("...") {
+            Some((base, head)) => (base, head, false),
+            None => {
+                let (base, head) = range
+                    .split_once("..")
+                    .ok_or("a compare needs two refs: BASE...HEAD, or BASE..HEAD")?;
+                (base, head, true)
+            }
+        };
+        // A head may be `owner:ref` for a fork of the same network, and so may a base.
+        for side in [base, head] {
+            let name = side.split_once(':').map_or(
+                side,
+                |(owner, name)| {
+                    if identifier(owner) { name } else { "" }
+                },
+            );
+            if !ref_name(name) {
+                return Err("the compare names a ref that Git cannot use".into());
+            }
+        }
+        Ok(Self {
+            host,
+            owner: parts[0].into(),
+            repo: parts[1].into(),
+            refs: CompareRefs {
+                base: base.into(),
+                head: head.into(),
+                direct,
+            },
+        })
+    }
+}
+/// Checks the rules `git check-ref-format` applies, plus the `:` this crate uses for `owner:ref`.
+pub(crate) fn ref_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && !s.starts_with(['-', '/', '.'])
+        && !s.ends_with(['/', '.'])
+        && !s.ends_with(".lock")
+        && !s.contains("..")
+        && !s.contains("//")
+        && !s.contains("@{")
+        && !s.contains("/.")
+        && !s
+            .bytes()
+            .any(|b| b <= b' ' || b == 0x7f || b"~^:?*[\\".contains(&b))
+}
+/// Decodes `%XX` in a URL path; refs such as `release%2F1.0` name branches with slashes.
+pub(crate) fn decode_path(s: &str) -> Result<String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = s
+                .get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+                .ok_or("invalid percent-encoding in the URL")?;
+            out.push(hex);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|_| "the URL is not valid UTF-8 once decoded".into())
+}
 #[derive(Debug)]
 pub struct HttpResponse {
     pub status: u16,
@@ -626,6 +762,156 @@ impl GithubReader {
         )
     }
 }
+/// A compare is read-only: it has no PR, account, or reviews, only two resolved commits.
+impl GithubReader {
+    pub fn compare(&self, a: &CompareAddress, cancel: Cancellation) -> Result<Snapshot> {
+        let repo = format!("repos/{}/{}", a.owner, a.repo);
+        let range = |base: &str, head: &str| {
+            let refs = |r: &str| encode_path(r).replace('/', "%2F");
+            format!("{repo}/compare/{}...{}", refs(base), refs(head))
+        };
+        // Refs move, so resolve them once here and pin every later read to those commits.
+        let (meta, named) = std::thread::scope(|s| {
+            let meta = s.spawn(|| self.get_json(&a.host, &repo, cancel.clone()));
+            let named = self.get_json(&a.host, &range(&a.refs.base, &a.refs.head), cancel.clone());
+            (joined(meta), named)
+        });
+        let (meta, named) = (meta?, named?);
+        let owner = text(&meta, "/owner/login")?;
+        let name = text(&meta, "/name")?;
+        if !owner.eq_ignore_ascii_case(&a.owner) || !name.eq_ignore_ascii_case(&a.repo) {
+            return Err(
+                "the repository moved to another identity; open the compare at its canonical URL"
+                    .into(),
+            );
+        }
+        let base = oid(&named, "/base_commit/sha")?;
+        let merge_base = oid(&named, "/merge_base_commit/sha")?;
+        if a.refs.direct && merge_base != base {
+            return Err(
+                "GitHub's API compares against the merge base only, and BASE is not an ancestor of HEAD here, so BASE..HEAD would differ; use BASE...HEAD"
+                    .into(),
+            );
+        }
+        // GitHub lists the newest commits, so the last one is the head; none means the head is behind the base.
+        let head = match named["commits"].as_array().and_then(|c| c.last()) {
+            Some(last) => oid(last, "/sha")?,
+            None => merge_base.clone(),
+        };
+        let pinned = range(&base, &head);
+        let (compare, raw) = std::thread::scope(|s| {
+            let compare = s.spawn(|| self.get_json(&a.host, &pinned, cancel.clone()));
+            let raw = self.request(
+                &a.host,
+                &pinned,
+                "GET",
+                None,
+                "Accept: application/vnd.github.diff",
+                cancel.clone(),
+            );
+            (joined(compare), raw)
+        });
+        let compare = compare?;
+        let raw = raw?;
+        let files = compare["files"].as_array().cloned().unwrap_or_default();
+        let from_files = raw.status == 406;
+        let body = match raw.status {
+            200 => raw.body,
+            406 => patch_from_files(&files),
+            status => {
+                return Err(format!("GitHub compare diff failed (HTTP {status})").into());
+            }
+        };
+        let patch = parse_patch(&body, ParseLimits::default())?;
+        drop(body);
+        let remote = RemoteTarget {
+            provider: ProviderId::GITHUB,
+            repository: RepositoryKey {
+                host: a.host.clone(),
+                id: number(&meta, "/id")?,
+                owner: owner.into(),
+                name: name.into(),
+            },
+            account: String::new(),
+            pr: 0,
+            target_tip: base,
+            comparison_base: merge_base,
+            head,
+            open: true,
+            draft: false,
+            pending_review: false,
+            compare: Some(a.refs.clone()),
+        };
+        let label = a.refs.label();
+        let mut s = Snapshot::with_origin(
+            format!("{owner}/{name}  {label}"),
+            patch,
+            Some(remote),
+            vec![],
+            format!("github-compare:{}/{owner}/{name}:{label}", a.host),
+        );
+        // Both caps are GitHub's: 300 files and 250 commits per compare response.
+        let capped = files.len() >= 300;
+        if from_files {
+            let omitted = files
+                .iter()
+                .filter(|f| f["patch"].is_null() && f["changes"].as_u64().unwrap_or(0) > 0)
+                .count();
+            s.warnings.push(format!(
+                "GitHub refused the unified diff for this compare, so it comes from the per-file listing. That stops at 300 files, and GitHub had already omitted the text for {omitted} of those files."
+            ));
+        } else if (capped && s.patch.files.len() < files.len())
+            || (!capped && s.patch.files.len() != files.len())
+        {
+            s.warnings.push(format!(
+                "coverage disagreement: file listing {}, patch count {}",
+                files.len(),
+                s.patch.files.len()
+            ));
+        }
+        for f in &files {
+            if f["patch"].is_null() && f["changes"].as_u64().unwrap_or(0) > 0 {
+                let name = f["filename"].as_str().unwrap_or_default();
+                let captured = s.patch.files.iter().any(|p| {
+                    p.path().utf8().ok() == Some(name)
+                        && (!p.hunks.is_empty()
+                            || p.content != diffz_core::patch::ContentKind::Text)
+                });
+                if !captured {
+                    s.warnings.push(format!("provider omitted text for {name}"));
+                }
+            }
+        }
+        let commits = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
+        let total = compare["total_commits"].as_u64().unwrap_or(0) as usize;
+        if total > commits.len() {
+            s.warnings.push(format!(
+                "GitHub lists only the newest {} of this compare's {total} commits; the diff still covers all of them.",
+                commits.len()
+            ));
+        }
+        s.overview.description = Some(
+            commits
+                .iter()
+                .map(|c| {
+                    let sha = c["sha"].as_str().unwrap_or_default();
+                    let subject = c["commit"]["message"]
+                        .as_str()
+                        .and_then(|m| m.lines().next())
+                        .unwrap_or_default();
+                    format!("- `{}` {subject}\n", &sha[..sha.len().min(7)])
+                })
+                .collect(),
+        );
+        s.overview.captured_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        );
+        Ok(s)
+    }
+}
 pub fn check_row(v: &Value, kind: &str) -> diffz_core::review_details::Check {
     let legacy = kind == "Status";
     let state = v["state"].as_str().unwrap_or("unknown");
@@ -686,6 +972,7 @@ fn target(
         open: m["state"] == "open",
         draft: m["draft"] == true,
         pending_review: false,
+        compare: None,
     })
 }
 fn thread(v: &Value) -> Result<ThreadComment> {
@@ -752,16 +1039,27 @@ impl ReviewRules for GithubRules {
         "Pull request"
     }
     fn address_hint(&self) -> &str {
-        "Enter owner/repo#123 or a GitHub pull request URL"
+        "Enter owner/repo#123, a GitHub pull request URL, or a compare URL"
     }
     fn address_help(&self) -> &str {
-        "Enter a PR link or use owner/repository#number."
+        "Enter a PR link or use owner/repository#number. A compare URL opens read-only."
     }
     fn write_flag(&self) -> &str {
         "--allow-github-writes"
     }
     fn reopen_address(&self, t: &RemoteTarget) -> String {
         let r = &t.repository;
+        if let Some(c) = &t.compare {
+            let dots = if c.direct { ".." } else { "..." };
+            return format!(
+                "https://{}/{}/{}/compare/{}{dots}{}",
+                r.host,
+                r.owner,
+                r.name,
+                encode_path(&c.base),
+                encode_path(&c.head)
+            );
+        }
         format!("https://{}/{}/{}/pull/{}", r.host, r.owner, r.name, t.pr)
     }
     fn line_url(&self, t: &RemoteTarget, path: &str, revision: &str, line: u32) -> String {
@@ -826,10 +1124,13 @@ impl ReviewProvider for GithubProvider {
         Arc::new(GithubRules)
     }
     fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot> {
-        self.reader()?.snapshot(&PrAddress::parse(address)?, cancel)
+        match GithubTarget::parse(address)? {
+            GithubTarget::Pr(a) => self.reader()?.snapshot(&a, cancel),
+            GithubTarget::Compare(a) => self.reader()?.compare(&a, cancel),
+        }
     }
     fn accepts(&self, address: &str) -> bool {
-        PrAddress::parse(address).is_ok()
+        GithubTarget::parse(address).is_ok()
     }
     fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
         self.reader()?.source(t, path, revision)
@@ -957,7 +1258,7 @@ pub fn patch_from_files(files: &[Value]) -> Vec<u8> {
     out
 }
 /// The quoting Git uses in C style, for paths holding quotes, backslashes, control bytes, or bytes outside ASCII.
-fn quote_path(prefix: &str, path: &str) -> String {
+pub(crate) fn quote_path(prefix: &str, path: &str) -> String {
     let plain = path
         .bytes()
         .all(|b| (0x20..0x7f).contains(&b) && b != b'"' && b != b'\\');

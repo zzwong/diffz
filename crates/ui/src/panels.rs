@@ -485,6 +485,17 @@ impl Workbench {
                         .child(format!("{} commands", matches.len())),
                 );
             }
+            Panel::Preview
+                if self
+                    .active
+                    .as_ref()
+                    .and_then(|a| a.snapshot.remote.as_ref())
+                    .is_some_and(|t| t.compare.is_some()) =>
+            {
+                card = card.child(
+                    "This is a compare, which is read-only: reviews, comments, and approvals cannot be sent to the provider. Local drafts stay on this machine and can be exported.",
+                );
+            }
             Panel::Preview => {
                 let provider = self
                     .active

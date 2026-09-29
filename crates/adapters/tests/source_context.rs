@@ -32,6 +32,7 @@ sys.stdout.buffer.write(b'HTTP/1.1 200 OK\r\n\r\nfirst\nsecond\n')
         open: true,
         draft: false,
         pending_review: false,
+        compare: None,
     };
     let bytes = GithubReader::new(program.clone())
         .source(&target, "dir/a b.rs", &target.head)

@@ -1,6 +1,8 @@
 //! Wiring for processes and explicit command-line input. Nothing writes remotely during startup.
 use anyhow::{Context, Result, bail};
 use diffz_adapters::{
+    github::GithubTarget,
+    gitlab::GitlabTarget,
     process::{read_bounded, resolve_program},
     service::{Services, default_state_dir, remote_provider},
 };
@@ -24,9 +26,11 @@ Usage:
   diffz owner/repo#123
   diffz group/project!123
   diffz https://github.com/owner/repo/pull/123
+  diffz https://github.com/owner/repo/compare/v1.0...v2.0
   diffz /path/to/change.patch
   diffz --pr owner/repo#123
   diffz --mr group/project!123
+  diffz --compare https://github.com/owner/repo/compare/v1.0...v2.0
   diffz --patch /path/to/change.patch
   diffz --git /repo --base main --head HEAD
   diffz --staged /repo
@@ -36,6 +40,7 @@ Usage:
 Options:
   --pr OWNER/REPO#N         Open a pull request on GitHub, fetched by the installed gh
   --mr URL                  Open a merge request on GitLab, fetched by the installed glab
+  --compare URL             Open a GitHub or GitLab compare of two refs, read-only, fetched by gh or glab
   --patch FILE              Show a unified diff file
   --git REPO                Diff --base (default main) against --head (default HEAD)
   --staged REPO             Compare the index with HEAD
@@ -144,6 +149,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
                     address: next()?,
                 },
             )?,
+            "--compare" => set_source(&mut source, compare_request(next()?)?)?,
             "--inspect" => inspect = true,
             "--foreground" => foreground = true,
             "--json" => json = true,
@@ -204,9 +210,25 @@ fn detect(path: PathBuf) -> Result<OpenRequest> {
     }
     bail!(
         "{:?} is neither a file nor a review address; pass a patch file, owner/repo#N or a \
-         GitHub pull request URL, or group/project!N or a GitLab merge request URL",
+         GitHub pull request URL, group/project!N or a GitLab merge request URL, or a GitHub \
+         or GitLab compare URL",
         path
     )
+}
+/// Each provider's own parser decides whether a URL is a compare of its own.
+fn compare_request(address: String) -> Result<OpenRequest> {
+    let (github, gitlab) = (GithubTarget::parse(&address), GitlabTarget::parse(&address));
+    let provider = match (github, gitlab) {
+        (Ok(GithubTarget::Compare(_)), _) => ProviderId::GITHUB,
+        (_, Ok(GitlabTarget::Compare(_))) => ProviderId::GITLAB,
+        (Ok(_), _) | (_, Ok(_)) => {
+            bail!("{address:?} is a pull or merge request; use --pr or --mr")
+        }
+        (Err(github), Err(gitlab)) => {
+            bail!("not a GitHub compare ({github}) or a GitLab compare ({gitlab})")
+        }
+    };
+    Ok(OpenRequest::Remote { provider, address })
 }
 fn set_source(source: &mut Option<OpenRequest>, request: OpenRequest) -> Result<()> {
     if source.is_some() {
@@ -636,6 +658,14 @@ mod tests {
                 "https://gitlab.com/group/sub/project/-/merge_requests/123/diffs",
                 ProviderId::GITLAB,
             ),
+            (
+                "https://github.com/owner/repo/compare/v1.0...v2.0",
+                ProviderId::GITHUB,
+            ),
+            (
+                "https://gitlab.com/group/sub/project/-/compare/v1.0...v2.0",
+                ProviderId::GITLAB,
+            ),
         ] {
             let options = parse([address.to_string()]).unwrap();
             assert!(options.requested);
@@ -767,6 +797,46 @@ mod tests {
     #[test]
     fn conflicting_sources_are_rejected() {
         assert!(parse(["--pr", "o/r#1", "--fixture", "F01"].map(str::to_string)).is_err());
+    }
+    #[test]
+    fn compare_url_picks_its_provider() {
+        for (url, expected) in [
+            ("https://github.com/o/r/compare/v1...v2", ProviderId::GITHUB),
+            (
+                "https://gitlab.com/g/p/-/compare/v1...v2",
+                ProviderId::GITLAB,
+            ),
+            (
+                "https://gitlab.com/g/p/-/compare?from=v1&to=v2",
+                ProviderId::GITLAB,
+            ),
+        ] {
+            let request = parse(["--compare", url].map(str::to_string))
+                .unwrap()
+                .request;
+            assert_eq!(
+                request,
+                OpenRequest::Remote {
+                    provider: expected,
+                    address: url.into()
+                }
+            );
+        }
+    }
+    #[test]
+    fn compare_rejects_other_addresses() {
+        for url in [
+            "https://github.com/o/r/pull/1",
+            "https://gitlab.com/g/p/-/merge_requests/1",
+            "o/r#1",
+            "https://example.com/",
+        ] {
+            assert!(
+                parse(["--compare", url].map(str::to_string)).is_err(),
+                "{url}"
+            );
+        }
+        assert!(parse(["--compare".to_string()]).is_err());
     }
     #[test]
     fn unknown_flags_are_rejected() {

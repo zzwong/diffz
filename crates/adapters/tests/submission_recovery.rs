@@ -52,6 +52,7 @@ fn setup() -> (tempfile::TempDir, Arc<Store>, Arc<Fake>, PreparedReview) {
         open: true,
         draft: false,
         pending_review: false,
+        compare: None,
     };
     let s = Snapshot::new(
         "p".into(),
