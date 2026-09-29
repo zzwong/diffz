@@ -911,7 +911,185 @@ impl GithubReader {
                 .unwrap_or_default()
                 .as_secs(),
         );
+        let t = s.remote.as_ref().expect("set above");
+        // Release metadata only adds to the compare, so failing to read it never fails the open.
+        match self.releases(a, &t.target_tip, &t.head, &compare, cancel) {
+            Ok((releases, warnings)) => {
+                s.overview.releases = releases;
+                s.warnings.extend(warnings);
+            }
+            Err(e) => s.warnings.push(format!(
+                "The releases in this range could not be listed: {e}"
+            )),
+        }
         Ok(s)
+    }
+    /// The release tags on a compare's range and what each changed since the one before.
+    /// `compare` is the response for `base...head`, reused for its commits when it lists them all.
+    fn releases(
+        &self,
+        a: &CompareAddress,
+        base: &str,
+        head: &str,
+        compare: &Value,
+        cancel: Cancellation,
+    ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
+        use crate::releases::{TAG_PAGES, bounded, folded_warning, steps};
+        use diffz_core::review_details::{Release, ReleaseFile};
+        let repo = format!("repos/{}/{}", a.owner, a.repo);
+        let listed = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
+        let total = compare["total_commits"].as_u64().unwrap_or(0) as usize;
+        let mut warnings = vec![];
+        let (commits, tags, notes) = std::thread::scope(|s| {
+            let tags = s.spawn(|| {
+                let mut tags = vec![];
+                for page in 1..=TAG_PAGES {
+                    let v = self.get_json(
+                        &a.host,
+                        &format!("{repo}/tags?per_page=100&page={page}"),
+                        cancel.clone(),
+                    )?;
+                    let rows = v.as_array().ok_or("expected GitHub array page")?;
+                    for t in rows {
+                        tags.push((text(t, "/name")?.to_owned(), oid(t, "/commit/sha")?));
+                    }
+                    if rows.len() < 100 {
+                        return Ok((tags, false));
+                    }
+                }
+                Ok::<_, AdapterError>((tags, true))
+            });
+            // One page of the newest releases; older tags keep their link but show no notes.
+            let notes = s.spawn(|| {
+                self.get_json(
+                    &a.host,
+                    &format!("{repo}/releases?per_page=100"),
+                    cancel.clone(),
+                )
+            });
+            // The compare lists at most 250 commits, oldest first; pages of 100 reach the rest.
+            let commits = if total <= listed.len() {
+                Ok(listed.to_vec())
+            } else if total > 5000 {
+                Err(
+                    format!("the range holds {total} commits, more than the 5,000 that are placed")
+                        .into(),
+                )
+            } else {
+                let pages: Vec<usize> = (1..=total.div_ceil(100)).collect();
+                bounded(&pages, |page| {
+                    self.get_json(
+                        &a.host,
+                        &format!("{repo}/compare/{base}...{head}?per_page=100&page={page}"),
+                        cancel.clone(),
+                    )
+                })
+                .map(|pages| {
+                    pages
+                        .iter()
+                        .flat_map(|p| p["commits"].as_array().cloned().unwrap_or_default())
+                        .collect::<Vec<_>>()
+                })
+            };
+            (commits, joined(tags), joined(notes))
+        });
+        let (commits, (tags, truncated), notes) = (commits?, tags?, notes?);
+        if truncated {
+            warnings.push(format!(
+                "Only the first {} tags were checked for releases in this range.",
+                TAG_PAGES * 100
+            ));
+        }
+        let notes: std::collections::HashMap<&str, &Value> = notes
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter(|r| r["draft"] != true)
+            .filter_map(|r| Some((r["tag_name"].as_str()?, r)))
+            .collect();
+        let range = commits
+            .iter()
+            .map(|c| Ok((oid(c, "/sha")?, oid(c, "/parents/0/sha").ok())))
+            .collect::<Result<Vec<_>>>()?;
+        let released = notes.keys().map(|t| t.to_string()).collect();
+        let (steps, folded) = steps(&range, base, head, &tags, &released);
+        warnings.extend(folded_warning(&folded));
+        let stats = |v: &Value| {
+            let files = v["files"].as_array().map_or(&[][..], Vec::as_slice);
+            (
+                v["total_commits"].as_u64().unwrap_or(0),
+                files
+                    .iter()
+                    .map(|f| ReleaseFile {
+                        path: f["filename"].as_str().unwrap_or_default().into(),
+                        additions: f["additions"].as_u64().unwrap_or(0),
+                        deletions: f["deletions"].as_u64().unwrap_or(0),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        // A single step spanning the whole compare is the compare already read.
+        let stats = match &steps[..] {
+            [only] if only.from == base && only.to == head => vec![stats(compare)],
+            _ => bounded(&steps, |step| {
+                self.get_json(
+                    &a.host,
+                    &format!("{repo}/compare/{}...{}?per_page=1", step.from, step.to),
+                    cancel.clone(),
+                )
+                .map(|v| stats(&v))
+            })?,
+        };
+        let dates: std::collections::HashMap<&str, &str> = commits
+            .iter()
+            .filter_map(|c| {
+                Some((
+                    c["sha"].as_str()?,
+                    c["commit"]["committer"]["date"].as_str()?,
+                ))
+            })
+            .collect();
+        let releases = steps
+            .into_iter()
+            .zip(stats)
+            .map(|(step, (commits, files))| {
+                let name = step.tag.as_deref().unwrap_or(&a.refs.head);
+                if files.len() >= 300 {
+                    warnings.push(format!(
+                        "GitHub lists only the first 300 files of {name}, so the file tree may leave some of its files out."
+                    ));
+                }
+                let release = step.tag.as_deref().and_then(|t| notes.get(t));
+                Release {
+                    url: step.tag.as_deref().map(|t| {
+                        release
+                            .and_then(|r| r["html_url"].as_str())
+                            .map_or_else(
+                                || {
+                                    format!(
+                                        "https://{}/{}/{}/releases/tag/{}",
+                                        a.host,
+                                        a.owner,
+                                        a.repo,
+                                        encode_path(t)
+                                    )
+                                },
+                                str::to_owned,
+                            )
+                    }),
+                    notes: release
+                        .and_then(|r| r["body"].as_str())
+                        .filter(|b| !b.trim().is_empty())
+                        .map(str::to_owned),
+                    date: dates.get(step.to.as_str()).map(|d| d.to_string()),
+                    tag: step.tag,
+                    commit: step.to,
+                    commits,
+                    files,
+                }
+            })
+            .collect();
+        Ok((releases, warnings))
     }
 }
 pub fn check_row(v: &Value, kind: &str) -> diffz_core::review_details::Check {

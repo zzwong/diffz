@@ -45,7 +45,12 @@
    },
    "author": {
     "login": "dtolnay"
-   }
+   },
+   "parents": [
+    {
+     "sha": "54437197ee79c20678db433d98616fab7ddff1a5"
+    }
+   ]
   },
   {
    "sha": "8be90917c603199c5d1fdd73984237f023768e22",
@@ -59,7 +64,15 @@
    },
    "author": {
     "login": "dtolnay"
-   }
+   },
+   "parents": [
+    {
+     "sha": "54437197ee79c20678db433d98616fab7ddff1a5"
+    },
+    {
+     "sha": "a2eb7dd5e13add83f254b6dac0f68e043effc521"
+    }
+   ]
   },
   {
    "sha": "4aad4edebd9f09247d6c6b6784419a74bb116829",
@@ -73,7 +86,12 @@
    },
    "author": {
     "login": "dtolnay"
-   }
+   },
+   "parents": [
+    {
+     "sha": "8be90917c603199c5d1fdd73984237f023768e22"
+    }
+   ]
   }
  ],
  "files": [

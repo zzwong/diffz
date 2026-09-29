@@ -45,6 +45,7 @@ pub fn decorate(snapshot: &mut diffz_core::domain::Snapshot, id: &str) {
         checks:vec![Check{name:"Example CI workflow".into(),kind:"Workflow".into(),status:"in_progress".into(),conclusion:None,url:None},Check{name:"Example unit tests".into(),kind:"Check".into(),status:"completed".into(),conclusion:Some("success".into()),url:None},Check{name:"Example Linux build".into(),kind:"Check".into(),status:"in_progress".into(),conclusion:None,url:None},Check{name:"Example formatting".into(),kind:"Check".into(),status:"completed".into(),conclusion:Some("failure".into()),url:None}],
         notices:vec!["Offline UI testing uses these made-up statuses; they do not come from real CI runs.".into()],
         conversation:vec![ConversationComment{id:7001,author:"sample-author".into(),created_at:Some("2026-09-04T09:58:00Z".into()),body:"Two files and a single line thread holding two messages make up the sample.".into()}],
+        releases:vec![],
     };
     for (id, author, body) in [
         (

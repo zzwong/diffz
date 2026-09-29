@@ -171,6 +171,36 @@ impl Workbench {
                 .or_insert((0, n.severity));
             *slot = (slot.0 + 1, slot.1.max(n.severity));
         }
+        // A compare's releases per path: the latest one's name, and every name for the tooltip.
+        let released: std::collections::HashMap<String, (String, String)> = snapshot
+            .as_ref()
+            .map(|s| {
+                let head = s
+                    .remote
+                    .as_ref()
+                    .and_then(|t| t.compare.as_ref())
+                    .map_or("head", |c| c.head.as_str());
+                let releases = &s.overview.releases;
+                diffz_core::review_details::releases_by_path(releases)
+                    .into_iter()
+                    .map(|(path, touched)| {
+                        let names: Vec<&str> =
+                            touched.iter().map(|&i| releases[i].name(head)).collect();
+                        let latest = names.last().copied().unwrap_or_default();
+                        let badge = match names.len() {
+                            1 => latest.to_owned(),
+                            n => format!("{latest} +{}", n - 1),
+                        };
+                        (path.to_owned(), (badge, names.join(", ")))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let release_filter = snapshot.as_ref().and_then(|s| {
+            let r = s.overview.releases.get(self.release_filter?)?;
+            let head = s.remote.as_ref()?.compare.as_ref()?.head.as_str();
+            Some(r.name(head).to_owned())
+        });
         let visible_ids: Vec<String> = self
             .browser
             .visible_files
@@ -235,6 +265,34 @@ impl Workbench {
                     .pb_2()
                     .child(Input::new(&self.filter_input).small()),
             )
+            .when_some(release_filter, |d, name| {
+                d.child(
+                    div()
+                        .h_flex()
+                        .items_center()
+                        .gap_1()
+                        .px_3()
+                        .pb_2()
+                        .text_size(px(11.))
+                        .text_color(skin.accent)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_ellipsis()
+                                .child(format!("Only files {name} touched")),
+                        )
+                        .child(
+                            Button::new("release-filter-clear")
+                                .ghost()
+                                .xsmall()
+                                .cursor_pointer()
+                                .label("Show all")
+                                .tooltip("Show every changed file again")
+                                .on_click(cx.listener(|a, _, _, c| a.filter_release(None, c))),
+                        ),
+                )
+            })
             .child(
                 list(self.browser.list.clone(), move |index, _, _| {
                     let Some(row) = rows.get(index) else {
@@ -265,6 +323,11 @@ impl Workbench {
                         .as_ref()
                         .and_then(|id| snapshot.as_ref()?.file(id))
                         .and_then(|f| marks.get(&f.display_path()).copied());
+                    let release = row
+                        .file
+                        .as_ref()
+                        .and_then(|_| released.get(&row.path))
+                        .cloned();
                     let icon = if row.file.is_some() {
                         div()
                             .h_flex()
@@ -315,7 +378,10 @@ impl Workbench {
                                 .w_full()
                                 .justify_start()
                                 .tab_stop(false)
-                                .tooltip(row.path.clone())
+                                .tooltip(match &release {
+                                    Some((_, names)) => format!("{}\nReleases: {names}", row.path),
+                                    None => row.path.clone(),
+                                })
                                 .accessibility_label(row.path.clone())
                                 .child(icon)
                                 .child(
@@ -332,6 +398,21 @@ impl Workbench {
                                         .font_family(crate::theme::code_font())
                                         .child(row.label.clone()),
                                 )
+                                .when_some(release, |b, (badge, _)| {
+                                    b.child(
+                                        div()
+                                            .flex_shrink_0()
+                                            .max_w(px(96.))
+                                            .text_ellipsis()
+                                            .px_1()
+                                            .rounded_sm()
+                                            .bg(skin.muted.opacity(0.12))
+                                            .text_color(skin.muted)
+                                            .text_size(px(10.))
+                                            .font_family(crate::theme::code_font())
+                                            .child(badge),
+                                    )
+                                })
                                 .when(comment_count > 0, |b| {
                                     b.child(
                                         div()

@@ -458,7 +458,139 @@ impl GitlabReader {
                 .map_err(|_| "Clock error")?
                 .as_secs(),
         );
+        let t = s.remote.as_ref().expect("set above");
+        // Release metadata only adds to the compare, so failing to read it never fails the open.
+        match self.releases(a, &h, &path, &t.target_tip, &t.head, &compare, c) {
+            Ok((releases, warnings)) => {
+                s.overview.releases = releases;
+                s.warnings.extend(warnings);
+            }
+            Err(e) => s.warnings.push(format!(
+                "The releases in this range could not be listed: {e}"
+            )),
+        }
         Ok(s)
+    }
+    /// The release tags on a compare's range and what each changed since the one before.
+    /// `compare` is the response for `from...to`, whose commits cover the whole range.
+    #[allow(clippy::too_many_arguments)]
+    fn releases(
+        &self,
+        a: &GitlabCompare,
+        h: &MrAddress,
+        path: &str,
+        from: &str,
+        to: &str,
+        compare: &Value,
+        c: Cancellation,
+    ) -> Result<(Vec<diffz_core::review_details::Release>, Vec<String>)> {
+        use crate::releases::{TAG_PAGES, bounded, folded_warning, steps};
+        use diffz_core::review_details::{Release, ReleaseFile};
+        let project = format!("projects/{}", a.project.replace('/', "%2F"));
+        let commits = compare["commits"].as_array().map_or(&[][..], Vec::as_slice);
+        let mut warnings = vec![];
+        // A tag lists its release's notes, so no separate release call is needed.
+        let mut tags = vec![];
+        let mut notes = std::collections::HashMap::new();
+        for page in 1..=TAG_PAGES {
+            let v = self.get(
+                h,
+                &format!("{project}/repository/tags?per_page=100&page={page}"),
+                c.clone(),
+            )?;
+            let rows = v.as_array().ok_or("Expected a GitLab tag list")?;
+            for t in rows {
+                let name = string(t, "/name")?;
+                if let Some(body) = t["release"]["description"].as_str() {
+                    notes.insert(name.clone(), body.to_owned());
+                }
+                tags.push((name, sha(t, "/commit/id")?));
+            }
+            if rows.len() < 100 {
+                break;
+            }
+            if page == TAG_PAGES {
+                warnings.push(format!(
+                    "Only the first {} tags were checked for releases in this range.",
+                    TAG_PAGES * 100
+                ));
+            }
+        }
+        let range = commits
+            .iter()
+            .map(|v| Ok((sha(v, "/id")?, sha(v, "/parent_ids/0").ok())))
+            .collect::<Result<Vec<_>>>()?;
+        let released = notes.keys().cloned().collect();
+        let (steps, folded) = steps(&range, from, to, &tags, &released);
+        warnings.extend(folded_warning(&folded));
+        let stats = |v: &Value| {
+            let diffs = v["diffs"].as_array().map_or(&[][..], Vec::as_slice);
+            (
+                v["commits"].as_array().map_or(0, |c| c.len() as u64),
+                diffs
+                    .iter()
+                    .map(|d| {
+                        let lines = d["diff"].as_str().unwrap_or_default().lines();
+                        let (mut additions, mut deletions) = (0, 0);
+                        for line in lines {
+                            match line.as_bytes().first() {
+                                Some(b'+') => additions += 1,
+                                Some(b'-') => deletions += 1,
+                                _ => {}
+                            }
+                        }
+                        ReleaseFile {
+                            path: d["new_path"].as_str().unwrap_or_default().into(),
+                            additions,
+                            deletions,
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        // A single step spanning the whole compare is the compare already read.
+        let stats = match &steps[..] {
+            [only] if only.from == from && only.to == to => vec![stats(compare)],
+            _ => bounded(&steps, |step| {
+                self.get(
+                    h,
+                    &format!(
+                        "{project}/repository/compare?from={}&to={}&straight=false",
+                        step.from, step.to
+                    ),
+                    c.clone(),
+                )
+                .map(|v| stats(&v))
+            })?,
+        };
+        let dates: std::collections::HashMap<&str, &str> = commits
+            .iter()
+            .filter_map(|v| Some((v["id"].as_str()?, v["created_at"].as_str()?)))
+            .collect();
+        let releases = steps
+            .into_iter()
+            .zip(stats)
+            .map(|(step, (commits, files))| {
+                let notes = step.tag.as_ref().and_then(|t| notes.get(t));
+                Release {
+                    url: step.tag.as_deref().map(|t| {
+                        format!(
+                            "https://{}/{path}/-/{}/{}",
+                            a.host,
+                            if notes.is_some() { "releases" } else { "tags" },
+                            crate::github::encode_path(t)
+                        )
+                    }),
+                    notes: notes.filter(|b| !b.trim().is_empty()).cloned(),
+                    date: dates.get(step.to.as_str()).map(|d| d.to_string()),
+                    tag: step.tag,
+                    commit: step.to,
+                    commits,
+                    files,
+                }
+            })
+            .collect();
+        Ok((releases, warnings))
     }
     pub fn snapshot(&self, a: &MrAddress, c: Cancellation) -> Result<Snapshot> {
         let m = self.get(a, &a.root(), c.clone())?;

@@ -9,6 +9,7 @@ pub mod local_git;
 pub mod outbox;
 pub mod process;
 pub mod provider;
+pub mod releases;
 pub mod service;
 pub mod store;
 pub use error::{AdapterError, Result};

@@ -143,6 +143,8 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
         self.line_context = None;
         self.thread_root = None;
         self.comment_page = 0;
+        self.release_filter = None;
+        self.release_notes.clear();
         self.prepared = None;
         self.offered = None;
         self.panel = Panel::None;
@@ -163,14 +165,64 @@ if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}app.status="Sourc
     pub fn filter_files(&mut self, cx: &mut Context<Self>) {
         let query = self.filter_input.read(cx).value().to_lowercase();
         let entries = self.active.as_ref().map_or_else(Vec::new, |a| {
+            let release = self
+                .release_filter
+                .and_then(|i| a.snapshot.overview.releases.get(i));
             a.snapshot
                 .patch
                 .files
                 .iter()
                 .map(|f| (f.id.clone(), f.display_path()))
+                .filter(|(_, path)| release.is_none_or(|r| r.touches(path)))
                 .collect()
         });
         self.browser.rebuild(entries, &query);
+    }
+    /// Narrows the tree to the files release `index` touched, or shows every file again.
+    pub fn filter_release(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
+        self.release_filter = index;
+        self.filter_files(cx);
+        let selected = self.viewport.as_ref().map(|v| v.borrow().file.clone());
+        if let Some(first) = self.browser.visible_files.first().cloned()
+            && selected.is_none_or(|s| !self.browser.visible_files.contains(&s))
+        {
+            self.select_file(first, cx);
+        }
+        let Some(a) = &self.active else { return };
+        self.status = match index.and_then(|i| a.snapshot.overview.releases.get(i)) {
+            Some(r) => format!(
+                "Showing the {} changed files {} touched.",
+                self.browser.visible_files.len(),
+                r.name("the head")
+            ),
+            None => "Showing every changed file.".into(),
+        };
+        cx.notify();
+    }
+    /// Opens release `index` on its own, as a compare from the release before it.
+    pub fn open_release_step(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(a) = &self.active else { return };
+        let Some(t) = &a.snapshot.remote else { return };
+        let (Some(refs), Some(release)) = (&t.compare, a.snapshot.overview.releases.get(index))
+        else {
+            return;
+        };
+        let base = index
+            .checked_sub(1)
+            .and_then(|i| a.snapshot.overview.releases[i].tag.clone())
+            .unwrap_or_else(|| refs.base.clone());
+        let step = RemoteTarget {
+            compare: Some(CompareRefs {
+                base,
+                head: release.name(&refs.head).to_owned(),
+                direct: false,
+            }),
+            ..t.clone()
+        };
+        let Some(provider) = self.services.provider(&t.provider) else {
+            return;
+        };
+        self.open(provider.reopen(&step), false, cx);
     }
     pub fn remember_anchor(&mut self) {
         if let (Some(a), Some(v)) = (&mut self.active, &self.viewport) {

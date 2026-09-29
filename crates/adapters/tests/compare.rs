@@ -275,8 +275,157 @@ mod loaded {
                 "repos/dtolnay/anyhow",
                 "repos/dtolnay/anyhow/compare/1.0.80...1.0.81",
                 pinned.as_str(),
+                "repos/dtolnay/anyhow/releases?per_page=100",
+                "repos/dtolnay/anyhow/tags?per_page=100&page=1",
             ]
         );
+        // The only release in range spans the whole compare, so its numbers are the compare's.
+        let [release] = &s.overview.releases[..] else {
+            panic!("{:?}", s.overview.releases)
+        };
+        assert_eq!(release.tag.as_deref(), Some("1.0.81"));
+        assert_eq!((release.commit.as_str(), release.commits), (GH_HEAD, 3));
+        assert_eq!(release.files.len(), 3);
+    }
+
+    const GH_RANGE: &str = "https://github.com/dtolnay/anyhow/compare/1.0.78...1.0.81";
+    fn summary(s: &Snapshot) -> Vec<(Option<&str>, u64, usize)> {
+        s.overview
+            .releases
+            .iter()
+            .map(|r| (r.tag.as_deref(), r.commits, r.files.len()))
+            .collect()
+    }
+
+    #[test]
+    fn github_releases_split_the_range_at_each_tag() {
+        let temp = tempfile::tempdir().unwrap();
+        let s = github(temp.path(), GH_RANGE).unwrap();
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        // 1.0.78 is the base, and 1.0.82 on are past the head, so neither is in range.
+        assert_eq!(
+            summary(&s),
+            [
+                (Some("1.0.79"), 6, 5),
+                (Some("1.0.80"), 7, 10),
+                (Some("1.0.81"), 3, 3)
+            ]
+        );
+        let first = &s.overview.releases[0];
+        assert_eq!(first.commit, "71ab53dd2e89ff816bebaa452ad5a968f4c4105d");
+        assert!(first.date.as_deref().unwrap().starts_with("2024-01-02T"));
+        assert_eq!(
+            first.url.as_deref(),
+            Some("https://github.com/dtolnay/anyhow/releases/tag/1.0.79")
+        );
+        assert!(first.notes.as_deref().is_some_and(|n| !n.is_empty()));
+        let lib = first.files.iter().find(|f| f.path == "src/lib.rs").unwrap();
+        assert_eq!((lib.additions, lib.deletions), (8, 1));
+        let by_path = diffz_core::review_details::releases_by_path(&s.overview.releases);
+        assert_eq!(by_path["src/lib.rs"], [0, 1, 2]);
+        assert_eq!(by_path["src/wrapper.rs"], [1]);
+        // Each step is one compare of its two commits, asked for a single commit per page.
+        let steps: Vec<_> = calls(temp.path())
+            .into_iter()
+            .filter(|c| c.ends_with("?per_page=1"))
+            .collect();
+        assert_eq!(steps.len(), 3, "{steps:?}");
+        assert!(steps.contains(&format!(
+            "repos/dtolnay/anyhow/compare/{GH_BASE}...{GH_HEAD}?per_page=1"
+        )));
+    }
+
+    #[test]
+    fn github_long_ranges_page_through_their_commits() {
+        let temp = tempfile::tempdir().unwrap();
+        let listed = github(temp.path(), GH_RANGE).unwrap();
+        std::fs::write(temp.path().join("paged"), "").unwrap();
+        std::fs::remove_file(temp.path().join("calls.log")).unwrap();
+        let s = github(temp.path(), GH_RANGE).unwrap();
+        assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("only the newest 10 of this compare's 16 commits"));
+        assert_eq!(summary(&s), summary(&listed));
+        assert!(
+            calls(temp.path())
+                .iter()
+                .any(|c| c.ends_with("?per_page=100&page=1"))
+        );
+    }
+
+    #[test]
+    fn tags_off_the_range_are_left_out() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("side-tag"), "").unwrap();
+        let s = github(temp.path(), GH_RANGE).unwrap();
+        assert_eq!(
+            s.overview
+                .releases
+                .iter()
+                .map(|r| r.tag.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            ["1.0.79", "1.0.80", "1.0.81"]
+        );
+    }
+
+    #[test]
+    fn unreadable_releases_leave_the_compare_open() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("no-tags"), "").unwrap();
+        let s = github(temp.path(), GH_RANGE).unwrap();
+        assert_eq!(s.patch.files.len(), 13);
+        assert!(s.overview.releases.is_empty());
+        assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("releases in this range could not be listed"));
+    }
+
+    #[test]
+    fn gitlab_releases_split_the_range_at_each_tag() {
+        let temp = tempfile::tempdir().unwrap();
+        let s = gitlab(
+            temp.path(),
+            "https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/compare/13.1.0...14.1.0",
+        )
+        .unwrap();
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert_eq!(
+            summary(&s),
+            [(Some("14.0.0"), 20, 24), (Some("14.1.0"), 8, 11)]
+        );
+        let [first, last] = &s.overview.releases[..] else {
+            unreachable!()
+        };
+        assert_eq!(
+            (first.commit.as_str(), last.commit.as_str()),
+            (GL_FROM, GL_TO)
+        );
+        assert_eq!(
+            last.url.as_deref(),
+            Some("https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/releases/14.1.0")
+        );
+        assert!(last.notes.as_deref().is_some_and(|n| !n.is_empty()));
+        assert!(last.date.is_some());
+        assert!(last.files.iter().any(|f| f.additions + f.deletions > 0));
+        // Tags carry their release notes, so only the step compares are added.
+        let calls = calls(temp.path());
+        assert!(!calls.iter().any(|c| c.contains("/releases")));
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|c| c.contains("/repository/compare?"))
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn snapshots_saved_before_releases_still_load() {
+        let old: diffz_core::review_details::Overview = serde_json::from_str(
+            r#"{"description":null,"checks":[],"notices":[],"captured_at":null,"conversation":[]}"#,
+        )
+        .unwrap();
+        assert!(old.releases.is_empty());
+        let json = serde_json::to_string(&old).unwrap();
+        assert!(!json.contains("releases"), "{json}");
     }
 
     #[test]
@@ -481,6 +630,7 @@ mod loaded {
         store.put_snapshot(&s).unwrap();
         let back = store.snapshot(&s.id).unwrap();
         assert_eq!(back.remote, s.remote);
+        assert_eq!(back.overview.releases, s.overview.releases);
         assert!(back.verify_identity());
         assert_ne!(gitlab(temp.path(), GL_URL).unwrap().id, s.id);
     }

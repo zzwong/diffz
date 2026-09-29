@@ -1,0 +1,74 @@
+[
+ {
+  "tag_name": "1.0.84",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.84",
+  "published_at": "2024-05-17T17:52:47Z",
+  "body": "- Disallow calling `ensure!` through a `Not` impl for a type that is not `bool` (#367)"
+ },
+ {
+  "tag_name": "1.0.83",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.83",
+  "published_at": "2024-05-06T18:14:54Z",
+  "body": "- Integrate compile-time checking of cfgs (#363)"
+ },
+ {
+  "tag_name": "1.0.82",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.82",
+  "published_at": "2024-04-10T03:51:27Z",
+  "body": "- Documentation improvements"
+ },
+ {
+  "tag_name": "1.0.81",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.81",
+  "published_at": "2024-03-12T02:48:25Z",
+  "body": "- Make backtrace support available when using -Dwarnings (#354)"
+ },
+ {
+  "tag_name": "1.0.80",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.80",
+  "published_at": "2024-02-19T04:50:15Z",
+  "body": "- Fix unused_imports warnings when compiled by rustc 1.78"
+ },
+ {
+  "tag_name": "1.0.79",
+  "name": "1.0.79",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.79",
+  "published_at": "2024-01-02T04:48:09Z",
+  "body": "- Work around improperly cached build script result by sccache (#340)"
+ },
+ {
+  "tag_name": "1.0.78",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.78",
+  "published_at": "2023-12-30T23:02:39Z",
+  "body": "- Reduce spurious rebuilds under RustRover IDE when using a nightly toolchain (#337)"
+ },
+ {
+  "tag_name": "1.0.77",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.77",
+  "published_at": "2023-12-26T23:27:12Z",
+  "body": "- Make `anyhow::Error::backtrace` available on stable Rust compilers 1.65+ (#293, thanks @LukasKalbertodt)"
+ },
+ {
+  "tag_name": "1.0.76",
+  "name": "",
+  "draft": false,
+  "html_url": "https://github.com/dtolnay/anyhow/releases/tag/1.0.76",
+  "published_at": "2023-12-21T00:56:29Z",
+  "body": "- Opt in to `unsafe_op_in_unsafe_fn` lint (#329)"
+ }
+]

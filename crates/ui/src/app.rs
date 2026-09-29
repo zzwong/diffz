@@ -145,6 +145,10 @@ pub(crate) struct Workbench {
     pub overview_focus: FocusHandle,
     pub overview_tab: usize,
     pub comment_page: usize,
+    /// The compare release whose files the tree is narrowed to; `None` shows every file.
+    pub release_filter: Option<usize>,
+    /// Releases whose notes are expanded in the overview.
+    pub release_notes: std::collections::HashSet<usize>,
     pub gesture: crate::scrolling::GestureState,
     pub export_context: Option<ContextExport>,
     pub outbox: Vec<OutboxEntry>,
@@ -404,6 +408,8 @@ impl Workbench {
             overview_focus: cx.focus_handle(),
             overview_tab: 0,
             comment_page: 0,
+            release_filter: None,
+            release_notes: Default::default(),
             gesture: Default::default(),
             export_context: None,
             outbox: vec![],

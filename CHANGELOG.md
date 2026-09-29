@@ -15,6 +15,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   commits directly (on GitHub only when the base is an ancestor of the head).
   Compares are read-only, and the coverage warning reports GitHub's commit and
   file caps and GitLab's omitted diffs.
+- A compare's overview lists the releases in its range: each tag on the
+  head's first-parent path, with its date, commits, files, lines changed,
+  release notes, and a link. Selecting one narrows the file tree to the files it
+  touched, "Open this step" opens it as a compare of its own, and each file in
+  the tree names the releases that changed it. The timeline keeps the newest 30
+  tags and says so; if the releases cannot be read, the compare still opens
+  with a warning.
 - `diffz <target>` detects what it was given: a patch file, a GitHub pull
   request (`owner/repo#123` or a URL), or a GitLab merge request
   (`group/project!123` or a URL). `--pr`, `--mr` and `--patch` still work.

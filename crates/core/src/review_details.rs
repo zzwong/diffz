@@ -13,6 +13,48 @@ pub struct Overview {
     pub notices: Vec<String>,
     pub captured_at: Option<u64>,
     pub conversation: Vec<ConversationComment>,
+    /// A compare's release tags in range order, each with what changed since the one before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub releases: Vec<Release>,
+}
+/// One step of a compare: from the previous release (or the merge base) to `commit`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Release {
+    /// `None` for the untagged commits after the last tag, up to the compare's head.
+    pub tag: Option<String>,
+    pub commit: String,
+    /// Commit date of `commit`, RFC 3339.
+    pub date: Option<String>,
+    pub commits: u64,
+    pub files: Vec<ReleaseFile>,
+    /// Body of the provider's release for this tag, if one exists.
+    pub notes: Option<String>,
+    pub url: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseFile {
+    pub path: String,
+    pub additions: u64,
+    pub deletions: u64,
+}
+impl Release {
+    /// The tag, or `head` for the untagged tail.
+    pub fn name<'a>(&'a self, head: &'a str) -> &'a str {
+        self.tag.as_deref().unwrap_or(head)
+    }
+    pub fn touches(&self, path: &str) -> bool {
+        self.files.iter().any(|f| f.path == path)
+    }
+}
+/// For each path, the indexes of the releases that touched it, oldest first.
+pub fn releases_by_path(releases: &[Release]) -> std::collections::HashMap<&str, Vec<usize>> {
+    let mut paths: std::collections::HashMap<&str, Vec<usize>> = Default::default();
+    for (i, r) in releases.iter().enumerate() {
+        for f in &r.files {
+            paths.entry(f.path.as_str()).or_default().push(i);
+        }
+    }
+    paths
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReviewDecision {

@@ -1,0 +1,236 @@
+{
+ "38c79ef242fdfb124e499a58d917286ed1d4cad5...71ab53dd2e89ff816bebaa452ad5a968f4c4105d": {
+  "status": "ahead",
+  "ahead_by": 6,
+  "behind_by": 0,
+  "total_commits": 6,
+  "base_commit": {
+   "sha": "38c79ef242fdfb124e499a58d917286ed1d4cad5"
+  },
+  "merge_base_commit": {
+   "sha": "38c79ef242fdfb124e499a58d917286ed1d4cad5"
+  },
+  "commits": [
+   {
+    "sha": "ee414707be0d4b6f0f109d0a85e4d10651e4aa2c",
+    "commit": {
+     "committer": {
+      "date": "2023-12-31T00:45:08Z"
+     },
+     "message": "RUSTC must be set by Cargo for build script"
+    },
+    "parents": [
+     {
+      "sha": "38c79ef242fdfb124e499a58d917286ed1d4cad5"
+     }
+    ]
+   }
+  ],
+  "files": [
+   {
+    "sha": "017ddbd244d2474db4bda4a0f5fcfc061412dade",
+    "filename": ".github/workflows/ci.yml",
+    "status": "modified",
+    "additions": 3,
+    "deletions": 0,
+    "changes": 3
+   },
+   {
+    "sha": "3a5cce41240703efb29ba8cd0d5359190c4bf3a4",
+    "filename": "Cargo.toml",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2
+   },
+   {
+    "sha": "7e95e6b55e51fee15cdd628f3e7d043d0830e7cd",
+    "filename": "build.rs",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 2,
+    "changes": 4
+   },
+   {
+    "sha": "21e776dafb90e85ebe924547452ee9e805de7214",
+    "filename": "build/probe.rs",
+    "status": "modified",
+    "additions": 3,
+    "deletions": 0,
+    "changes": 3
+   },
+   {
+    "sha": "490a075937a7bb0219dc9736d85e3616bae9b990",
+    "filename": "src/lib.rs",
+    "status": "modified",
+    "additions": 8,
+    "deletions": 1,
+    "changes": 9
+   }
+  ]
+ },
+ "71ab53dd2e89ff816bebaa452ad5a968f4c4105d...54437197ee79c20678db433d98616fab7ddff1a5": {
+  "status": "ahead",
+  "ahead_by": 7,
+  "behind_by": 0,
+  "total_commits": 7,
+  "base_commit": {
+   "sha": "71ab53dd2e89ff816bebaa452ad5a968f4c4105d"
+  },
+  "merge_base_commit": {
+   "sha": "71ab53dd2e89ff816bebaa452ad5a968f4c4105d"
+  },
+  "commits": [
+   {
+    "sha": "edd88d3a43f11f1931330d3dd54189353ef00203",
+    "commit": {
+     "committer": {
+      "date": "2024-01-31T06:18:10Z"
+     },
+     "message": "Update ui test suite to nightly-2024-01-31"
+    },
+    "parents": [
+     {
+      "sha": "71ab53dd2e89ff816bebaa452ad5a968f4c4105d"
+     }
+    ]
+   }
+  ],
+  "files": [
+   {
+    "sha": "c62cc691b287c64d033ca20f9e71c61b3724d5a4",
+    "filename": "Cargo.toml",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2
+   },
+   {
+    "sha": "2c0034dc2e19729d64e454e521e9e1a5b89f9730",
+    "filename": "src/backtrace.rs",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2
+   },
+   {
+    "sha": "b75885df42367dfe314e2c9e891b3149de067539",
+    "filename": "src/chain.rs",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2
+   },
+   {
+    "sha": "85c84a9ca434739ac58177f44f0c8be771f7a002",
+    "filename": "src/fmt.rs",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 0,
+    "changes": 2
+   },
+   {
+    "sha": "15d9f9b875d7ca3f94872346825c5e0d9616b97d",
+    "filename": "src/kind.rs",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 0,
+    "changes": 2
+   },
+   {
+    "sha": "aaa175d04570decaf363b8ea7884f3cd741744e9",
+    "filename": "src/lib.rs",
+    "status": "modified",
+    "additions": 6,
+    "deletions": 2,
+    "changes": 8
+   },
+   {
+    "sha": "9726ae596b9a50069b5940a0c36e713fb8b117f0",
+    "filename": "src/wrapper.rs",
+    "status": "modified",
+    "additions": 3,
+    "deletions": 0,
+    "changes": 3
+   },
+   {
+    "sha": "a322b673cace9af8da8e758141254eab99b1b844",
+    "filename": "tests/test_macros.rs",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1
+   },
+   {
+    "sha": "2976cd86204a54e08088d7ca76a91ff15c55c790",
+    "filename": "tests/test_repr.rs",
+    "status": "modified",
+    "additions": 0,
+    "deletions": 1,
+    "changes": 1
+   },
+   {
+    "sha": "6c797618466f943daf0948d087987e277227d9cd",
+    "filename": "tests/ui/no-impl.stderr",
+    "status": "modified",
+    "additions": 6,
+    "deletions": 5,
+    "changes": 11
+   }
+  ]
+ },
+ "54437197ee79c20678db433d98616fab7ddff1a5...4aad4edebd9f09247d6c6b6784419a74bb116829": {
+  "status": "ahead",
+  "ahead_by": 3,
+  "behind_by": 0,
+  "total_commits": 3,
+  "base_commit": {
+   "sha": "54437197ee79c20678db433d98616fab7ddff1a5"
+  },
+  "merge_base_commit": {
+   "sha": "54437197ee79c20678db433d98616fab7ddff1a5"
+  },
+  "commits": [
+   {
+    "sha": "a2eb7dd5e13add83f254b6dac0f68e043effc521",
+    "commit": {
+     "committer": {
+      "date": "2024-03-12T02:38:47Z"
+     },
+     "message": "Make compatible with -Dwarnings"
+    },
+    "parents": [
+     {
+      "sha": "54437197ee79c20678db433d98616fab7ddff1a5"
+     }
+    ]
+   }
+  ],
+  "files": [
+   {
+    "sha": "edb3e6882b981a1502baa00b4751f9d3ddb88ae3",
+    "filename": "Cargo.toml",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2
+   },
+   {
+    "sha": "55d8a7eb6a3c1c30467913fd09df8fe1a4af5f05",
+    "filename": "build.rs",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1
+   },
+   {
+    "sha": "9a3f13caf48904bf3c9305b93c1b183469381667",
+    "filename": "src/lib.rs",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2
+   }
+  ]
+ }
+}

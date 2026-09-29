@@ -1,0 +1,232 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 68858a51..017ddbd2 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -35,6 +35,9 @@ jobs:
+       - name: Enable type layout randomization
+         run: echo RUSTFLAGS=${RUSTFLAGS}\ -Zrandomize-layout >> $GITHUB_ENV
+         if: matrix.rust == 'nightly'
++      - name: Enable nightly-only tests
++        run: echo RUSTFLAGS=${RUSTFLAGS}\ --cfg=anyhow_nightly_testing >> $GITHUB_ENV
++        if: matrix.rust == 'nightly'
+       - run: cargo test
+       - run: cargo check --no-default-features
+       - run: cargo check --features backtrace
+diff --git a/Cargo.toml b/Cargo.toml
+index 4462b000..edb3e688 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "anyhow"
+-version = "1.0.78"
++version = "1.0.81"
+ authors = ["David Tolnay <dtolnay@gmail.com>"]
+ categories = ["rust-patterns", "no-std"]
+ description = "Flexible concrete Error type built on std::error::Error"
+diff --git a/build.rs b/build.rs
+index f1c13944..55d8a7eb 100644
+--- a/build.rs
++++ b/build.rs
+@@ -121,7 +121,8 @@ fn compile_probe(rustc_bootstrap: bool) -> bool {
+         .arg("--edition=2018")
+         .arg("--crate-name=anyhow")
+         .arg("--crate-type=lib")
+-        .arg("--emit=metadata")
++        .arg("--emit=dep-info,metadata")
++        .arg("--cap-lints=allow")
+         .arg("--out-dir")
+         .arg(out_dir)
+         .arg(probefile);
+@@ -146,7 +147,7 @@ fn compile_probe(rustc_bootstrap: bool) -> bool {
+ }
+ 
+ fn rustc_minor_version() -> Option<u32> {
+-    let rustc = env::var_os("RUSTC")?;
++    let rustc = cargo_env_var("RUSTC");
+     let output = Command::new(rustc).arg("--version").output().ok()?;
+     let version = str::from_utf8(&output.stdout).ok()?;
+     let mut pieces = version.split('.');
+diff --git a/build/probe.rs b/build/probe.rs
+index 1dfc2449..21e776da 100644
+--- a/build/probe.rs
++++ b/build/probe.rs
+@@ -30,3 +30,6 @@ impl Error for MyError {
+ }
+ 
+ const _: fn(&dyn Error) -> Option<&Backtrace> = |err| error::request_ref::<Backtrace>(err);
++
++// Include in sccache cache key.
++const _: Option<&str> = option_env!("RUSTC_BOOTSTRAP");
+diff --git a/src/backtrace.rs b/src/backtrace.rs
+index 65ad1cce..2c0034dc 100644
+--- a/src/backtrace.rs
++++ b/src/backtrace.rs
+@@ -65,11 +65,11 @@ macro_rules! backtrace_if_absent {
+ 
+ #[cfg(all(not(std_backtrace), feature = "backtrace"))]
+ mod capture {
++    use alloc::borrow::Cow;
+     use backtrace::{BacktraceFmt, BytesOrWideString, Frame, PrintFmt, SymbolName};
+     use core::cell::UnsafeCell;
+     use core::fmt::{self, Debug, Display};
+     use core::sync::atomic::{AtomicUsize, Ordering};
+-    use std::borrow::Cow;
+     use std::env;
+     use std::path::{self, Path, PathBuf};
+     use std::sync::Once;
+diff --git a/src/chain.rs b/src/chain.rs
+index f7baff29..b75885df 100644
+--- a/src/chain.rs
++++ b/src/chain.rs
+@@ -2,7 +2,7 @@ use self::ChainState::*;
+ use crate::StdError;
+ 
+ #[cfg(feature = "std")]
+-use std::vec;
++use alloc::vec::{self, Vec};
+ 
+ #[cfg(feature = "std")]
+ pub(crate) use crate::Chain;
+diff --git a/src/fmt.rs b/src/fmt.rs
+index a99649b2..85c84a9c 100644
+--- a/src/fmt.rs
++++ b/src/fmt.rs
+@@ -43,6 +43,7 @@ impl ErrorImpl {
+         #[cfg(any(std_backtrace, feature = "backtrace"))]
+         {
+             use crate::backtrace::BacktraceStatus;
++            use alloc::string::ToString;
+ 
+             let backtrace = unsafe { Self::backtrace(this) };
+             if let BacktraceStatus::Captured = backtrace.status() {
+@@ -102,6 +103,7 @@ where
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    use alloc::string::String;
+ 
+     #[test]
+     fn one_digit() {
+diff --git a/src/kind.rs b/src/kind.rs
+index 21d76aa2..15d9f9b8 100644
+--- a/src/kind.rs
++++ b/src/kind.rs
+@@ -49,6 +49,8 @@ use core::fmt::{Debug, Display};
+ 
+ #[cfg(feature = "std")]
+ use crate::StdError;
++#[cfg(feature = "std")]
++use alloc::boxed::Box;
+ 
+ pub struct Adhoc;
+ 
+diff --git a/src/lib.rs b/src/lib.rs
+index 21fe8bf1..9a3f13ca 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -206,10 +206,10 @@
+ //! will require an explicit `.map_err(Error::msg)` when working with a
+ //! non-Anyhow error type inside a function that returns Anyhow's error type.
+ 
+-#![doc(html_root_url = "https://docs.rs/anyhow/1.0.78")]
++#![doc(html_root_url = "https://docs.rs/anyhow/1.0.81")]
+ #![cfg_attr(error_generic_member_access, feature(error_generic_member_access))]
+ #![cfg_attr(doc_cfg, feature(doc_cfg))]
+-#![cfg_attr(not(feature = "std"), no_std)]
++#![no_std]
+ #![deny(dead_code, unused_imports, unused_mut)]
+ #![cfg_attr(
+     not(anyhow_no_unsafe_op_in_unsafe_fn_lint),
+@@ -221,6 +221,7 @@
+     clippy::enum_glob_use,
+     clippy::explicit_auto_deref,
+     clippy::extra_unused_type_parameters,
++    clippy::incompatible_msrv,
+     clippy::let_underscore_untyped,
+     clippy::missing_errors_doc,
+     clippy::missing_panics_doc,
+@@ -237,8 +238,18 @@
+     clippy::wrong_self_convention
+ )]
+ 
++#[cfg(all(
++    anyhow_nightly_testing,
++    feature = "std",
++    not(error_generic_member_access)
++))]
++compile_error!("Build script probe failed to compile.");
++
+ extern crate alloc;
+ 
++#[cfg(feature = "std")]
++extern crate std;
++
+ #[macro_use]
+ mod backtrace;
+ mod chain;
+diff --git a/src/wrapper.rs b/src/wrapper.rs
+index 0eb5478a..9726ae59 100644
+--- a/src/wrapper.rs
++++ b/src/wrapper.rs
+@@ -1,6 +1,9 @@
+ use crate::StdError;
+ use core::fmt::{self, Debug, Display};
+ 
++#[cfg(feature = "std")]
++use alloc::boxed::Box;
++
+ #[cfg(error_generic_member_access)]
+ use std::error::Request;
+ 
+diff --git a/tests/test_macros.rs b/tests/test_macros.rs
+index a3342ab7..a322b673 100644
+--- a/tests/test_macros.rs
++++ b/tests/test_macros.rs
+@@ -1,6 +1,7 @@
+ #![allow(
+     clippy::assertions_on_result_states,
+     clippy::eq_op,
++    clippy::incompatible_msrv, // https://github.com/rust-lang/rust-clippy/issues/12257
+     clippy::items_after_statements,
+     clippy::needless_pass_by_value,
+     clippy::shadow_unrelated,
+diff --git a/tests/test_repr.rs b/tests/test_repr.rs
+index 065041c5..2976cd86 100644
+--- a/tests/test_repr.rs
++++ b/tests/test_repr.rs
+@@ -4,7 +4,6 @@ mod drop;
+ 
+ use self::drop::{DetectDrop, Flag};
+ use anyhow::Error;
+-use std::marker::Unpin;
+ use std::mem;
+ 
+ #[test]
+diff --git a/tests/ui/no-impl.stderr b/tests/ui/no-impl.stderr
+index 1ddf7686..6c797618 100644
+--- a/tests/ui/no-impl.stderr
++++ b/tests/ui/no-impl.stderr
+@@ -2,11 +2,7 @@ error[E0599]: the method `anyhow_kind` exists for reference `&Error`, but its tr
+  --> tests/ui/no-impl.rs:7:13
+   |
+ 4 | struct Error;
+-  | ------------
+-  | |
+-  | doesn't satisfy `Error: Into<anyhow::Error>`
+-  | doesn't satisfy `Error: anyhow::kind::TraitKind`
+-  | doesn't satisfy `Error: std::fmt::Display`
++  | ------------ doesn't satisfy `Error: Into<anyhow::Error>`, `Error: anyhow::kind::TraitKind` or `Error: std::fmt::Display`
+ ...
+ 7 |     let _ = anyhow!(Error);
+   |             ^^^^^^^^^^^^^^ method cannot be called on `&Error` due to unsatisfied trait bounds
+@@ -28,4 +24,9 @@ note: the traits `Into` and `std::fmt::Display` must be implemented
+   |
+   | pub trait Into<T>: Sized {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
++  = help: items from traits can only be used if the trait is implemented and in scope
++  = note: the following traits define an item `anyhow_kind`, perhaps you need to implement one of them:
++          candidate #1: `anyhow::kind::AdhocKind`
++          candidate #2: `anyhow::kind::TraitKind`
++          candidate #3: `anyhow::kind::BoxedKind`
+   = note: this error originates in the macro `anyhow` (in Nightly builds, run with -Z macro-backtrace for more info)
