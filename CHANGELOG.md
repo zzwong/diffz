@@ -18,6 +18,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The file tree folds a folder that holds a single changed file into that file's
+  row, showing the folder path dimmed before the file name, so such folders no
+  longer take a row of their own.
 - Primary buttons in the Open panel, the review preview, export, and the empty
   reader size to their label instead of stretching across the panel.
 - The file tree button in the title bar is highlighted like the Wrap and Split

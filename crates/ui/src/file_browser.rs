@@ -67,6 +67,7 @@ mod tests {
 
         let (visible, rows) = project(entries, &collapsed, "a.rs");
         assert_eq!(visible, vec![FileId("a".into())]);
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].prefix, "src/");
     }
 }

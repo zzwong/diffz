@@ -274,9 +274,14 @@ impl Workbench {
                                 .child(icon)
                                 .child(
                                     div()
+                                        .flex()
+                                        .flex_row()
+                                        .flex_nowrap()
+                                        .items_center()
                                         .flex_1()
                                         .min_w_0()
-                                        .text_ellipsis()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
                                         .text_size(px(12.))
                                         .text_color(if is_selected && !reviewed {
                                             skin.text
@@ -284,7 +289,22 @@ impl Workbench {
                                             skin.muted
                                         })
                                         .font_family(crate::theme::code_font())
-                                        .child(row.label.clone()),
+                                        .when(!row.prefix.is_empty(), |d| {
+                                            d.child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_color(skin.muted.opacity(0.6))
+                                                    .child(row.prefix.clone()),
+                                            )
+                                        })
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .flex_shrink_0()
+                                                .truncate()
+                                                .child(row.label.clone()),
+                                        ),
                                 )
                                 .when_some(release, |b, (badge, _)| {
                                     b.child(
