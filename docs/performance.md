@@ -53,7 +53,7 @@ a specific image count. GPUI's Wayland window requests Mailbox and falls back to
 FIFO if unsupported; its X11 window uses FIFO. The wgpu surface configuration
 requests maximum frame latency 2; its Vulkan backend asks for at least three
 swapchain images (`maximum_frame_latency + 1`). The actual compositor allocation
-needs a separate observation.
+needs a separate observation, as recorded in the Wayland baseline below.
 
 `--malloc-trim` is an opt-in experiment for #70: after a source replacement,
 diffz calls glibc `malloc_trim(0)` and writes its return value to `app.log`.
@@ -111,26 +111,33 @@ remained reserved while pages became clean or unmapped. This is a diagnostic
 result for #70, not a default behavior change; a production trim needs timing
 and navigation checks.
 
-The Vulkan code requests a 1360×900 window, up to two frames of latency and at
-least three swapchain images. The measured DRM total was 58.4–58.6 MB across
-scenarios, but fdinfo does not split swapchain images from other GPU resources.
-An exact image count, image extent and chosen Wayland present mode require a
-Vulkan trace; the source requests Mailbox with FIFO fallback. Issues #69 and
-#71–#73 remain open at this baseline, so their proposed shared-code fixes have
-no before/after Linux result yet.
+The Vulkan code requests a 1360×900 window and up to two frames of latency.
+A one-off diagnostic build instrumented `wgpu-hal`'s Vulkan swapchain creation
+and queried the returned images. On this Wayland session, after an initial
+64×64 FIFO surface and a 1360×900 Mailbox surface, the settled window had
+**four 1700×1125 Mailbox images**. The final extent reflects the compositor's
+1.25 scale. The ordinary profile measured 58.4–58.6 MB of DRM memory, which
+also includes resources other than those four images. The diagnostic
+instrumentation was kept outside this repository and excluded from the baseline
+binary. Issues #69 and #71–#73 remain open at this baseline, so their proposed
+shared-code fixes have no before/after Linux result yet.
 
 There is no Xorg session on this host. An Xwayland diagnostic can test the X11
 client path, but the required real Xorg baseline remains open. For that
 diagnostic, `WAYLAND_DISPLAY=` forced GPUI's X11 backend while GNOME Wayland
 continued as compositor. The offline Open panel, F01 and large patch scenarios
-used 90.5–90.8 MB DRM memory, about 32 MB more than Wayland. Three repeated
+used 90.5–90.8 MB DRM memory, about 32 MB more than Wayland. The Vulkan
+diagnostic found **three 2720×1800 FIFO images** in the settled
+Xwayland window, after an initial 64×64 FIFO surface. The larger image extent
+accounts for much of the DRM memory difference; it reflects Xwayland's scaling
+on this host and may differ in a real Xorg session. Three repeated
 Open panel runs showed 65.3–65.9 voluntary switches/s and 0.70–0.73% CPU;
 three F01 runs showed 60.13 switches/s and 0.10–0.17% CPU. The X11 backend's
 visible-window refresh timer fires at the monitor rate even when it passes
 `force_render: false`. Issue #88 tracks making that timer demand driven. These
-numbers demonstrate wakeups, not a full redraw or a particular swapchain
-allocation count. One of the three repeated samples in each view was flagged
-busy; the context-switch rate stayed the same in the clean samples.
+numbers demonstrate wakeups, not a full redraw on every tick. One of the three
+repeated samples in each view was flagged busy; the context-switch rate stayed
+the same in the clean samples.
 
 `scripts/profile-macos.sh` measures diffz's memory and CPU on macOS over a fixed
 set of scenarios, so a change can be compared against a baseline. Each scenario
