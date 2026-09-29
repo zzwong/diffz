@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, HashSet};
 pub struct TreeRow {
     pub path: String,
     pub label: String,
+    /// Dimmed folder path shown before `label` when a single-file folder is folded into its file row.
+    pub prefix: String,
     pub depth: usize,
     pub file: Option<FileId>,
     pub expanded: bool,
@@ -68,10 +70,23 @@ fn flatten(
             path.push_str(name);
             node = child;
         }
+        if node.dirs.is_empty() && node.files.len() == 1 {
+            let (name, (id, file_path)) = node.files.first_key_value().unwrap();
+            rows.push(TreeRow {
+                path: file_path.clone(),
+                label: name.clone(),
+                prefix: format!("{label}/"),
+                depth,
+                file: Some(id.clone()),
+                expanded: false,
+            });
+            continue;
+        }
         let expanded = filtering || !collapsed.contains(&path);
         rows.push(TreeRow {
             path: path.clone(),
             label,
+            prefix: String::new(),
             depth,
             file: None,
             expanded,
@@ -84,6 +99,7 @@ fn flatten(
         rows.push(TreeRow {
             path: path.clone(),
             label: name.clone(),
+            prefix: String::new(),
             depth,
             file: Some(id.clone()),
             expanded: false,
