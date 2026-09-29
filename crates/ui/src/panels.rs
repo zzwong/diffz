@@ -358,18 +358,20 @@ impl Workbench {
                     );
                 }
                 card = card.child(
-                    Button::new("do-open")
-                        .cursor_pointer()
-                        .primary()
-                        .label(if self.loading {
-                            "Opening…"
-                        } else {
-                            "Open review"
-                        })
-                        .disabled(
-                            self.loading || self.open_input.read(cx).value().trim().is_empty(),
-                        )
-                        .on_click(cx.listener(|a, _, _, cx| a.submit_open(cx))),
+                    div().h_flex().justify_end().child(
+                        Button::new("do-open")
+                            .cursor_pointer()
+                            .primary()
+                            .label(if self.loading {
+                                "Opening…"
+                            } else {
+                                "Open review"
+                            })
+                            .disabled(
+                                self.loading || self.open_input.read(cx).value().trim().is_empty(),
+                            )
+                            .on_click(cx.listener(|a, _, _, cx| a.submit_open(cx))),
+                    ),
                 );
                 card = card.child(
                     div()
