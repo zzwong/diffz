@@ -193,7 +193,24 @@
                          instant += refresh_rate;
 --- a/src/linux/x11/window.rs
 +++ b/src/linux/x11/window.rs
-@@ -1671,6 +1671,23 @@
+@@ -1361,6 +1361,16 @@
+     }
+ }
+ 
++fn wake_frame_source(client: &X11ClientStatePtr, executor: &ForegroundExecutor, x_window: u32) {
++    if !client.try_request_frame(x_window) {
++        // Input callbacks can invalidate while the client is still borrowed to dispatch the X11 event.
++        let client = client.clone();
++        executor
++            .spawn(async move { client.request_frame(x_window) })
++            .detach();
++    }
++}
++
+ impl PlatformWindow for X11Window {
+     fn bounds(&self) -> Bounds<Pixels> {
+         self.0.state.borrow().bounds
+@@ -1671,6 +1681,16 @@
          self.0.state.borrow().fullscreen
      }
  
@@ -203,17 +220,22 @@
 +        let executor = state.executor.clone();
 +        let x_window = self.0.x_window;
 +        Some(Rc::new(move || {
-+            if !client.try_request_frame(x_window) {
-+                // Input callbacks can invalidate while the client is still borrowed to
-+                // dispatch the X11 event. Retry after that dispatch releases the borrow.
-+                let client = client.clone();
-+                executor
-+                    .spawn(async move { client.request_frame(x_window) })
-+                    .detach();
-+            }
++            wake_frame_source(&client, &executor, x_window)
 +        }))
 +    }
 +
      fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
          self.0.callbacks.borrow_mut().request_frame = Some(callback);
      }
+@@ -1714,6 +1734,11 @@
+         self.0.callbacks.borrow_mut().button_layout_changed = Some(callback);
+     }
+ 
++    fn schedule_frame(&self) {
++        let state = self.0.state.borrow();
++        wake_frame_source(&state.client, &state.executor, self.0.x_window);
++    }
++
+     fn draw(&self, scene: &Scene) {
+         let mut inner = self.0.state.borrow_mut();
+ 
