@@ -1,5 +1,137 @@
 # Performance
 
+## Linux profiling
+
+`scripts/profile-linux.sh` runs the same nine scenarios and writes the same
+top-level `summary.json` layout (`env`, `scenarios`, per-scenario `metrics` and
+`runs`) as the macOS harness. Linux metric names differ because `/proc` and DRM
+account for memory differently. Run it in an unlocked, hardware-backed Wayland
+or Xorg session. Record separate baselines for each display server on the same
+GPU, driver, viewport and binary. Xwayland under a Wayland compositor tests an
+X11 client path but is not an Xorg session baseline.
+
+```sh
+bash scripts/profile-linux.sh --bin /path/to/diffz --label wayland-main
+bash scripts/profile-linux.sh --bin /path/to/diffz --label xorg-main
+bash scripts/profile-linux.sh --offline --repeat 1 --scenarios f01,large-patch
+bash scripts/profile-linux.sh --compare target/profile/wayland-main/summary.json --to target/profile/wayland-fix/summary.json
+```
+
+Omit `--bin` to build the normal release binary first. The script checks one
+minute load, available memory, other builds and other profiles before any
+measurement; `--wait SECONDS` waits for a quiet machine and `--force` records
+the override in `env.gate_failures`. Set `PROFILE_MAX_LOAD` or
+`PROFILE_MIN_FREE_PERCENT` only when the host's normal idle level requires it,
+and disclose the setting. A forced run is not a reliable CPU baseline.
+
+Each scenario gets a fresh process and empty `--state-dir` under the script's
+private `/tmp/dzp.*` directory. `DIFFZ_PROFILE_STEPS` saturates the frame pool
+and steps files through the same hook as the macOS run. The script waits at
+least eight seconds, then for an unchanged SQLite WAL and PSS within 1 MB for
+six seconds, with a 180-second timeout. It records 30 one-second `/proc`
+samples after settling; `--sample-seconds` can shorten a diagnostic run. The
+`idle` scenario first waits 240 seconds by default. Interrupted runs stop the
+processes started against the private state directories.
+
+| Metric | Source | Meaning |
+| --- | --- | --- |
+| `pss_bytes` | `/proc/PID/smaps_rollup` | Proportional resident memory. Shared pages are split across processes. |
+| `private_dirty_bytes` | `smaps_rollup` | Private dirty CPU-mapped pages, including glibc arenas and other mutable regions. |
+| `gpu_memory_bytes` | `drm-memory-vram` plus `drm-memory-gtt` in `/proc/PID/fdinfo` | Driver-accounted GPU memory where exposed. This can include non-swapchain resources and omit compositor-owned buffers. Raw categories are in `drm_memory_bytes`. |
+| `heap_in_use_bytes` | glibc `mallinfo2().uordblks` | glibc allocations in use. Other allocators and direct mappings may not be included. |
+| `heap_arena_bytes` | glibc `mallinfo2().arena + hblkhd` | Memory obtained by glibc arenas and direct mapped blocks. The gap to in-use is allocator retention and fragmentation. |
+| `cpu_percent` | `/proc/PID/stat` | Process user plus system CPU time over the sample period, where 100% is one core. |
+| `voluntary_csw_per_s` | `/proc/PID/status` | Voluntary context switches per second, a wakeup proxy. Nonvoluntary switches are also saved. |
+
+The heap sampler is compiled only on glibc Linux and starts only with
+`DIFFZ_PROFILE_HEAP` set. `heap.jsonl` and per-second `proc.json` are kept under
+each run's `raw/` directory. Missing DRM fdinfo or heap fields stay null in the
+summary; do not interpret them as zero. These figures overlap, so do not sum
+PSS, private dirty, DRM and heap. `/proc` cannot directly count swapchain
+images; check the wgpu surface configuration and driver traces before claiming
+a specific image count. GPUI's Wayland window requests Mailbox and falls back to
+FIFO if unsupported; its X11 window uses FIFO. The wgpu surface configuration
+requests maximum frame latency 2; its Vulkan backend asks for at least three
+swapchain images (`maximum_frame_latency + 1`). The actual compositor allocation
+needs a separate observation.
+
+`--malloc-trim` is an opt-in experiment for #70: after a source replacement,
+diffz calls glibc `malloc_trim(0)` and writes its return value to `app.log`.
+Compare `handoff-to-f01` with and without it; do not use a trimmed run as the
+ordinary baseline.
+
+For an A/B run, build both binaries before profiling, run main then branch in
+the same session, and use `--compare`. The table marks changes inside the old
+run's min–max spread with `≈`. Keep Wayland and Xorg comparisons separate.
+
+### Linux baselines
+
+On 2026-09-29, a release build at `7e2dc6f` plus this Linux profile hook ran
+all nine scenarios three times on Fedora 44, GNOME Wayland, an AMD Strix Halo
+Radeon 8060S, Mesa 26.1.6, kernel 7.1.8, and a 1360×900 requested window.
+The run used Vulkan and a real GPU. Numbers below are median decimal MB or
+percent of one CPU core; the complete min–max ranges and raw samples are in
+`target/profile/wayland-amd-7e2dc6f/` on the measurement host.
+
+| Scenario | PSS | Private dirty | DRM memory | glibc in use | glibc arena | CPU % | voluntary csw/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Open panel | 77.9 | 17.3 | 58.5 | 8.7 | 16.7 | 0.93 | 6.0 |
+| F01 | 87.6 | 26.1 | 58.5 | 14.0 | 26.5 | 0.07 | 0 |
+| Large patch | 99.2 | 34.7 | 58.5 | 18.8 | 36.7 | 0.07 | 0 |
+| Large patch, stepped | 102.2 | 37.4 | 58.5 | 20.0 | 37.4 | 0.07 | 0 |
+| Small compare | 91.8 | 30.0 | 58.5 | 10.8 | 32.2 | 0.07 | 0 |
+| Large compare, fresh | 122.0 | 59.2 | 58.5 | 16.8 | 68.4 | 0.10 | 0 |
+| Large compare, stepped | 132.3 | 66.8 | 58.5 | 18.6 | 77.2 | 0.13 | 0 |
+| Four minute idle | 118.4 | 65.7 | 58.5 | 18.7 | 73.2 | 0.13 | 0 |
+| Hand-off to F01 | 130.2 | 77.1 | 58.6 | 19.2 | 87.9 | 0.07 | 0 |
+
+Unrelated Cargo builds started during parts of the run. The script flagged two
+of three Open panel, F01, patch, small compare and idle samples, and one of
+three large compare and hand-off samples as busy. CPU values above are the
+observed medians, not a quiet-machine CPU baseline. Private dirty, glibc and
+DRM totals stayed close across repeats. PSS moved substantially when shared
+pages were charged differently: the idle range was 70.9–130.8 MB while private
+dirty stayed within 65.7–65.9 MB. Repeat the CPU baseline when the host stays
+quiet for a full pass.
+
+The Open panel woke about six times a second and used 0.83–0.93% CPU, consistent
+with the cursor-blink issue #69. Review views showed zero voluntary context
+switches in many 30-second samples and 0.03–0.13% CPU, supporting a parked
+Wayland frame loop rather than the macOS display-link problem in #76. A hand-off
+to F01 left 50.9 MB more private dirty memory, 5.2 MB more live glibc heap and
+61.4 MB more glibc arena than a fresh F01 process; it did not increase the DRM
+total. This motivates the #70 allocator experiment and the #71 cache work.
+
+With the same binary and `--malloc-trim`, three hand-off repeats returned
+`malloc_trim 1` and lowered the medians to 48.0 MB private dirty and 101.7 MB
+PSS, from 77.1 MB and 130.2 MB without trim. The ranges were 47.6–49.1 MB
+private dirty and 101.5–103.0 MB PSS. Live heap stayed at 19.2 MB and DRM
+memory at 58.6 MB. The glibc arena stayed near 88 MB because its address space
+remained reserved while pages became clean or unmapped. This is a diagnostic
+result for #70, not a default behavior change; a production trim needs timing
+and navigation checks.
+
+The Vulkan code requests a 1360×900 window, up to two frames of latency and at
+least three swapchain images. The measured DRM total was 58.4–58.6 MB across
+scenarios, but fdinfo does not split swapchain images from other GPU resources.
+An exact image count, image extent and chosen Wayland present mode require a
+Vulkan trace; the source requests Mailbox with FIFO fallback. Issues #69 and
+#71–#73 remain open at this baseline, so their proposed shared-code fixes have
+no before/after Linux result yet.
+
+There is no Xorg session on this host. An Xwayland diagnostic can test the X11
+client path, but the required real Xorg baseline remains open. For that
+diagnostic, `WAYLAND_DISPLAY=` forced GPUI's X11 backend while GNOME Wayland
+continued as compositor. The offline Open panel, F01 and large patch scenarios
+used 90.5–90.8 MB DRM memory, about 32 MB more than Wayland. Three repeated
+Open panel runs showed 65.3–65.9 voluntary switches/s and 0.70–0.73% CPU;
+three F01 runs showed 60.13 switches/s and 0.10–0.17% CPU. The X11 backend's
+visible-window refresh timer fires at the monitor rate even when it passes
+`force_render: false`. Issue #88 tracks making that timer demand driven. These
+numbers demonstrate wakeups, not a full redraw or a particular swapchain
+allocation count. One of the three repeated samples in each view was flagged
+busy; the context-switch rate stayed the same in the clean samples.
+
 `scripts/profile-macos.sh` measures diffz's memory and CPU on macOS over a fixed
 set of scenarios, so a change can be compared against a baseline. Each scenario
 runs in a fresh process, several times, and the script writes raw samples and a

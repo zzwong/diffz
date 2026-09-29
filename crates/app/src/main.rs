@@ -462,10 +462,55 @@ fn serve(
 
 fn main() {
     diffz_core::timing::mark("main");
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    start_profile_heap_samples();
     if let Err(e) = run() {
         eprintln!("diffz: {e:#}");
         std::process::exit(1);
     }
+}
+
+/// glibc's allocator totals, sampled only for an explicit Linux profile run.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn start_profile_heap_samples() {
+    #[repr(C)]
+    struct Mallinfo2 {
+        arena: usize,
+        ordblks: usize,
+        smblks: usize,
+        hblks: usize,
+        hblkhd: usize,
+        usmblks: usize,
+        fsmblks: usize,
+        uordblks: usize,
+        fordblks: usize,
+        keepcost: usize,
+    }
+    unsafe extern "C" {
+        fn mallinfo2() -> Mallinfo2;
+    }
+    let Some(path) = std::env::var_os("DIFFZ_PROFILE_HEAP") else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let Ok(mut file) = std::fs::File::create(path) else {
+            return;
+        };
+        loop {
+            // SAFETY: mallinfo2 reads glibc's process-wide allocator counters.
+            let info = unsafe { mallinfo2() };
+            let row = serde_json::json!({
+                "arena": info.arena,
+                "hblkhd": info.hblkhd,
+                "uordblks": info.uordblks,
+                "fordblks": info.fordblks,
+            });
+            if writeln!(file, "{row}").is_err() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
 }
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -1,4 +1,4 @@
-//! Hooks for `scripts/profile-macos.sh`, active only while `DIFFZ_PROFILE_STEPS` is set.
+//! Hooks for the macOS and Linux profile scripts, active only while `DIFFZ_PROFILE_STEPS` is set.
 //! With `DIFFZ_PROFILE_STEPS=N` (N ≥ 0), the window redraws on every frame for a moment after
 //! it opens, so GPUI grows its pool of frame buffers to the maximum on every run, and after
 //! the first source installs, diffz steps through N files as `]` would. Unset, nothing runs.
@@ -21,6 +21,18 @@ pub(super) fn steps() -> Option<usize> {
 }
 
 impl Workbench {
+    /// Optional experiment for issue #70; normal launches never trim here.
+    pub(super) fn profile_trim_after_switch(&self) {
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        if std::env::var_os("DIFFZ_PROFILE_MALLOC_TRIM").is_some() {
+            unsafe extern "C" {
+                fn malloc_trim(pad: usize) -> i32;
+            }
+            // SAFETY: malloc_trim is glibc's process-wide allocator release operation.
+            let released = unsafe { malloc_trim(0) };
+            eprintln!("diffz-profile malloc_trim {released}");
+        }
+    }
     /// Redraw on each of the next `frames` frames while profiling.
     pub(super) fn saturate_frames(
         &mut self,
