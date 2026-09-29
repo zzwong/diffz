@@ -127,6 +127,7 @@ app.status="Source unchanged; comment list and review state refreshed without mo
         cx.notify();
     }
     pub fn install(&mut self, opened: Opened, cx: &mut Context<Self>) {
+        let replacing = self.active.is_some();
         let ack = opened.view.revision;
         let selected = opened
             .view
@@ -166,6 +167,9 @@ app.status="Source unchanged; comment list and review state refreshed without mo
                 .into();
         self.refresh_recent(cx);
         self.refresh_outbox(cx);
+        if replacing {
+            self.profile_trim_after_switch();
+        }
     }
     pub fn filter_files(&mut self, cx: &mut Context<Self>) {
         let query = self.filter_input.read(cx).value().to_lowercase();
