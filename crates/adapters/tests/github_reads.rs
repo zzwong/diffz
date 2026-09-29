@@ -1,4 +1,7 @@
 use diffz_adapters::github::{PrAddress, decode_http, encode_path};
+#[cfg(unix)]
+#[path = "support/fake_cli.rs"]
+mod fake_cli;
 #[test]
 fn strict_url() {
     let a = PrAddress::parse("https://github.com/o/r/pull/123/files").unwrap();
@@ -57,15 +60,12 @@ fn check_metadata_distinguishes_running_and_completed() {
 #[test]
 #[cfg(unix)]
 fn failed_gh_run_reports_its_redacted_stderr() {
-    use std::os::unix::fs::PermissionsExt;
     let temp = tempfile::tempdir().unwrap();
     let gh = temp.path().join("gh");
-    std::fs::write(
+    fake_cli::write_executable(
         &gh,
         "#!/bin/sh\nprintf 'mise ERROR no tasks defined in ~\\ntoken ghp_abcdefghijklmnopqrstuvwxyz0123\\n' >&2\nexit 1\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
+    );
     let err = diffz_adapters::github::GithubReader::new(gh)
         .account("github.com", diffz_core::provider::Cancellation::default())
         .unwrap_err()

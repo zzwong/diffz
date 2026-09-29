@@ -1,0 +1,108 @@
+{
+ "html_url": "https://github.com/dtolnay/anyhow/compare/1.0.80...1.0.81",
+ "status": "ahead",
+ "ahead_by": 3,
+ "behind_by": 0,
+ "total_commits": 3,
+ "base_commit": {
+  "sha": "54437197ee79c20678db433d98616fab7ddff1a5",
+  "html_url": "https://github.com/dtolnay/anyhow/commit/54437197ee79c20678db433d98616fab7ddff1a5",
+  "commit": {
+   "author": {
+    "name": "David Tolnay",
+    "date": "2024-02-19T04:49:24Z"
+   },
+   "message": "Release 1.0.80"
+  },
+  "author": {
+   "login": "dtolnay"
+  }
+ },
+ "merge_base_commit": {
+  "sha": "54437197ee79c20678db433d98616fab7ddff1a5",
+  "html_url": "https://github.com/dtolnay/anyhow/commit/54437197ee79c20678db433d98616fab7ddff1a5",
+  "commit": {
+   "author": {
+    "name": "David Tolnay",
+    "date": "2024-02-19T04:49:24Z"
+   },
+   "message": "Release 1.0.80"
+  },
+  "author": {
+   "login": "dtolnay"
+  }
+ },
+ "commits": [
+  {
+   "sha": "a2eb7dd5e13add83f254b6dac0f68e043effc521",
+   "html_url": "https://github.com/dtolnay/anyhow/commit/a2eb7dd5e13add83f254b6dac0f68e043effc521",
+   "commit": {
+    "author": {
+     "name": "David Tolnay",
+     "date": "2024-03-12T02:30:29Z"
+    },
+    "message": "Make compatible with -Dwarnings"
+   },
+   "author": {
+    "login": "dtolnay"
+   }
+  },
+  {
+   "sha": "8be90917c603199c5d1fdd73984237f023768e22",
+   "html_url": "https://github.com/dtolnay/anyhow/commit/8be90917c603199c5d1fdd73984237f023768e22",
+   "commit": {
+    "author": {
+     "name": "David Tolnay",
+     "date": "2024-03-12T02:43:17Z"
+    },
+    "message": "Merge pull request #354 from dtolnay/deadcode\n\nMake compatible with -Dwarnings"
+   },
+   "author": {
+    "login": "dtolnay"
+   }
+  },
+  {
+   "sha": "4aad4edebd9f09247d6c6b6784419a74bb116829",
+   "html_url": "https://github.com/dtolnay/anyhow/commit/4aad4edebd9f09247d6c6b6784419a74bb116829",
+   "commit": {
+    "author": {
+     "name": "David Tolnay",
+     "date": "2024-03-12T02:45:23Z"
+    },
+    "message": "Release 1.0.81"
+   },
+   "author": {
+    "login": "dtolnay"
+   }
+  }
+ ],
+ "files": [
+  {
+   "sha": "edb3e6882b981a1502baa00b4751f9d3ddb88ae3",
+   "filename": "Cargo.toml",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 1,
+   "changes": 2,
+   "patch": "@@ -1,6 +1,6 @@\n [package]\n name = \"anyhow\"\n-version = \"1.0.80\"\n+version = \"1.0.81\"\n authors = [\"David Tolnay <dtolnay@gmail.com>\"]\n categories = [\"rust-patterns\", \"no-std\"]\n description = \"Flexible concrete Error type built on std::error::Error\""
+  },
+  {
+   "sha": "55d8a7eb6a3c1c30467913fd09df8fe1a4af5f05",
+   "filename": "build.rs",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 0,
+   "changes": 1,
+   "patch": "@@ -122,6 +122,7 @@ fn compile_probe(rustc_bootstrap: bool) -> bool {\n         .arg(\"--crate-name=anyhow\")\n         .arg(\"--crate-type=lib\")\n         .arg(\"--emit=dep-info,metadata\")\n+        .arg(\"--cap-lints=allow\")\n         .arg(\"--out-dir\")\n         .arg(out_dir)\n         .arg(probefile);"
+  },
+  {
+   "sha": "9a3f13caf48904bf3c9305b93c1b183469381667",
+   "filename": "src/lib.rs",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 1,
+   "changes": 2,
+   "patch": "@@ -206,7 +206,7 @@\n //! will require an explicit `.map_err(Error::msg)` when working with a\n //! non-Anyhow error type inside a function that returns Anyhow's error type.\n \n-#![doc(html_root_url = \"https://docs.rs/anyhow/1.0.80\")]\n+#![doc(html_root_url = \"https://docs.rs/anyhow/1.0.81\")]\n #![cfg_attr(error_generic_member_access, feature(error_generic_member_access))]\n #![cfg_attr(doc_cfg, feature(doc_cfg))]\n #![no_std]"
+  }
+ ]
+}

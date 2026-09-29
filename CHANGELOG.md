@@ -9,6 +9,12 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `diffz URL` and `diffz --compare URL` open a GitHub or GitLab compare of two
+  refs, such as two release tags, from its URL. Three-dot and `?from=&to=` forms show what the
+  head changed since the merge base; `..` and `straight=true` diff the two
+  commits directly (on GitHub only when the base is an ancestor of the head).
+  Compares are read-only, and the coverage warning reports GitHub's commit and
+  file caps and GitLab's omitted diffs.
 - `diffz <target>` detects what it was given: a patch file, a GitHub pull
   request (`owner/repo#123` or a URL), or a GitLab merge request
   (`group/project!123` or a URL). `--pr`, `--mr` and `--patch` still work.

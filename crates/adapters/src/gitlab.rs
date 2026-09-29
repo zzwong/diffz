@@ -1,7 +1,7 @@
 //! glab transport for a chosen host. Reads have limits; uncertain writes stay one-shot.
 use crate::{
     Result,
-    github::{HttpResponse, decode_http},
+    github::{HttpResponse, decode_http, decode_path, quote_path, ref_name},
     process::{ProcessRequest, Runner},
     provider::{ReviewProvider, ReviewRemote, SendOutcome},
 };
@@ -99,6 +99,151 @@ impl MrAddress {
         }
     }
 }
+/// What a GitLab address names: a merge request, or a read-only compare of two refs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitlabTarget {
+    Mr(MrAddress),
+    Compare(GitlabCompare),
+}
+impl GitlabTarget {
+    pub fn parse(input: &str) -> Result<Self> {
+        let input = input.trim();
+        let compare = input.starts_with("https://")
+            && url::Url::parse(input).is_ok_and(|u| {
+                let path = u.path().trim_end_matches('/');
+                path.ends_with("/-/compare") || path.contains("/-/compare/")
+            });
+        if compare {
+            GitlabCompare::parse(input).map(Self::Compare)
+        } else {
+            MrAddress::parse(input).map(Self::Mr)
+        }
+    }
+}
+/// `https://HOST/GROUP/PROJECT/-/compare/FROM...TO`, or the `?from=&to=&straight=` form.
+/// `FROM..TO` and `straight=true` ask for a direct diff instead of one against the merge base.
+/// GitLab's Compare button adds `from_project_id`; it is kept so a cross-project compare can be refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitlabCompare {
+    pub host: String,
+    pub project: String,
+    pub refs: CompareRefs,
+    pub from_project_id: Option<u64>,
+}
+impl GitlabCompare {
+    pub fn parse(input: &str) -> Result<Self> {
+        let input = input.trim();
+        if input.split('/').any(|s| matches!(s, "." | "..")) {
+            return Err("URL paths may not contain relative segments".into());
+        }
+        let u = url::Url::parse(input).map_err(|_| "Invalid compare URL")?;
+        if u.scheme() != "https"
+            || !u.username().is_empty()
+            || u.password().is_some()
+            || u.port().is_some()
+        {
+            return Err("HTTPS compare URLs cannot include credentials or ports".into());
+        }
+        let path = u.path().trim_matches('/');
+        let (project, tail) = path
+            .split_once("/-/compare")
+            .ok_or("Expected /group/project/-/compare/from...to")?;
+        let tail = match tail {
+            "" => None,
+            t => Some(t.strip_prefix('/').ok_or("Invalid compare URL suffix")?),
+        };
+        let mut from_project_id = None;
+        let mut straight = None;
+        let mut project_id = |value: &str| -> Result<()> {
+            from_project_id = Some(
+                value
+                    .parse()
+                    .map_err(|_| "from_project_id must be a number")?,
+            );
+            Ok(())
+        };
+        let (from, to, direct) = match tail {
+            Some(range) => {
+                for (key, value) in u.query_pairs() {
+                    match &*key {
+                        "from_project_id" => project_id(&value)?,
+                        "straight" => straight = Some(&*value == "true"),
+                        _ => {
+                            return Err(
+                                "Give the refs in the path or in the query, not both".into()
+                            );
+                        }
+                    }
+                }
+                let range = decode_path(range)?;
+                let (from, to, direct) = match range.split_once("...") {
+                    Some((from, to)) => (from, to, false),
+                    None => {
+                        let (from, to) = range
+                            .split_once("..")
+                            .ok_or("A compare needs two refs: from...to, or from..to")?;
+                        (from, to, true)
+                    }
+                };
+                if straight.is_some_and(|s| s != direct) {
+                    return Err("straight disagrees with the dots in the compare path".into());
+                }
+                (from.to_owned(), to.to_owned(), direct)
+            }
+            None => {
+                let (mut from, mut to, mut direct) = (None, None, false);
+                for (key, value) in u.query_pairs() {
+                    match &*key {
+                        "from" => from = Some(value.into_owned()),
+                        "to" => to = Some(value.into_owned()),
+                        "from_project_id" => project_id(&value)?,
+                        "straight" => {
+                            direct = match &*value {
+                                "true" => true,
+                                "false" => false,
+                                _ => return Err("straight must be true or false".into()),
+                            }
+                        }
+                        _ => {
+                            return Err(
+                                "Only from, to, straight, and from_project_id are accepted".into(),
+                            );
+                        }
+                    }
+                }
+                (
+                    from.ok_or("The compare query needs from and to")?,
+                    to.ok_or("The compare query needs from and to")?,
+                    direct,
+                )
+            }
+        };
+        if project.split('/').count() < 2
+            || project.split('/').any(|p| {
+                p.is_empty()
+                    || matches!(p, "." | "..")
+                    || !p
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+            })
+        {
+            return Err("GitLab project name is invalid".into());
+        }
+        if !ref_name(&from) || !ref_name(&to) {
+            return Err("The compare names a ref that Git cannot use".into());
+        }
+        Ok(Self {
+            host: u.host_str().ok_or("Missing GitLab host")?.to_string(),
+            project: project.into(),
+            refs: CompareRefs {
+                base: from,
+                head: to,
+                direct,
+            },
+            from_project_id,
+        })
+    }
+}
 pub struct GitlabReader {
     executable: PathBuf,
 }
@@ -189,6 +334,131 @@ impl GitlabReader {
         let m = self.get(a, &a.root(), c.clone())?;
         let user = self.get(a, "user", c)?;
         target(a, &m, &user)
+    }
+    /// A compare is read-only: no MR, discussions, or account, only two resolved commits.
+    pub fn compare(&self, a: &GitlabCompare, c: Cancellation) -> Result<Snapshot> {
+        // The transport only needs the host from an address; the number is never used.
+        let h = MrAddress {
+            host: a.host.clone(),
+            project: a.project.clone(),
+            number: 0,
+        };
+        let project = format!("projects/{}", a.project.replace('/', "%2F"));
+        let commit = |r: &str| {
+            format!(
+                "{project}/repository/commits/{}",
+                crate::github::encode_path(r).replace('/', "%2F")
+            )
+        };
+        // Refs move, so resolve them once here and pin every later read to those commits.
+        let (meta, from, to) = std::thread::scope(|s| {
+            let meta = s.spawn(|| self.get(&h, &project, c.clone()));
+            let from = s.spawn(|| self.get(&h, &commit(&a.refs.base), c.clone()));
+            let to = self.get(&h, &commit(&a.refs.head), c.clone());
+            (joined(meta), joined(from), to)
+        });
+        let (meta, from, to) = (meta?, from?, to?);
+        let (from, to) = (sha(&from, "/id")?, sha(&to, "/id")?);
+        let (compare, base) = std::thread::scope(|s| {
+            let compare = s.spawn(|| {
+                self.get(
+                    &h,
+                    &format!(
+                        "{project}/repository/compare?from={from}&to={to}&straight={}",
+                        a.refs.direct
+                    ),
+                    c.clone(),
+                )
+            });
+            let base = if a.refs.direct {
+                Ok(from.clone())
+            } else {
+                self.get(
+                    &h,
+                    &format!("{project}/repository/merge_base?refs[]={from}&refs[]={to}"),
+                    c.clone(),
+                )
+                .and_then(|v| sha(&v, "/id"))
+            };
+            (joined(compare), base)
+        });
+        let (compare, base) = (compare?, base?);
+        let diffs = compare["diffs"].as_array().map_or(&[][..], Vec::as_slice);
+        let patch = parse_patch(&patch_from_diffs(diffs), ParseLimits::default())?;
+        let id = meta["id"].as_u64().ok_or("Missing project ID")?;
+        if a.from_project_id.is_some_and(|from| from != id) {
+            return Err("cross-project compares are not supported".into());
+        }
+        let path = string(&meta, "/path_with_namespace")?;
+        let (owner, name) = path.rsplit_once('/').ok_or("Invalid project")?;
+        let remote = RemoteTarget {
+            provider: ProviderId::GITLAB,
+            repository: RepositoryKey {
+                host: a.host.clone(),
+                id,
+                owner: owner.into(),
+                name: name.into(),
+            },
+            account: String::new(),
+            pr: 0,
+            target_tip: from,
+            comparison_base: base,
+            head: to,
+            open: true,
+            draft: false,
+            pending_review: false,
+            compare: Some(a.refs.clone()),
+        };
+        let label = a.refs.label();
+        let mut s = Snapshot::with_origin(
+            format!("{path}  {label}"),
+            patch,
+            Some(remote),
+            vec![],
+            format!("gitlab-compare:{}:{path}:{label}", a.host),
+        );
+        if compare["compare_timeout"] == true {
+            s.warnings.push(
+                "GitLab timed out computing this compare, so its file list may be incomplete"
+                    .into(),
+            );
+        }
+        if s.patch.files.len() != diffs.len() {
+            s.warnings.push(format!(
+                "coverage disagreement: file listing {}, patch count {}",
+                diffs.len(),
+                s.patch.files.len()
+            ));
+        }
+        for d in diffs {
+            if d["too_large"] == true || d["collapsed"] == true {
+                s.warnings.push(format!(
+                    "GitLab left out the text of {} because it is too large or collapsed",
+                    d["new_path"].as_str().unwrap_or_default()
+                ));
+            }
+        }
+        s.overview.description = Some(
+            compare["commits"]
+                .as_array()
+                .map_or(&[][..], Vec::as_slice)
+                .iter()
+                .map(|c| {
+                    format!(
+                        "- `{}` {}\n",
+                        c["short_id"].as_str().unwrap_or_default(),
+                        c["title"].as_str().unwrap_or_default()
+                    )
+                })
+                .collect(),
+        );
+        s.overview.captured_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "Clock error")?
+                .as_secs(),
+        );
+        Ok(s)
     }
     pub fn snapshot(&self, a: &MrAddress, c: Cancellation) -> Result<Snapshot> {
         let m = self.get(a, &a.root(), c.clone())?;
@@ -335,6 +605,78 @@ fn string(v: &Value, key: &str) -> Result<String> {
         .map(str::to_owned)
         .ok_or_else(|| format!("GitLab response missing {key}").into())
 }
+fn sha(v: &Value, key: &str) -> Result<String> {
+    let s = string(v, key)?;
+    if !matches!(s.len(), 40 | 64) || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("the object ID GitLab sent is not valid".into());
+    }
+    Ok(s.to_ascii_lowercase())
+}
+/// GitLab's compare lists hunks without file headers; rebuild a unified diff `parse_patch` reads.
+fn patch_from_diffs(diffs: &[Value]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for d in diffs {
+        let (Some(old), Some(new)) = (d["old_path"].as_str(), d["new_path"].as_str()) else {
+            continue;
+        };
+        let mode = |key: &str| d[key].as_str().unwrap_or("100644");
+        out.extend_from_slice(
+            format!(
+                "diff --git {} {}\n",
+                quote_path("a/", old),
+                quote_path("b/", new)
+            )
+            .as_bytes(),
+        );
+        if d["new_file"] == true {
+            out.extend_from_slice(format!("new file mode {}\n", mode("b_mode")).as_bytes());
+        } else if d["deleted_file"] == true {
+            out.extend_from_slice(format!("deleted file mode {}\n", mode("a_mode")).as_bytes());
+        } else if mode("a_mode") != mode("b_mode") {
+            out.extend_from_slice(
+                format!("old mode {}\nnew mode {}\n", mode("a_mode"), mode("b_mode")).as_bytes(),
+            );
+        }
+        if d["renamed_file"] == true && old != new {
+            out.extend_from_slice(
+                format!(
+                    "rename from {}\nrename to {}\n",
+                    quote_path("", old),
+                    quote_path("", new)
+                )
+                .as_bytes(),
+            );
+        }
+        let text = d["diff"].as_str().unwrap_or_default();
+        let omitted = text.is_empty() && (d["too_large"] == true || d["collapsed"] == true);
+        if omitted {
+            out.extend_from_slice(b"GitLab omitted its text\n");
+        }
+        if !text.is_empty() || omitted {
+            let a = if d["new_file"] == true {
+                "/dev/null".to_string()
+            } else {
+                quote_path("a/", old)
+            };
+            let b = if d["deleted_file"] == true {
+                "/dev/null".to_string()
+            } else {
+                quote_path("b/", new)
+            };
+            out.extend_from_slice(format!("--- {a}\n+++ {b}\n").as_bytes());
+        }
+        out.extend_from_slice(text.as_bytes());
+        if !text.is_empty() && !text.ends_with('\n') {
+            out.push(b'\n');
+        }
+    }
+    out
+}
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, Result<T>>) -> Result<T> {
+    handle
+        .join()
+        .unwrap_or_else(|_| Err("a GitLab read stopped unexpectedly".into()))
+}
 fn target(a: &MrAddress, m: &Value, user: &Value) -> Result<RemoteTarget> {
     let (owner, name) = a.project.rsplit_once('/').ok_or("Invalid project")?;
     let t = RemoteTarget {
@@ -353,6 +695,7 @@ fn target(a: &MrAddress, m: &Value, user: &Value) -> Result<RemoteTarget> {
         open: m["state"] == "opened",
         draft: m["draft"] == true || m["work_in_progress"] == true,
         pending_review: false,
+        compare: None,
     };
     for sha in [&t.head, &t.target_tip, &t.comparison_base] {
         if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -515,10 +858,10 @@ impl ReviewRules for GitlabRules {
         "Merge request"
     }
     fn address_hint(&self) -> &str {
-        "Enter group/project!123 or a GitLab merge request URL"
+        "Enter group/project!123, a GitLab merge request URL, or a compare URL"
     }
     fn address_help(&self) -> &str {
-        "Uses glab with GitLab.com or a self-managed HTTPS server."
+        "Uses glab with GitLab.com or a self-managed HTTPS server. A compare URL opens read-only."
     }
     fn write_flag(&self) -> &str {
         "--allow-gitlab-writes"
@@ -530,6 +873,17 @@ impl ReviewRules for GitlabRules {
     }
     fn reopen_address(&self, t: &RemoteTarget) -> String {
         let r = &t.repository;
+        if let Some(c) = &t.compare {
+            let dots = if c.direct { ".." } else { "..." };
+            return format!(
+                "https://{}/{}/{}/-/compare/{}{dots}{}",
+                r.host,
+                r.owner,
+                r.name,
+                crate::github::encode_path(&c.base),
+                crate::github::encode_path(&c.head)
+            );
+        }
         format!(
             "https://{}/{}/{}/-/merge_requests/{}",
             r.host, r.owner, r.name, t.pr
@@ -649,10 +1003,13 @@ impl ReviewProvider for GitlabProvider {
         Arc::new(GitlabRules)
     }
     fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot> {
-        self.reader()?.snapshot(&MrAddress::parse(address)?, cancel)
+        match GitlabTarget::parse(address)? {
+            GitlabTarget::Mr(a) => self.reader()?.snapshot(&a, cancel),
+            GitlabTarget::Compare(a) => self.reader()?.compare(&a, cancel),
+        }
     }
     fn accepts(&self, address: &str) -> bool {
-        MrAddress::parse(address).is_ok()
+        GitlabTarget::parse(address).is_ok()
     }
     fn source(&self, t: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
         self.reader()?.source(t, path, revision)
@@ -957,5 +1314,23 @@ mod tests {
         assert!(wip_mr.draft);
         let ready_mr = target(&address(), &meta(false, false), &user).unwrap();
         assert!(!ready_mr.draft);
+    }
+    #[test]
+    fn patch_from_diffs_keeps_binary_and_rename_only_entries() {
+        use diffz_core::patch::ChangeKind;
+        let diffs = vec![
+            serde_json::json!({"old_path":"logo.png","new_path":"logo.png","a_mode":"100644","b_mode":"100644","diff":""}),
+            serde_json::json!({"old_path":"old name.txt","new_path":"new name.txt","a_mode":"100644","b_mode":"100644","renamed_file":true,"diff":""}),
+        ];
+        let patch = parse_patch(&patch_from_diffs(&diffs), ParseLimits::default()).unwrap();
+        assert_eq!(patch.files.len(), 2);
+        assert_eq!(patch.files[0].display_path(), "logo.png");
+        assert!(patch.files.iter().all(|f| f.hunks.is_empty()));
+        assert!(
+            matches!(patch.files[1].kind, ChangeKind::Renamed),
+            "{:?}",
+            patch.files[1].kind
+        );
+        assert_eq!(patch.files[1].display_path(), "new name.txt");
     }
 }

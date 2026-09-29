@@ -1,0 +1,11 @@
+{
+ "id": "7a4c44f50c90e9a14f8a2a6a224636398c473c1c",
+ "short_id": "7a4c44f5",
+ "title": "Merge branch 'bump-to-14' into 'master'",
+ "created_at": "2026-01-12T14:22:46.000+01:00",
+ "parent_ids": [
+  "a5684a2747d23783608a34807c7c96efcbc765f1",
+  "1ea6730205eb9eb05046e0879320bd895dd95a19"
+ ],
+ "web_url": "https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/7a4c44f50c90e9a14f8a2a6a224636398c473c1c"
+}

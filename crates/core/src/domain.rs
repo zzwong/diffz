@@ -381,6 +381,21 @@ impl std::fmt::Display for ProviderId {
         f.write_str(&self.0)
     }
 }
+/// The two refs of a compare as written in its URL; the commits they resolved to sit in `RemoteTarget`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompareRefs {
+    pub base: String,
+    pub head: String,
+    /// The two-dot form: `head` against `base` itself, not against their merge base.
+    pub direct: bool,
+}
+impl CompareRefs {
+    /// `base...head`, or `base..head` for a direct compare.
+    pub fn label(&self) -> String {
+        let dots = if self.direct { ".." } else { "..." };
+        format!("{}{dots}{}", self.base, self.head)
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteTarget {
     #[serde(default, skip_serializing_if = "ProviderId::is_github")]
@@ -395,6 +410,9 @@ pub struct RemoteTarget {
     #[serde(default)]
     pub draft: bool,
     pub pending_review: bool,
+    /// Set for a compare, which has no PR number (`pr` is 0) and is read-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare: Option<CompareRefs>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadComment {

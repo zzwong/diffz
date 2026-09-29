@@ -431,6 +431,7 @@ impl Workbench {
             .and_then(|a| a.snapshot.remote.as_ref());
         let (pill_label, pill_fg, pill_bg) = match remote {
             None => ("Local", skin.accent, skin.accent.opacity(0.1)),
+            Some(r) if r.compare.is_some() => ("Compare", skin.muted, skin.muted.opacity(0.12)),
             Some(r) if r.draft => ("Draft", skin.warning, skin.warning.opacity(0.12)),
             Some(r) if !r.open => ("Closed", skin.muted, skin.muted.opacity(0.12)),
             Some(_) => ("Review", skin.accent, skin.accent.opacity(0.1)),

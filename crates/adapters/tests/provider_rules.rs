@@ -23,6 +23,7 @@ fn remote(provider: ProviderId, host: &str, owner: &str, name: &str, pr: u64) ->
         open: true,
         draft: false,
         pending_review: false,
+        compare: None,
     }
 }
 
@@ -101,6 +102,7 @@ fn snapshot() -> Snapshot {
             open: true,
             draft: false,
             pending_review: false,
+            compare: None,
         }),
         vec![],
     )

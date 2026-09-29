@@ -23,6 +23,7 @@ fn snapshot(i: usize) -> Snapshot {
         open: true,
         draft: false,
         pending_review: false,
+        compare: None,
     };
     Snapshot::with_origin(
         format!("s{i}"),

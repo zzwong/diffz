@@ -1,0 +1,37 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index c62cc691..edb3e688 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "anyhow"
+-version = "1.0.80"
++version = "1.0.81"
+ authors = ["David Tolnay <dtolnay@gmail.com>"]
+ categories = ["rust-patterns", "no-std"]
+ description = "Flexible concrete Error type built on std::error::Error"
+diff --git a/build.rs b/build.rs
+index 7e95e6b5..55d8a7eb 100644
+--- a/build.rs
++++ b/build.rs
+@@ -122,6 +122,7 @@ fn compile_probe(rustc_bootstrap: bool) -> bool {
+         .arg("--crate-name=anyhow")
+         .arg("--crate-type=lib")
+         .arg("--emit=dep-info,metadata")
++        .arg("--cap-lints=allow")
+         .arg("--out-dir")
+         .arg(out_dir)
+         .arg(probefile);
+diff --git a/src/lib.rs b/src/lib.rs
+index aaa175d0..9a3f13ca 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -206,7 +206,7 @@
+ //! will require an explicit `.map_err(Error::msg)` when working with a
+ //! non-Anyhow error type inside a function that returns Anyhow's error type.
+ 
+-#![doc(html_root_url = "https://docs.rs/anyhow/1.0.80")]
++#![doc(html_root_url = "https://docs.rs/anyhow/1.0.81")]
+ #![cfg_attr(error_generic_member_access, feature(error_generic_member_access))]
+ #![cfg_attr(doc_cfg, feature(doc_cfg))]
+ #![no_std]

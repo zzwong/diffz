@@ -573,7 +573,9 @@ impl Workbench {
                         body = body.child(div().text_size(px(11.)).text_color(skin.muted).child(
                             format!(
                                 "{} · head {}",
-                                if remote.open {
+                                if remote.compare.is_some() {
+                                    "Read-only compare"
+                                } else if remote.open {
                                     "Open review"
                                 } else {
                                     "Closed review"

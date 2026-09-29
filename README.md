@@ -101,10 +101,12 @@ not Developer ID signed or notarized.
 ```sh
 diffz owner/repo#123                   # GitHub pull request (or a full URL)
 diffz group/project!123                # GitLab merge request (or a full URL)
+diffz https://github.com/owner/repo/compare/v1.0...v2.0  # GitHub or GitLab compare (read-only)
 diffz change.patch                     # unified diff file
 diffz --pr owner/repo#123              # the same, naming the source explicitly
 diffz --mr group/project!123
 diffz --patch change.patch
+diffz --compare https://gitlab.com/group/project/-/compare/v1.0...v2.0
 diffz --git /repo --base main          # main..HEAD in a local repository
 diffz --staged /repo                   # the index against HEAD
 diffz --worktree /repo                 # unstaged and untracked changes
@@ -144,6 +146,25 @@ external tools the machine has.
 diffz treats repositories as read-only. It never checks out, stages, or writes
 to them, and it makes no network calls of its own; GitHub and GitLab traffic
 runs through the `gh` and `glab` you have already authenticated.
+
+### Comparing two refs
+
+`--compare` takes the URL of a compare page, typically two tags, and picks
+GitHub or GitLab from it. GitHub's form is `HOST/OWNER/REPO/compare/BASE...HEAD`
+and GitLab's `HOST/GROUP/PROJECT/-/compare/FROM...TO`, or
+`/-/compare?from=&to=`. Both show what HEAD changed since the two refs
+diverged, as the browser does. Refs may contain slashes when percent-encoded,
+and a GitHub head may name a fork as `owner:branch`.
+
+The two-dot form (`BASE..HEAD`, or `straight=true` on GitLab) diffs the two
+commits directly. GitHub's API has no such diff, so diffz accepts it only when
+BASE is an ancestor of HEAD, where both forms agree, and otherwise asks for the
+three-dot URL.
+
+A compare is read-only: it has no review to publish, even with
+`--allow-*-writes`, and the Preview panel says so. Drafts you write stay local
+and can be exported. If GitHub caps the list of commits or files, or GitLab
+leaves out a large file's text, the coverage warning above the diff says so.
 
 ### Publishing reviews
 

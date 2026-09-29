@@ -109,6 +109,7 @@ mod link_tests {
             open: true,
             draft: false,
             pending_review: false,
+            compare: None,
         };
         let patch = parse_patch(
             b"diff --git a/a.rs b/b.rs\n--- a/a.rs\n+++ b/b.rs\n@@ -1 +1 @@\n-old\n+new\n",

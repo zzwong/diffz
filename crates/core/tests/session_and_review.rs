@@ -62,6 +62,7 @@ fn snapshot() -> Snapshot {
             open: true,
             draft: false,
             pending_review: false,
+            compare: None,
         }),
         vec![],
     )
