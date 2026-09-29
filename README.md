@@ -263,6 +263,10 @@ feature, run `cargo build -p diffz` after it and before you launch the app
 again. `--inspect` prints the JSON form of a loaded snapshot without opening
 any window, handy for exercising the core on machines with no display.
 
+On macOS, `bash scripts/profile-macos.sh` measures memory and CPU over a fixed set
+of scenarios; [docs/performance.md](docs/performance.md) explains the method,
+the metrics, and the recorded baseline.
+
 [CONTRIBUTING.md](CONTRIBUTING.md) covers bug reports and sending changes.
 
 ## License

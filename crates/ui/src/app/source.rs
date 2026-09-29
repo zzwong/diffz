@@ -160,6 +160,7 @@ app.status="Source unchanged; comment list and review state refreshed without mo
         }
         self.annotate(cx);
         self.load_releases(cx);
+        self.start_profile_steps(cx);
         self.status =
             "Snapshot loaded. The source holds still until another revision is accepted on purpose."
                 .into();

@@ -7,6 +7,15 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/profile-macos.sh` measures memory and CPU on macOS over a fixed set of
+  scenarios, each in a fresh process on a quiet machine, and compares a run
+  against an earlier one. `docs/performance.md` describes the method and records
+  the baseline. With `DIFFZ_PROFILE_STEPS=N` set, diffz fills its frame buffers
+  after the window opens and steps through N files after the source loads, so
+  the script needs no keystrokes.
+
 ### Changed
 
 - Primary buttons in the Open panel, the review preview, export, and the empty
