@@ -134,12 +134,16 @@ impl Workbench {
                 .as_ref()
                 .map_or_else(|| p.target.provider.to_string(), |r| r.name().to_string());
             card = card.child(
-                Button::new("publish-exact")
-                    .cursor_pointer()
-                    .primary()
-                    .label(format!("Send this review unchanged to {host}"))
-                    .disabled(self.busy || !self.services.writes_enabled_for(&p.target.provider))
-                    .on_click(cx.listener(|a, _, _, c| a.publish(c))),
+                div().h_flex().justify_end().child(
+                    Button::new("publish-exact")
+                        .cursor_pointer()
+                        .primary()
+                        .label(format!("Send this review unchanged to {host}"))
+                        .disabled(
+                            self.busy || !self.services.writes_enabled_for(&p.target.provider),
+                        )
+                        .on_click(cx.listener(|a, _, _, c| a.publish(c))),
+                ),
             );
             if !self.services.writes_enabled_for(&p.target.provider) {
                 card = card.child(match &provider {
@@ -189,11 +193,13 @@ impl Workbench {
             }
         }
         card = card.child(Input::new(&self.export_input)).child(
-            Button::new("export-file")
-                .cursor_pointer()
-                .primary()
-                .label("Create new private JSON file")
-                .on_click(cx.listener(|a, _, _, c| a.export(c))),
+            div().h_flex().justify_end().child(
+                Button::new("export-file")
+                    .cursor_pointer()
+                    .primary()
+                    .label("Create new private JSON file")
+                    .on_click(cx.listener(|a, _, _, c| a.export(c))),
+            ),
         );
         card
     }

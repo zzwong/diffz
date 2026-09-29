@@ -205,13 +205,15 @@ impl Workbench {
                 .child("diffz")
                 .child("Open a source, or begin with the long Markdown fixture.")
                 .child(
-                    Button::new("demo")
-                        .cursor_pointer()
-                        .primary()
-                        .label("Open Markdown fixture")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open(OpenRequest::Fixture("F01".into()), false, cx)
-                        })),
+                    div().h_flex().child(
+                        Button::new("demo")
+                            .cursor_pointer()
+                            .primary()
+                            .label("Open Markdown fixture")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open(OpenRequest::Fixture("F01".into()), false, cx)
+                            })),
+                    ),
                 )
                 .into_any_element();
         };

@@ -7,6 +7,11 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Primary buttons in the Open panel, the review preview, export, and the empty
+  reader size to their label instead of stretching across the panel.
+
 ## [0.3.1] - 2026-09-29
 
 ### Fixed
