@@ -40,13 +40,17 @@ be signed in. The tags are fixed, so the content does not change between runs.
 
 ## Method
 
-Each run starts `diffz --foreground --state-dir /tmp/dzp/<scenario>` with an empty
-state directory, and sets `DIFFZ_PROFILE_STEPS`:
+Each run starts `diffz --foreground --state-dir /tmp/dzp.XXXXXX/<scenario>` with
+an empty state directory, and sets `DIFFZ_PROFILE_STEPS`. The `/tmp/dzp.XXXXXX`
+root is private to one invocation (short, because the state directory holds a
+Unix socket), and the script stops every diffz it started and removes the root
+when it exits, including on Ctrl-C.
 
 - **Frame buffers first.** With the variable set, the window redraws on every
   frame for about two seconds after it opens, so GPUI's pool of frame buffers
   grows to its maximum of three on every run. A run that ends up with fewer,
-  usually because the window was covered while it opened, is retried.
+  usually because the window was covered while it opened, is retried up to
+  twice.
 - **Stepping.** After the first source installs, diffz selects the next file
   N times, 300 ms apart, through the same path as `]`, and writes
   `diffz-profile stepped <count>` to stderr. The script waits for that line, and
@@ -54,7 +58,8 @@ state directory, and sets `DIFFZ_PROFILE_STEPS`:
   process, such as the hand-off, does not step. Without the variable, none of
   this runs.
 - **Settling.** The script waits 8 s, then until the SQLite WAL in the state
-  directory has not changed and `phys_footprint` has stayed within 1 MB for 6 s.
+  directory has not changed and `phys_footprint` has stayed within 1 MB of its
+  value at the start of that stretch, for 6 s.
   Releases and blame load after a compare shows, so memory keeps moving for a
   while after the window looks finished. A run that has not settled after 180 s
   is sampled anyway and flagged.
@@ -62,11 +67,18 @@ state directory, and sets `DIFFZ_PROFILE_STEPS`:
   process: `footprint`, then 31 one-second samples of `top` (the first has no
   interval and is dropped), `powermetrics --samplers tasks` alongside when
   `sudo -n` works, then `ps`, `vmmap --summary` and `heap -s`.
+- **Hand-off.** `handoff-to-f01` requires `diffz --json` to report
+  `handed_off`. Any other result is recorded in the run's `meta.json` and
+  flagged, and a window it launched instead is stopped.
+- **Failures.** A run whose diffz exits early or whose `footprint` sample fails
+  is recorded as failed rather than dropped, so the summary and `--compare`
+  count it.
 - **Repeats.** `--repeat N` (default 3) runs every scenario once per round,
   round after round, so slow drift in the machine spreads across scenarios. The
   summary gives the median with the minimum and maximum.
 
-The window opens at 1360×900 points on the main display. The script checks that
+The window opens at 1360×900 points on the screen that has the key window
+(`NSScreen.mainScreen`), and the script reads the scale of that screen. The script checks that
 IOSurface is a whole number of frame buffers of that size at the display's
 scale, which catches a window that opened at another size, and records how many
 there were.
@@ -76,7 +88,8 @@ there were.
 The script refuses to run unless the memory pressure level
 (`kern.memorystatus_vm_pressure_level`) is 1, at least 25% of memory is free
 (`memory_pressure -Q`), the one-minute load is at most a third of the CPU count,
-and no `cargo`, `rustc` or `clippy-driver` is running. `--wait SECONDS` polls
+no `cargo`, `rustc` or `clippy-driver` is running, and no other
+`profile-macos.sh` is running. `--wait SECONDS` polls
 every 30 s until the machine is quiet. `--force` runs anyway, and the summary
 says which checks failed; treat its CPU numbers as noise. `PROFILE_MAX_LOAD` and
 `PROFILE_MIN_FREE_PERCENT` change the limits. Each run also records the load and
@@ -154,8 +167,9 @@ bash scripts/profile-macos.sh --bin /tmp/diffz-symbols --label attribution --att
   and unlocked. Each window takes focus as it opens; a covered window or a
   sleeping display stops drawing, which changes both memory and CPU. A run that
   still has too few frame buffers after three attempts is kept and flagged.
-- The window opens on the main display. Record runs that are compared on the
-  same display arrangement; an external monitor at another scale changes every
+- The window opens on the screen with the key window, not necessarily the
+  built-in one. Record runs that are compared on the same display arrangement,
+  with focus on the same screen; an external monitor at another scale changes every
   IOSurface number.
 - Low Power Mode and thermal throttling change CPU numbers but not memory; both
   are recorded, and the two sides of an A/B run should match.
@@ -190,7 +204,10 @@ A change that claims a memory or CPU effect carries a comparison in its PR:
      --compare target/profile/main/summary.json
    ```
    If the spread is wide, run main again afterwards and compare against both.
-3. Paste the `--compare` table into the PR body. A change counts when the
+3. Paste the `--compare` table into the PR body. Its last two columns give the
+   runs behind each median and any flags (failed runs, short frame buffers,
+   failed hand-offs, settle timeouts); rerun a flagged scenario before drawing a
+   conclusion from it. A change counts when the
    targeted metric moves beyond the old run's min–max spread (the table marks a
    change inside it with ≈), and no other scenario gets worse by more than its
    spread.

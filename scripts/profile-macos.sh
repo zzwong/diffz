@@ -3,6 +3,7 @@
 # and writes raw samples plus summary.json and summary.md under <target>/profile/<label>/.
 # docs/performance.md explains the method, the metrics and the A/B protocol for pull requests.
 set -euo pipefail
+caller="$PWD"
 cd "$(dirname "$0")/.."
 
 usage() {
@@ -24,14 +25,13 @@ Usage: bash scripts/profile-macos.sh [options]
   --wait SECONDS     wait up to this long for the machine to become quiet (default 0)
   --force            run even when the machine is not quiet; the summary records it
 USAGE
-  exit 2
+  exit "${1:-2}"
 }
 
 # Scenario name, whether it needs the network, the source argument, profile steps, and what
 # happens after the source settles. The window opens at 1360x900 points.
 anyhow=https://github.com/dtolnay/anyhow/compare/1.0.70...1.0.81
 cargo_range=https://github.com/rust-lang/cargo/compare/0.80.0...0.81.0
-large_patch=/tmp/dzp/fixtures/large.patch
 SCENARIOS='open-panel 0 - 0 -
 f01 0 --fixture=F01 0 -
 large-patch 0 PATCH 0 -
@@ -58,11 +58,18 @@ while [[ $# -gt 0 ]]; do
     --to) compare_to="${2:?}"; shift 2 ;;
     --wait) wait_quiet="${2:?}"; shift 2 ;;
     --force) force=1; shift ;;
-    -h|--help) usage ;;
+    -h|--help) usage 0 ;;
     *) echo "unknown option: $1" >&2; usage ;;
   esac
 done
 [[ "$repeat" =~ ^[1-9][0-9]*$ && "$idle_seconds" =~ ^[0-9]+$ && "$wait_quiet" =~ ^[0-9]+$ ]] || usage
+known=",$(echo "$SCENARIOS" | awk '{print $1}' | paste -sd, -),"
+for name in ${only//,/ }; do
+  [[ "$known" == *",$name,"* ]] || { echo "unknown scenario: $name (see --list)" >&2; exit 2; }
+done
+# Paths on the command line are relative to where the script was run from.
+absolute() { if [[ -z "$1" || "$1" == /* ]]; then echo "$1"; else echo "$caller/$1"; fi; }
+bin="$(absolute "$bin")" compare="$(absolute "$compare")" compare_to="$(absolute "$compare_to")"
 [[ "$(uname -s)" == Darwin ]] || { echo 'The profile runs on macOS only.' >&2; exit 2; }
 for tool in footprint vmmap heap top python3; do
   command -v "$tool" >/dev/null || { echo "$tool is required; nothing was measured." >&2; exit 127; }
@@ -89,6 +96,9 @@ METRICS = [
 
 def parse_sample(d):
     d = pathlib.Path(d)
+    meta = json.loads((d / "meta.json").read_text())
+    if meta.get("failed"):
+        return meta
     m = {}
     fp = json.loads((d / "footprint.json").read_text())
     proc = fp["processes"][0]
@@ -114,8 +124,7 @@ def parse_sample(d):
         m["cpu_max_percent"] = max(cpu)
     if len(csw) > 1:
         m["csw_per_s"] = round((csw[-1] - csw[0]) / (len(csw) - 1), 2)
-    meta = json.loads((d / "meta.json").read_text())
-    m.update(meta)
+    m.update(json.loads((d / "meta.json").read_text()))
     return m
 
 def spread(values):
@@ -130,6 +139,20 @@ def fmt(key, v):
     unit = next((u for k, _, u, _ in METRICS if k == key), "")
     return f"{v / MB:.1f}" if unit == "MB" else f"{v:.2f}" if unit == "%" else f"{v:.1f}"
 
+def flags_of(s, env):
+    flags = []
+    dr = s["metrics"]["drawables"]
+    if dr and dr["min"] < env.get("frame_buffers", 3):
+        flags.append("frame buffers short")
+    if not s["iosurface_ok"]:
+        flags.append("IOSurface size unexpected")
+    for key, text in [("failed_runs", "runs failed"), ("failed_handoffs", "hand-offs failed"),
+                      ("settle_timeouts", "settle timeouts"), ("short_steps", "runs stepped short"),
+                      ("busy_samples", "busy samples")]:
+        if s.get(key):
+            flags.append(f"{s[key]} {text}")
+    return flags
+
 def summarise(out):
     out = pathlib.Path(out)
     env = json.loads((out / "raw" / "env.json").read_text())
@@ -139,9 +162,10 @@ def summarise(out):
             continue
         name = d.name.rsplit("-run", 1)[0]
         try:
-            scenarios.setdefault(name, []).append(parse_sample(d))
+            run = parse_sample(d)
         except (OSError, ValueError, KeyError, IndexError) as e:
-            print(f"skipped {d}: {e}", file=sys.stderr)
+            run = {"failed": f"unreadable sample: {e}"}
+        scenarios.setdefault(name, []).append(run)
     order = [l.split()[0] for l in env["scenario_table"].splitlines()]
     summary = {"env": env, "scenarios": {}}
     for name in sorted(scenarios, key=lambda n: order.index(n) if n in order else 99):
@@ -149,12 +173,15 @@ def summarise(out):
         keys = [k for k, *_ in METRICS] + ["heap_nodes", "drawables", "settle_seconds", "cpu_max_percent"]
         summary["scenarios"][name] = {
             "metrics": {k: spread([r.get(k) for r in runs]) for k in keys},
-            "iosurface_ok": all(r.get("iosurface_ok") for r in runs),
+            "iosurface_ok": all(r.get("iosurface_ok") for r in runs if not r.get("failed")),
             "settle_timeouts": sum(1 for r in runs if r.get("settle_timeout")),
             "busy_samples": sum(1 for r in runs if r.get("busy")),
             "short_steps": sum(1 for r in runs if r.get("stepped", 0) < r.get("steps", 0)),
+            "failed_runs": sum(1 for r in runs if r.get("failed")),
+            "failed_handoffs": sum(1 for r in runs if r.get("handoff_status") not in (None, "handed_off")),
             "runs": runs,
         }
+        summary["scenarios"][name]["flags"] = flags_of(summary["scenarios"][name], env)
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     lines = [f"# diffz profile: {env['label']}", ""]
     lines.append(
@@ -166,7 +193,7 @@ def summarise(out):
     if env.get("forced"):
         lines.append(f"\n**Forced on a busy machine:** {'; '.join(env['gate_failures'])}. Treat CPU numbers as noise.")
     lines += ["", "Medians in MB unless noted, with min–max over the runs.", ""]
-    heads = [label for _, label, *_ in METRICS] + ["frame buffers"]
+    heads = [label for _, label, *_ in METRICS] + ["frame buffers", "runs"]
     lines.append("| Scenario | " + " | ".join(heads) + " |")
     lines.append("|---" * (len(heads) + 1) + "|")
     for name, s in summary["scenarios"].items():
@@ -176,17 +203,8 @@ def summarise(out):
             cells.append("–" if v is None else f"{fmt(k, v['median'])} ({fmt(k, v['min'])}–{fmt(k, v['max'])})")
         dr = s["metrics"]["drawables"]
         cells.append("–" if dr is None else f"{dr['min']:g}–{dr['max']:g}" if dr["min"] != dr["max"] else f"{dr['median']:g}")
-        flags = []
-        if dr and dr["min"] < env.get("frame_buffers", 3):
-            flags.append("frame buffers short")
-        if not s["iosurface_ok"]:
-            flags.append("IOSurface size unexpected")
-        if s["settle_timeouts"]:
-            flags.append(f"{s['settle_timeouts']} settle timeouts")
-        if s["short_steps"]:
-            flags.append(f"{s['short_steps']} runs stepped short")
-        if s["busy_samples"]:
-            flags.append(f"{s['busy_samples']} busy samples")
+        cells.append(str(len(s["runs"]) - s["failed_runs"]))
+        flags = s["flags"]
         lines.append(f"| {name}{' ⚠ ' + ', '.join(flags) if flags else ''} | " + " | ".join(cells) + " |")
     attr = out / "raw" / "attribute"
     if attr.is_dir():
@@ -202,11 +220,13 @@ def compare(old, new):
     print(f"Compare: {old['env']['label']} ({old['env']['git_sha'][:10]}) → {new['env']['label']} ({new['env']['git_sha'][:10]})")
     print("Δ is new − old medians; ≈ marks a change inside the old run's min–max spread.\n")
     keys = [(k, label) for k, label, *_ in METRICS]
-    print("| Scenario | " + " | ".join(label for _, label in keys) + " |")
-    print("|---" * (len(keys) + 1) + "|")
+    print("| Scenario | " + " | ".join(label for _, label in keys) + " | runs (old → new) | flags |")
+    print("|---" * (len(keys) + 3) + "|")
+    count = lambda s: s["metrics"]["phys_footprint"]["n"] if s["metrics"].get("phys_footprint") else 0
     for name, s in new["scenarios"].items():
         o = old["scenarios"].get(name)
         if not o:
+            print(f"| {name} | " + " | ".join("–" for _ in keys) + f" | – → {count(s)} | not in the old run |")
             continue
         cells = []
         for k, _ in keys:
@@ -219,6 +239,8 @@ def compare(old, new):
             noise = " ≈" if a["min"] <= b["median"] <= a["max"] else ""
             sign = "+" if delta >= 0 else "−"
             cells.append(f"{fmt(k, b['median'])}, {sign}{fmt(k, abs(delta))}{pct}{noise}")
+        flags = [f"old: {f}" for f in o.get("flags", [])] + [f"new: {f}" for f in s.get("flags", [])]
+        cells += [f"{count(o)} → {count(s)}", "; ".join(flags) or "–"]
         print(f"| {name} | " + " | ".join(cells) + " |")
 
 def large_patch(path):
@@ -276,15 +298,6 @@ fi
 [[ -x "$bin" ]] || { echo "not an executable: $bin" >&2; exit 2; }
 bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
 
-pids=()
-cleanup() {
-  local pid
-  for pid in "${pids[@]+"${pids[@]}"}"; do kill "$pid" 2>/dev/null || true; done
-  sleep 1
-  for pid in "${pids[@]+"${pids[@]}"}"; do kill -9 "$pid" 2>/dev/null || true; done
-  rm -rf /tmp/dzp
-}
-trap cleanup EXIT
 trap 'echo "interrupted" >&2; exit 130' INT TERM
 
 # The quiet-machine gate: CPU numbers from a busy machine are noise, and memory pressure
@@ -293,6 +306,13 @@ ncpu="$(sysctl -n hw.ncpu)"
 max_load="${PROFILE_MAX_LOAD:-$((ncpu / 3))}"
 min_free="${PROFILE_MIN_FREE_PERCENT:-25}"
 load1() { sysctl -n vm.loadavg | awk '{print $2}'; }
+# Other profiles, not counting this script's own subshells.
+other_profiles() {
+  local pid
+  for pid in $(pgrep -f 'bash .*profile-macos[.]sh' || true); do
+    [[ "$pid" == "$$" || "$(ps -o ppid= -p "$pid" | tr -d ' ')" == "$$" ]] || echo "$pid"
+  done
+}
 builds_running() { pgrep -x cargo >/dev/null || pgrep -x rustc >/dev/null || pgrep -x clippy-driver >/dev/null; }
 gate_failures() {
   local pressure free load
@@ -303,6 +323,7 @@ gate_failures() {
   [[ "$free" -ge "$min_free" ]] || echo "free memory $free% (want >= $min_free%)"
   awk -v l="$load" -v m="$max_load" 'BEGIN { exit !(l > m) }' && echo "load $load (want <= $max_load)"
   builds_running && echo "cargo or rustc is running"
+  [[ -z "$(other_profiles)" ]] || echo "another profile-macos.sh is running"
   return 0
 }
 failures="$(gate_failures)"
@@ -321,8 +342,27 @@ if [[ -n "$failures" ]]; then
   echo "warning: running on a busy machine: ${failures//$'\n'/; }" >&2
 fi
 
-rm -rf "$out" /tmp/dzp
-mkdir -p "$out/raw" /tmp/dzp/fixtures
+# A short private root: state directories hold a Unix socket, whose path is limited to 104 bytes.
+tmp="$(mktemp -d /tmp/dzp.XXXXXX)"
+# Stops every diffz this run started, including a window a failed hand-off launched, by the
+# state directories under $tmp, and every other child still running.
+cleanup() {
+  local pid pids=()
+  # jobs runs in this shell, not a subshell, so it lists this script's children.
+  jobs -p >"$tmp/jobs"
+  pgrep -f -- "--state-dir $tmp/" >>"$tmp/jobs" || true
+  while read -r pid; do pids+=("$pid"); done <"$tmp/jobs"
+  if [[ ${#pids[@]} -gt 0 ]]; then
+    kill "${pids[@]}" 2>/dev/null || true
+    sleep 1
+    kill -9 "${pids[@]}" 2>/dev/null || true
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+large_patch="$tmp/large.patch"
+rm -rf "$out"
+mkdir -p "$out/raw"
 py large-patch "$large_patch"
 scale="$(osascript -l JavaScript -e 'ObjC.import("AppKit"); $.NSScreen.mainScreen.backingScaleFactor' 2>/dev/null || echo 2)"
 thermal="$(osascript -l JavaScript -e 'ObjC.import("Foundation"); ["nominal","fair","serious","critical"][$.NSProcessInfo.processInfo.thermalState]' 2>/dev/null || echo unknown)"
@@ -370,10 +410,10 @@ source_args() {
 footprint_now() { footprint -j "$1" -f bytes "$2" >/dev/null 2>&1 && py footprint "$1"; }
 
 # Settled means: a minimum wait, the profile steps done, then the SQLite WAL unchanged
-# (releases and blame arrive after the source shows) and phys_footprint within 1 MB, both
-# for 6 s. Gives up after 180 s and records the timeout.
+# (releases and blame arrive after the source shows) and phys_footprint within 1 MB of its
+# value at the start of the quiet stretch, both for 6 s. Gives up after 180 s and records it.
 settle() {
-  local pid="$1" state="$2" log="$3" steps="$4" start wal last_wal="" fp last_fp=0 quiet=0
+  local pid="$1" state="$2" log="$3" steps="$4" start wal fp ref_wal="" ref_fp="" since=0
   start=$SECONDS
   sleep "${PROFILE_SETTLE_MIN:-8}"
   if [[ "$steps" -gt 0 ]]; then
@@ -382,22 +422,30 @@ settle() {
   while ((SECONDS - start < 180)); do
     kill -0 "$pid" 2>/dev/null || return 1
     wal="$(stat -f '%z %m' "$state"/*-wal 2>/dev/null || true)"
-    fp="$(footprint_now /tmp/dzp/settle.json "$pid" | awk '{print $1}')"
-    if [[ "$wal" == "$last_wal" && "${fp:-0}" -gt 0 ]] && ((fp - last_fp < 1000000 && last_fp - fp < 1000000)); then
-      quiet=$((quiet + 2))
-      [[ "$quiet" -ge 6 ]] && { echo $((SECONDS - start)); return 0; }
+    fp="$(footprint_now "$tmp/settle.json" "$pid" | awk '{print $1}')"
+    fp="${fp:-0}"
+    if [[ -n "$ref_fp" && "$wal" == "$ref_wal" && "$fp" -gt 0 ]] &&
+      ((fp - ref_fp < 1000000 && ref_fp - fp < 1000000)); then
+      ((SECONDS - since >= 6)) && { echo $((SECONDS - start)); return 0; }
     else
-      quiet=0
+      ref_wal="$wal" ref_fp="$fp" since=$SECONDS
     fi
-    last_wal="$wal" last_fp="${fp:-0}"
     sleep 2
   done
   echo timeout
 }
 
+stop() { kill "$1" 2>/dev/null || true; wait "$1" 2>/dev/null || true; }
+# Records a run that produced no sample, so the summary counts it instead of losing it.
+fail_run() {
+  echo "  $(basename "$1"): $2" >&2
+  python3 -c 'import json, sys; json.dump({"failed": sys.argv[2]}, open(sys.argv[1], "w"))' "$1/meta.json" "$2"
+}
+
 run_scenario() {
   local name="$1" source="$2" steps="$3" after="$4" dir="$5" msl="$6" last_try="$7" pid state log settled
-  state="/tmp/dzp/$name"
+  local handoff_status=""
+  state="$tmp/$name"
   rm -rf "$state"
   mkdir -p "$state" "$dir"
   log="$dir/app.log"
@@ -410,26 +458,37 @@ run_scenario() {
     env DIFFZ_PROFILE_STEPS="$steps" "$bin" --foreground --state-dir "$state" "${args[@]+"${args[@]}"}" >"$log" 2>&1 &
   fi
   pid=$!
-  pids+=("$pid")
-  settled="$(settle "$pid" "$state" "$log" "$steps")" || { echo "  $name: diffz exited; see $log" >&2; return 1; }
+  settled="$(settle "$pid" "$state" "$log" "$steps")" || { fail_run "$dir" "diffz exited; see app.log"; return 1; }
   # A window that was covered while it opened never drew enough frames to fill the pool.
   # The last attempt is sampled anyway, and the summary shows the frame-buffer count.
   local buffers
-  buffers="$(footprint_now /tmp/dzp/settle.json "$pid" | awk -v f="$drawable_bytes" '{printf "%d", $2 / f + 0.5}')"
+  buffers="$(footprint_now "$tmp/settle.json" "$pid" | awk -v f="$drawable_bytes" '{printf "%d", $2 / f + 0.5}')"
   if [[ "$buffers" -lt "$frame_buffers" && "$last_try" == 0 ]]; then
     echo "  $name: $buffers of $frame_buffers frame buffers; was the window covered? retrying" >&2
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+    stop "$pid"
     return 2
   fi
   case "$after" in
     idle) sleep "$idle_seconds" ;;
     handoff)
       "$bin" --state-dir "$state" --json --fixture F01 >"$dir/handoff.json" 2>&1 || true
-      settled="$(settle "$pid" "$state" "$log" 0)" || return 1
+      handoff_status="$(sed -n 's/.*"status":"\([a-z_]*\)".*/\1/p' "$dir/handoff.json" | head -1)"
+      if [[ "$handoff_status" != handed_off ]]; then
+        # A launch opened a second window; stop it and flag the run.
+        echo "  $name: hand-off ${handoff_status:-failed}; see handoff.json" >&2
+        local other
+        for other in $(pgrep -f -- "--state-dir $state" || true); do
+          [[ "$other" == "$pid" ]] || kill "$other" 2>/dev/null || true
+        done
+      fi
+      settled="$(settle "$pid" "$state" "$log" 0)" || { fail_run "$dir" "diffz exited after the hand-off"; return 1; }
       ;;
   esac
-  footprint -j "$dir/footprint.json" -f bytes "$pid" >"$dir/footprint.txt" 2>&1
+  if ! footprint -j "$dir/footprint.json" -f bytes "$pid" >"$dir/footprint.txt" 2>&1; then
+    stop "$pid"
+    fail_run "$dir" "footprint failed; see footprint.txt"
+    return 1
+  fi
   if [[ "$msl" == 1 ]]; then
     malloc_history "$pid" -allBySize >"$dir/malloc_history.txt" 2>&1 || true
     leaks --groupByType "$pid" >"$dir/leaks.txt" 2>&1 || true
@@ -439,7 +498,6 @@ run_scenario() {
       # shellcheck disable=SC2024 # the output file belongs to the user on purpose
       sudo -n powermetrics --samplers tasks --show-process-wakeups -i 1000 -n 30 >"$dir/powermetrics.txt" 2>&1 &
       pm_pid=$!
-      pids+=("$pm_pid")
     fi
     top -l 31 -s 1 -pid "$pid" -stats pid,cpu,csw,idlew,power >"$dir/top.txt" 2>&1
     [[ -z "$pm_pid" ]] || wait "$pm_pid" || true
@@ -447,8 +505,7 @@ run_scenario() {
     vmmap --summary "$pid" >"$dir/vmmap.txt" 2>&1 || true
     heap -s "$pid" >"$dir/heap.txt" 2>&1 || true
   fi
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  stop "$pid"
   local ios fp busy=False
   read -r fp ios < <(py footprint "$dir/footprint.json")
   builds_running && busy=True
@@ -461,6 +518,7 @@ json.dump({
     "settle_timeout": "$settled" == "timeout", "busy": $busy, "load1": float("$(load1)"),
     "memory_pressure_level": $(sysctl -n kern.memorystatus_vm_pressure_level),
     "drawables": n, "iosurface_ok": n >= 1 and abs(ios - n * frame) <= frame * 0.1,
+    "handoff_status": "$handoff_status" or None,
     "steps": $steps, "stepped": int("$(sed -n 's/^diffz-profile stepped //p' "$log")" or 0),
 }, open(sys.argv[1], "w"), indent=2)
 PYTHON
