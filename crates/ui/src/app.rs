@@ -168,6 +168,8 @@ pub(crate) struct Workbench {
     pub discard_candidate: Option<DraftId>,
     pub open_generation: u64,
     pub open_cancel: Cancellation,
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    pub allocator_trim_cancel: Cancellation,
     highlight_cancel: Arc<std::sync::atomic::AtomicUsize>,
     pub annotations: Arc<Vec<diffz_core::annotation::Annotation>>,
     annotate_cancel: Cancellation,
@@ -431,6 +433,8 @@ impl Workbench {
             discard_candidate: None,
             open_generation: 0,
             open_cancel: Cancellation::default(),
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            allocator_trim_cancel: Cancellation::default(),
             highlight_cancel: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             annotations: Arc::default(),
             annotate_cancel: Cancellation::default(),
