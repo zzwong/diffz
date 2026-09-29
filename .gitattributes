@@ -4,3 +4,4 @@
 fixtures/** -text
 *.wasm binary
 patches/gpui-pre-linux-0.3.3-x11-demand.patch whitespace=-blank-at-eol,-blank-at-eof
+vendor/gpui-pre-apple/src/shaders.metal whitespace=-space-before-tab

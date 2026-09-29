@@ -149,7 +149,7 @@ def fmt(key, v):
 def flags_of(s, env):
     flags = []
     dr = s["metrics"]["drawables"]
-    if dr and dr["min"] < env.get("frame_buffers", 3):
+    if dr and dr["min"] < env.get("frame_buffers", 2):
         flags.append("frame buffers short")
     if not s["iosurface_ok"]:
         flags.append("IOSurface size unexpected")
@@ -386,8 +386,8 @@ powermetrics=0
 sudo -n true 2>/dev/null && command -v powermetrics >/dev/null && powermetrics=1
 # One frame buffer: the window's pixels at 4 bytes each. IOSurface should be a whole number of them.
 drawable_bytes=$((1360 * 900 * scale * scale * 4))
-# GPUI's Metal layer keeps at most three; see docs/performance.md.
-frame_buffers="${PROFILE_FRAME_BUFFERS:-3}"
+# GPUI's Metal layer keeps at most two; see docs/performance.md.
+frame_buffers="${PROFILE_FRAME_BUFFERS:-2}"
 
 scenario_table=""
 while read -r name net source steps after; do

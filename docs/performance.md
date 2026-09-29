@@ -194,7 +194,7 @@ when it exits, including on Ctrl-C.
 
 - **Frame buffers first.** With the variable set, the window redraws on every
   frame for about two seconds after it opens, so GPUI's pool of frame buffers
-  grows to its maximum of three on every run. A run that ends up with fewer,
+  grows to its maximum of two on every run. A run that ends up with fewer,
   usually because the window was covered while it opened, is retried up to
   twice.
 - **Stepping.** After the first source installs, diffz selects the next file
@@ -271,10 +271,10 @@ is a subset of dirty, not something to add. Reclaimable memory is excluded from
 **IOSurface moves in steps of 19.6 MB.** A frame buffer at 1360×900 points on a
 2x display is 2720×1800 pixels at 4 bytes each: 19,584,000 bytes. GPUI's Metal
 layer allocates another buffer whenever it asks for a frame while the earlier
-ones are still in use, up to three, and never gives them back. The count depends
+ones are still in use, up to two, and never gives them back. The count depends
 on how many frames were drawn back to back, not on what the scenario did, so
-without the redraw burst one run holds 19.6 MB and the next 58.8 MB for the same
-work. The harness saturates the pool, so IOSurface is about 59.8 MB (three
+without the redraw burst one run holds 19.6 MB and the next 39.2 MB for the same
+work. The harness saturates the pool, so IOSurface is about 39.8 MB (two
 buffers plus small surfaces) in every scenario, and the difference between two
 runs lives in footprint − IOSurface. A larger window or display scale makes each
 step bigger.

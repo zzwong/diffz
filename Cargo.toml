@@ -54,6 +54,9 @@ gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 # Temporary: stops the idle macOS display link (#76); remove with its deny.toml entry
 # when gpui-pre-macos includes the demand-driven frame source.
 gpui-pre-macos = { git = "https://github.com/zzwong/gpui-pre-macos", rev = "35b9012109fff737f234ea95818de71001d4aee5" }
+# Temporary: carries the on-demand Metal path targets and two-drawable cap for #77/#74.
+# Remove this and the vendor copy when gpui-pre-apple ships both changes.
+gpui-pre-apple = { path = "vendor/gpui-pre-apple" }
 
 [profile.dev]
 debug = 1
