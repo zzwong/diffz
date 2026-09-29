@@ -39,4 +39,5 @@ allow-git = [
     # Temporary; see the [patch.crates-io] comment in Cargo.toml.
     "https://github.com/zzwong/gpui-pre-wgpu",
     "https://github.com/zzwong/gpui-base",
+    "https://github.com/zzwong/gpui-pre-macos",
 ]
