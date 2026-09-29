@@ -72,6 +72,25 @@ fn adjacent_file_index(index: usize, len: usize, forward: bool) -> Option<usize>
 }
 
 impl Workbench {
+    /// Select the next or previous visible file at its first hunk, as `]` and `[` do.
+    /// Returns false when there is no current file or no file in that direction.
+    pub(crate) fn step_file(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
+        let current = self.viewport.as_ref().map(|v| v.borrow().file.clone());
+        let Some(next) = self
+            .browser
+            .visible_files
+            .iter()
+            .position(|f| Some(f) == current.as_ref())
+            .and_then(|at| adjacent_file_index(at, self.browser.visible_files.len(), forward))
+        else {
+            return false;
+        };
+        self.select_file(self.browser.visible_files[next].clone(), cx);
+        if let Some(v) = &self.viewport {
+            v.borrow_mut().jump_first_hunk();
+        }
+        true
+    }
     /// Move between changed files after scrolling reaches an edge; both rich and source
     /// views use this helper. Positive `direction` advances.
     pub(crate) fn turn_file(&mut self, direction: i8, window: &mut Window, cx: &mut Context<Self>) {

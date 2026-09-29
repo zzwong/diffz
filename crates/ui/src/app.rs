@@ -1,4 +1,5 @@
 mod appearance;
+mod profile;
 mod review_flow;
 mod source;
 
@@ -756,6 +757,9 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                             app.refresh_recent(cx);
                         }),
                     }
+                    view.update(cx, |app, cx| {
+                        app.saturate_frames(profile::SATURATE_FRAMES, window, cx)
+                    });
                     workbench = Some(view.clone());
                     cx.new(|cx| Root::new(view, window, cx))
                 });

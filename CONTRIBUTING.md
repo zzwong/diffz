@@ -107,4 +107,7 @@ without rebasing the fork drops the patch with a "patch was not used" warning.
 
 For desktop changes, run `make check-native` on macOS and try the affected
 interaction. Keep PRs focused, add regression tests where useful, and mention
-what you tested. Contributions use the project's MIT license.
+what you tested. A change that claims a memory or CPU effect includes the
+before-and-after table from `scripts/profile-macos.sh --compare`, measured as
+[docs/performance.md](docs/performance.md#ab-protocol-for-pull-requests)
+describes. Contributions use the project's MIT license.

@@ -193,23 +193,7 @@ impl Workbench {
                 self.diff_focus.focus(window, cx);
             }
             Command::NextFile | Command::PreviousFile => {
-                let current = self.viewport.as_ref().map(|v| v.borrow().file.clone());
-                if let Some(at) = self
-                    .browser
-                    .visible_files
-                    .iter()
-                    .position(|f| Some(f) == current.as_ref())
-                    && let Some(next) = adjacent_file_index(
-                        at,
-                        self.browser.visible_files.len(),
-                        command == Command::NextFile,
-                    )
-                {
-                    self.select_file(self.browser.visible_files[next].clone(), cx);
-                    if let Some(v) = &self.viewport {
-                        v.borrow_mut().jump_first_hunk();
-                    }
-                }
+                self.step_file(command == Command::NextFile, cx);
             }
             Command::Keys => {
                 if self.panel == Panel::Keys {
