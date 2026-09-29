@@ -11,6 +11,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Primary buttons in the Open panel, the review preview, export, and the empty
   reader size to their label instead of stretching across the panel.
+- The file tree button in the title bar is highlighted like the Wrap and Split
+  toggles while the tree is pinned open, and screen readers announce it as a
+  toggle with that state.
 
 ## [0.3.1] - 2026-09-29
 
