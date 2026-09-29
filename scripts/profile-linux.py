@@ -323,7 +323,7 @@ def main():
     parser.add_argument("--to", type=Path)
     parser.add_argument("--wait", type=int, default=0)
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--malloc-trim", action="store_true", help="experiment: trim glibc after source replacement")
+    parser.add_argument("--malloc-trim", action="store_true", help="log the return value of the scheduled glibc trim (Linux/glibc production behavior)")
     args = parser.parse_args()
     if args.list:
         print("\n".join(s[0] + (" (network)" if s[1] else "") for s in SCENARIOS))

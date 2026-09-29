@@ -55,10 +55,14 @@ requests maximum frame latency 2; its Vulkan backend asks for at least three
 swapchain images (`maximum_frame_latency + 1`). The actual compositor allocation
 needs a separate observation, as recorded in the Wayland baseline below.
 
-`--malloc-trim` is an opt-in experiment for #70: after a source replacement,
-diffz calls glibc `malloc_trim(0)` and writes its return value to `app.log`.
-Compare `handoff-to-f01` with and without it; do not use a trimmed run as the
-ordinary baseline.
+On Linux/glibc, diffz schedules glibc `malloc_trim(0)` on a background thread
+three seconds after an active snapshot is replaced. A later replacement cancels
+the pending trim. Starting another accepted source load also cancels it to avoid
+allocator contention; a failed load or an offered revision reschedules against
+the active snapshot. The delay lets snapshot readers finish and release old data
+first. The profile script's `--malloc-trim` option sets
+`DIFFZ_PROFILE_MALLOC_TRIM`, which logs the trim return value to stderr for the
+handoff diagnostic; it does not enable or disable the production behavior.
 
 For an A/B run, build both binaries before profiling, run main then branch in
 the same session, and use `--compare`. The table marks changes inside the old
@@ -102,14 +106,14 @@ to F01 left 50.9 MB more private dirty memory, 5.2 MB more live glibc heap and
 61.4 MB more glibc arena than a fresh F01 process; it did not increase the DRM
 total. This motivates the #70 allocator experiment and the #71 cache work.
 
-With the same binary and `--malloc-trim`, three hand-off repeats returned
-`malloc_trim 1` and lowered the medians to 48.0 MB private dirty and 101.7 MB
-PSS, from 77.1 MB and 130.2 MB without trim. The ranges were 47.6–49.1 MB
-private dirty and 101.5–103.0 MB PSS. Live heap stayed at 19.2 MB and DRM
-memory at 58.6 MB. The glibc arena stayed near 88 MB because its address space
-remained reserved while pages became clean or unmapped. This is a diagnostic
-result for #70, not a default behavior change; a production trim needs timing
-and navigation checks.
+An earlier diagnostic used the same binary with `--malloc-trim`: three
+hand-off repeats returned `malloc_trim 1` and lowered the medians to 48.0 MB
+private dirty and 101.7 MB PSS, from 77.1 MB and 130.2 MB without trim. The
+ranges were 47.6–49.1 MB private dirty and 101.5–103.0 MB PSS. Live heap stayed
+at 19.2 MB and DRM memory at 58.6 MB. The glibc arena stayed near 88 MB because
+its address space remained reserved while pages became clean or unmapped. This
+diagnostic informed the delayed production trim; verify its effect and
+navigation behavior with the A/B protocol before claiming a production result.
 
 The Vulkan code requests a 1360×900 window and up to two frames of latency.
 A one-off diagnostic build instrumented `wgpu-hal`'s Vulkan swapchain creation
