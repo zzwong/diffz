@@ -305,7 +305,9 @@ fn launch_args(
         Some(OpenRequest::Fixture(id)) => args.extend(["--fixture".into(), id.into()]),
         Some(OpenRequest::Patch(path)) => args.extend(["--patch".into(), path.into()]),
         Some(OpenRequest::Remote { provider, address }) => {
-            let flag = if *provider == ProviderId::GITHUB {
+            let flag = if compare_request(address.clone()).is_ok() {
+                "--compare"
+            } else if *provider == ProviderId::GITHUB {
                 "--pr"
             } else if *provider == ProviderId::GITLAB {
                 "--mr"
@@ -525,7 +527,14 @@ fn run() -> Result<()> {
         report.push_str("This report implies no native runtime and no credential capability.");
         return print(&report);
     }
-    let mut options = parse(args)?;
+    let json = args.iter().any(|a| a == "--json");
+    let mut options = parse(args).inspect_err(|e| {
+        // An agent reading --json output gets unusable input reported the same way.
+        if json {
+            let line = serde_json::json!({ "status": "error", "message": format!("{e:#}") });
+            let _ = print(&line.to_string());
+        }
+    })?;
     #[cfg(not(feature = "desktop"))]
     let _ = &options.font;
     #[cfg(not(all(unix, feature = "desktop")))]
@@ -732,6 +741,13 @@ mod tests {
         assert_eq!(
             args[3..],
             ["--mr", "group/project!4"].map(std::ffi::OsString::from)
+        );
+        let compare = "https://gitlab.com/g/p/-/compare/v1...v2";
+        let options = parse([compare.to_string()]).unwrap();
+        let args = launch_args(&options, Path::new("/state"), Some(&options.request)).unwrap();
+        assert_eq!(
+            args[3..],
+            ["--compare", compare].map(std::ffi::OsString::from)
         );
         let args = launch_args(&options, Path::new("/state"), None).unwrap();
         assert_eq!(args.len(), 3);
