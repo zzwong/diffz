@@ -95,7 +95,7 @@ impl Workbench {
             cx.notify();
             return;
         }
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        #[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
         self.cancel_allocator_trim();
         self.open_cancel.cancel();
         let (cancel, pending) = match pending {
@@ -118,17 +118,17 @@ impl Workbench {
             diffz_core::timing::mark("snapshot opened");
             let _=this.update(cx,|app,cx|{if app.open_generation!=generation{return}app.loading=false;match result{
                 Ok(opened)=>{if refresh&&app.active.as_ref().is_some_and(|a|a.snapshot.id!=opened.snapshot.id){app.offered=Some(opened);app.status="New revision available. The snapshot on screen has not changed.".into();
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
 if app.active.is_some(){app.trim_allocator_after_switch(cx);}}
                     else if refresh{let snapshot=Arc::new(opened.snapshot);if let Some(a)=&mut app.active{a.snapshot=snapshot.clone();}
 if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
 if app.active.is_some(){app.trim_allocator_after_switch(cx);}
 // The release list is read again, so indexes into the old one no longer hold.
 app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);app.mark_releases();app.fetch_blame(cx);
 app.status="Source unchanged; comment list and review state refreshed without moving the view.".into();}
                     else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>{app.status=e.message;
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
 if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
             }cx.notify();});
         }).detach();
@@ -176,7 +176,7 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         self.refresh_recent(cx);
         self.refresh_outbox(cx);
         if replacing {
-            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            #[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
             self.trim_allocator_after_switch(cx);
         }
     }

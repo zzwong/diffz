@@ -21,10 +21,11 @@ pub(super) fn steps() -> Option<usize> {
 }
 
 impl Workbench {
-    /// Lets snapshot readers release their references before asking glibc to return free pages.
-    /// A newer replacement cancels this pending trim. The optional profile flag only enables
-    /// logging its return value; the production trim itself is always scheduled on Linux/glibc.
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    /// Lets snapshot readers release their references before asking the process allocator to
+    /// return free pages. A newer replacement cancels this pending trim. The optional profile
+    /// flag only enables logging its return value; the production trim itself is always scheduled
+    /// on supported allocators.
+    #[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
     pub(super) fn trim_allocator_after_switch(&mut self, cx: &mut Context<Self>) {
         const TRIM_DELAY: Duration = Duration::from_secs(3);
         self.cancel_allocator_trim();
@@ -43,13 +44,32 @@ impl Workbench {
                     if still_current.cancelled() {
                         return;
                     }
-                    unsafe extern "C" {
-                        fn malloc_trim(pad: usize) -> i32;
+                    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+                    {
+                        unsafe extern "C" {
+                            fn malloc_trim(pad: usize) -> i32;
+                        }
+                        // SAFETY: malloc_trim is glibc's process-wide allocator release operation.
+                        let released = unsafe { malloc_trim(0) };
+                        if profile_log {
+                            eprintln!("diffz-profile malloc_trim {released}");
+                        }
                     }
-                    // SAFETY: malloc_trim is glibc's process-wide allocator release operation.
-                    let released = unsafe { malloc_trim(0) };
-                    if profile_log {
-                        eprintln!("diffz-profile malloc_trim {released}");
+                    #[cfg(target_os = "macos")]
+                    {
+                        unsafe extern "C" {
+                            fn malloc_zone_pressure_relief(
+                                zone: *mut std::ffi::c_void,
+                                goal: usize,
+                            ) -> usize;
+                        }
+                        // SAFETY: malloc_zone_pressure_relief is Apple's process-wide allocator
+                        // release operation when passed a null zone and zero goal.
+                        let released =
+                            unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
+                        if profile_log {
+                            eprintln!("diffz-profile malloc_zone_pressure_relief {released}");
+                        }
                     }
                 })
                 .await;
@@ -58,7 +78,7 @@ impl Workbench {
     }
 
     /// Prevent a pending trim from contending with a source load.
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    #[cfg(any(target_os = "macos", all(target_os = "linux", target_env = "gnu")))]
     pub(super) fn cancel_allocator_trim(&mut self) {
         self.allocator_trim_cancel.cancel();
     }

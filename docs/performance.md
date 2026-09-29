@@ -152,6 +152,15 @@ An SSH connection is enough on a headless Mac with an online display, as long
 as its console desktop is unlocked. The script checks the live session and keeps
 the display active while it runs.
 
+After an active snapshot is replaced or refreshed, diffz schedules
+`malloc_zone_pressure_relief(NULL, 0)` three seconds later on a background
+executor. A newer source request cancels the pending call, so allocator work
+does not run during navigation or contend with an in-flight load. Set
+`DIFFZ_PROFILE_MALLOC_TRIM=1` for a profile run to record the number of bytes
+reported by the allocator call in `app.log`; the call itself is always enabled
+on macOS. The delay gives readers of the previous snapshot time to release
+their allocations before the process-wide allocator is asked to return pages.
+
 ```sh
 bash scripts/profile-macos.sh                        # build the release binary, run everything
 bash scripts/profile-macos.sh --bin /path/to/diffz --label main
