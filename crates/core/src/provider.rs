@@ -188,4 +188,13 @@ pub trait WorkbenchServices: Send + Sync {
         None
     }
     fn fresh_id(&self) -> String;
+    /// `snapshot` with a compare's releases, which are read after it opens because a long
+    /// range takes many more requests. The result is saved; failing to read them is a warning.
+    fn releases(
+        &self,
+        snapshot: &Snapshot,
+        _cancel: Cancellation,
+    ) -> Result<Snapshot, ServiceError> {
+        Ok(snapshot.clone())
+    }
 }

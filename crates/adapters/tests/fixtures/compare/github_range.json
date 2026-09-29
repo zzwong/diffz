@@ -1,0 +1,366 @@
+{
+ "status": "ahead",
+ "ahead_by": 16,
+ "behind_by": 0,
+ "total_commits": 16,
+ "base_commit": {
+  "sha": "38c79ef242fdfb124e499a58d917286ed1d4cad5"
+ },
+ "merge_base_commit": {
+  "sha": "38c79ef242fdfb124e499a58d917286ed1d4cad5"
+ },
+ "commits": [
+  {
+   "sha": "ee414707be0d4b6f0f109d0a85e4d10651e4aa2c",
+   "commit": {
+    "committer": {
+     "date": "2023-12-31T00:45:08Z"
+    },
+    "message": "RUSTC must be set by Cargo for build script"
+   },
+   "parents": [
+    {
+     "sha": "38c79ef242fdfb124e499a58d917286ed1d4cad5"
+    }
+   ]
+  },
+  {
+   "sha": "1fd290c222f28ade7f5ee6f049a47b93a51b1f97",
+   "commit": {
+    "committer": {
+     "date": "2023-12-31T02:40:31Z"
+    },
+    "message": "Make CI verify that error_generic_member_access works in latest nightly"
+   },
+   "parents": [
+    {
+     "sha": "ee414707be0d4b6f0f109d0a85e4d10651e4aa2c"
+    }
+   ]
+  },
+  {
+   "sha": "04774c089409597e4859ed256ef68eeb60ba81a7",
+   "commit": {
+    "committer": {
+     "date": "2023-12-31T02:42:51Z"
+    },
+    "message": "Merge pull request #338 from dtolnay/nightlyci"
+   },
+   "parents": [
+    {
+     "sha": "ee414707be0d4b6f0f109d0a85e4d10651e4aa2c"
+    },
+    {
+     "sha": "1fd290c222f28ade7f5ee6f049a47b93a51b1f97"
+    }
+   ]
+  },
+  {
+   "sha": "17e252bfdf4f7a2dff8e788ef7deab326682bbba",
+   "commit": {
+    "committer": {
+     "date": "2024-01-02T04:37:27Z"
+    },
+    "message": "Include env-dep:RUSTC_BOOTSTRAP in dep-info for sccache"
+   },
+   "parents": [
+    {
+     "sha": "04774c089409597e4859ed256ef68eeb60ba81a7"
+    }
+   ]
+  },
+  {
+   "sha": "60705a53cefdc387b72c20cbab88aa4ffcf4b38e",
+   "commit": {
+    "committer": {
+     "date": "2024-01-02T04:39:56Z"
+    },
+    "message": "Merge pull request #340 from dtolnay/depinfo"
+   },
+   "parents": [
+    {
+     "sha": "04774c089409597e4859ed256ef68eeb60ba81a7"
+    },
+    {
+     "sha": "17e252bfdf4f7a2dff8e788ef7deab326682bbba"
+    }
+   ]
+  },
+  {
+   "sha": "71ab53dd2e89ff816bebaa452ad5a968f4c4105d",
+   "commit": {
+    "committer": {
+     "date": "2024-01-02T04:40:22Z"
+    },
+    "message": "Release 1.0.79"
+   },
+   "parents": [
+    {
+     "sha": "60705a53cefdc387b72c20cbab88aa4ffcf4b38e"
+    }
+   ]
+  },
+  {
+   "sha": "edd88d3a43f11f1931330d3dd54189353ef00203",
+   "commit": {
+    "committer": {
+     "date": "2024-01-31T06:18:10Z"
+    },
+    "message": "Update ui test suite to nightly-2024-01-31"
+   },
+   "parents": [
+    {
+     "sha": "71ab53dd2e89ff816bebaa452ad5a968f4c4105d"
+    }
+   ]
+  },
+  {
+   "sha": "78f2d81cc71b79050a2fda270c45ff267557d853",
+   "commit": {
+    "committer": {
+     "date": "2024-02-08T05:21:28Z"
+    },
+    "message": "Update ui test suite to nightly-2024-02-08"
+   },
+   "parents": [
+    {
+     "sha": "edd88d3a43f11f1931330d3dd54189353ef00203"
+    }
+   ]
+  },
+  {
+   "sha": "fefbcbcb0b336a2d6c2ce6f0ee6d3fd02ef2cd3b",
+   "commit": {
+    "committer": {
+     "date": "2024-02-10T02:39:13Z"
+    },
+    "message": "Ignore incompatible_msrv clippy lint"
+   },
+   "parents": [
+    {
+     "sha": "78f2d81cc71b79050a2fda270c45ff267557d853"
+    }
+   ]
+  },
+  {
+   "sha": "f885a133ede579c45e90ab489455126403d05db1",
+   "commit": {
+    "committer": {
+     "date": "2024-02-10T02:52:57Z"
+    },
+    "message": "Ignore incompatible_msrv clippy false positives in test"
+   },
+   "parents": [
+    {
+     "sha": "fefbcbcb0b336a2d6c2ce6f0ee6d3fd02ef2cd3b"
+    }
+   ]
+  },
+  {
+   "sha": "6e4f86b48b5182ec71dbc8e308db9dc91e2ec8a5",
+   "commit": {
+    "committer": {
+     "date": "2024-02-19T04:36:29Z"
+    },
+    "message": "Import from alloc not std, where possible"
+   },
+   "parents": [
+    {
+     "sha": "f885a133ede579c45e90ab489455126403d05db1"
+    }
+   ]
+  },
+  {
+   "sha": "dfc7bc07d4c41b61093c3251ed82becb51810bd4",
+   "commit": {
+    "committer": {
+     "date": "2024-02-19T04:48:39Z"
+    },
+    "message": "Work around prelude redundant import warnings"
+   },
+   "parents": [
+    {
+     "sha": "6e4f86b48b5182ec71dbc8e308db9dc91e2ec8a5"
+    }
+   ]
+  },
+  {
+   "sha": "54437197ee79c20678db433d98616fab7ddff1a5",
+   "commit": {
+    "committer": {
+     "date": "2024-02-19T04:49:24Z"
+    },
+    "message": "Release 1.0.80"
+   },
+   "parents": [
+    {
+     "sha": "dfc7bc07d4c41b61093c3251ed82becb51810bd4"
+    }
+   ]
+  },
+  {
+   "sha": "a2eb7dd5e13add83f254b6dac0f68e043effc521",
+   "commit": {
+    "committer": {
+     "date": "2024-03-12T02:38:47Z"
+    },
+    "message": "Make compatible with -Dwarnings"
+   },
+   "parents": [
+    {
+     "sha": "54437197ee79c20678db433d98616fab7ddff1a5"
+    }
+   ]
+  },
+  {
+   "sha": "8be90917c603199c5d1fdd73984237f023768e22",
+   "commit": {
+    "committer": {
+     "date": "2024-03-12T02:43:17Z"
+    },
+    "message": "Merge pull request #354 from dtolnay/deadcode"
+   },
+   "parents": [
+    {
+     "sha": "54437197ee79c20678db433d98616fab7ddff1a5"
+    },
+    {
+     "sha": "a2eb7dd5e13add83f254b6dac0f68e043effc521"
+    }
+   ]
+  },
+  {
+   "sha": "4aad4edebd9f09247d6c6b6784419a74bb116829",
+   "commit": {
+    "committer": {
+     "date": "2024-03-12T02:45:23Z"
+    },
+    "message": "Release 1.0.81"
+   },
+   "parents": [
+    {
+     "sha": "8be90917c603199c5d1fdd73984237f023768e22"
+    }
+   ]
+  }
+ ],
+ "files": [
+  {
+   "sha": "017ddbd244d2474db4bda4a0f5fcfc061412dade",
+   "filename": ".github/workflows/ci.yml",
+   "status": "modified",
+   "additions": 3,
+   "deletions": 0,
+   "changes": 3,
+   "patch": "@@ -35,6 +35,9 @@ jobs:\n       - name: Enable type layout randomization\n         run: echo RUSTFLAGS=${RUSTFLAGS}\\ -Zrandomize-layout >> $GITHUB_ENV\n         if: matrix.rust == 'nightly'\n+      - name: Enable nightly-only tests\n+        run: echo RUSTFLAGS=${RUSTFLAGS}\\ --cfg=anyhow_nightly_testing >> $GITHUB_ENV\n+        if: matrix.rust == 'nightly'\n       - run: cargo test\n       - run: cargo check --no-default-features\n       - run: cargo check --features backtrace"
+  },
+  {
+   "sha": "edb3e6882b981a1502baa00b4751f9d3ddb88ae3",
+   "filename": "Cargo.toml",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 1,
+   "changes": 2,
+   "patch": "@@ -1,6 +1,6 @@\n [package]\n name = \"anyhow\"\n-version = \"1.0.78\"\n+version = \"1.0.81\"\n authors = [\"David Tolnay <dtolnay@gmail.com>\"]\n categories = [\"rust-patterns\", \"no-std\"]\n description = \"Flexible concrete Error type built on std::error::Error\""
+  },
+  {
+   "sha": "55d8a7eb6a3c1c30467913fd09df8fe1a4af5f05",
+   "filename": "build.rs",
+   "status": "modified",
+   "additions": 3,
+   "deletions": 2,
+   "changes": 5,
+   "patch": "@@ -121,7 +121,8 @@ fn compile_probe(rustc_bootstrap: bool) -> bool {\n         .arg(\"--edition=2018\")\n         .arg(\"--crate-name=anyhow\")\n         .arg(\"--crate-type=lib\")\n-        .arg(\"--emit=metadata\")\n+        .arg(\"--emit=dep-info,metadata\")\n+        .arg(\"--cap-lints=allow\")\n         .arg(\"--out-dir\")\n         .arg(out_dir)\n         .arg(probefile);\n@@ -146,7 +147,7 @@ fn compile_probe(rustc_bootstrap: bool) -> bool {\n }\n \n fn rustc_minor_version() -> Option<u32> {\n-    let rustc = env::var_os(\"RUSTC\")?;\n+    let rustc = cargo_env_var(\"RUSTC\");\n     let output = Command::new(rustc).arg(\"--version\").output().ok()?;\n     let version = str::from_utf8(&output.stdout).ok()?;\n     let mut pieces = version.split('.');"
+  },
+  {
+   "sha": "21e776dafb90e85ebe924547452ee9e805de7214",
+   "filename": "build/probe.rs",
+   "status": "modified",
+   "additions": 3,
+   "deletions": 0,
+   "changes": 3,
+   "patch": "@@ -30,3 +30,6 @@ impl Error for MyError {\n }\n \n const _: fn(&dyn Error) -> Option<&Backtrace> = |err| error::request_ref::<Backtrace>(err);\n+\n+// Include in sccache cache key.\n+const _: Option<&str> = option_env!(\"RUSTC_BOOTSTRAP\");"
+  },
+  {
+   "sha": "2c0034dc2e19729d64e454e521e9e1a5b89f9730",
+   "filename": "src/backtrace.rs",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 1,
+   "changes": 2,
+   "patch": "@@ -65,11 +65,11 @@ macro_rules! backtrace_if_absent {\n \n #[cfg(all(not(std_backtrace), feature = \"backtrace\"))]\n mod capture {\n+    use alloc::borrow::Cow;\n     use backtrace::{BacktraceFmt, BytesOrWideString, Frame, PrintFmt, SymbolName};\n     use core::cell::UnsafeCell;\n     use core::fmt::{self, Debug, Display};\n     use core::sync::atomic::{AtomicUsize, Ordering};\n-    use std::borrow::Cow;\n     use std::env;\n     use std::path::{self, Path, PathBuf};\n     use std::sync::Once;"
+  },
+  {
+   "sha": "b75885df42367dfe314e2c9e891b3149de067539",
+   "filename": "src/chain.rs",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 1,
+   "changes": 2,
+   "patch": "@@ -2,7 +2,7 @@ use self::ChainState::*;\n use crate::StdError;\n \n #[cfg(feature = \"std\")]\n-use std::vec;\n+use alloc::vec::{self, Vec};\n \n #[cfg(feature = \"std\")]\n pub(crate) use crate::Chain;"
+  },
+  {
+   "sha": "85c84a9ca434739ac58177f44f0c8be771f7a002",
+   "filename": "src/fmt.rs",
+   "status": "modified",
+   "additions": 2,
+   "deletions": 0,
+   "changes": 2,
+   "patch": "@@ -43,6 +43,7 @@ impl ErrorImpl {\n         #[cfg(any(std_backtrace, feature = \"backtrace\"))]\n         {\n             use crate::backtrace::BacktraceStatus;\n+            use alloc::string::ToString;\n \n             let backtrace = unsafe { Self::backtrace(this) };\n             if let BacktraceStatus::Captured = backtrace.status() {\n@@ -102,6 +103,7 @@ where\n #[cfg(test)]\n mod tests {\n     use super::*;\n+    use alloc::string::String;\n \n     #[test]\n     fn one_digit() {"
+  },
+  {
+   "sha": "15d9f9b875d7ca3f94872346825c5e0d9616b97d",
+   "filename": "src/kind.rs",
+   "status": "modified",
+   "additions": 2,
+   "deletions": 0,
+   "changes": 2,
+   "patch": "@@ -49,6 +49,8 @@ use core::fmt::{Debug, Display};\n \n #[cfg(feature = \"std\")]\n use crate::StdError;\n+#[cfg(feature = \"std\")]\n+use alloc::boxed::Box;\n \n pub struct Adhoc;\n "
+  },
+  {
+   "sha": "9a3f13caf48904bf3c9305b93c1b183469381667",
+   "filename": "src/lib.rs",
+   "status": "modified",
+   "additions": 13,
+   "deletions": 2,
+   "changes": 15,
+   "patch": "@@ -206,10 +206,10 @@\n //! will require an explicit `.map_err(Error::msg)` when working with a\n //! non-Anyhow error type inside a function that returns Anyhow's error type.\n \n-#![doc(html_root_url = \"https://docs.rs/anyhow/1.0.78\")]\n+#![doc(html_root_url = \"https://docs.rs/anyhow/1.0.81\")]\n #![cfg_attr(error_generic_member_access, feature(error_generic_member_access))]\n #![cfg_attr(doc_cfg, feature(doc_cfg))]\n-#![cfg_attr(not(feature = \"std\"), no_std)]\n+#![no_std]\n #![deny(dead_code, unused_imports, unused_mut)]\n #![cfg_attr(\n     not(anyhow_no_unsafe_op_in_unsafe_fn_lint),\n@@ -221,6 +221,7 @@\n     clippy::enum_glob_use,\n     clippy::explicit_auto_deref,\n     clippy::extra_unused_type_parameters,\n+    clippy::incompatible_msrv,\n     clippy::let_underscore_untyped,\n     clippy::missing_errors_doc,\n     clippy::missing_panics_doc,\n@@ -237,8 +238,18 @@\n     clippy::wrong_self_convention\n )]\n \n+#[cfg(all(\n+    anyhow_nightly_testing,\n+    feature = \"std\",\n+    not(error_generic_member_access)\n+))]\n+compile_error!(\"Build script probe failed to compile.\");\n+\n extern crate alloc;\n \n+#[cfg(feature = \"std\")]\n+extern crate std;\n+\n #[macro_use]\n mod backtrace;\n mod chain;"
+  },
+  {
+   "sha": "9726ae596b9a50069b5940a0c36e713fb8b117f0",
+   "filename": "src/wrapper.rs",
+   "status": "modified",
+   "additions": 3,
+   "deletions": 0,
+   "changes": 3,
+   "patch": "@@ -1,6 +1,9 @@\n use crate::StdError;\n use core::fmt::{self, Debug, Display};\n \n+#[cfg(feature = \"std\")]\n+use alloc::boxed::Box;\n+\n #[cfg(error_generic_member_access)]\n use std::error::Request;\n "
+  },
+  {
+   "sha": "a322b673cace9af8da8e758141254eab99b1b844",
+   "filename": "tests/test_macros.rs",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 0,
+   "changes": 1,
+   "patch": "@@ -1,6 +1,7 @@\n #![allow(\n     clippy::assertions_on_result_states,\n     clippy::eq_op,\n+    clippy::incompatible_msrv, // https://github.com/rust-lang/rust-clippy/issues/12257\n     clippy::items_after_statements,\n     clippy::needless_pass_by_value,\n     clippy::shadow_unrelated,"
+  },
+  {
+   "sha": "2976cd86204a54e08088d7ca76a91ff15c55c790",
+   "filename": "tests/test_repr.rs",
+   "status": "modified",
+   "additions": 0,
+   "deletions": 1,
+   "changes": 1,
+   "patch": "@@ -4,7 +4,6 @@ mod drop;\n \n use self::drop::{DetectDrop, Flag};\n use anyhow::Error;\n-use std::marker::Unpin;\n use std::mem;\n \n #[test]"
+  },
+  {
+   "sha": "6c797618466f943daf0948d087987e277227d9cd",
+   "filename": "tests/ui/no-impl.stderr",
+   "status": "modified",
+   "additions": 6,
+   "deletions": 5,
+   "changes": 11,
+   "patch": "@@ -2,11 +2,7 @@ error[E0599]: the method `anyhow_kind` exists for reference `&Error`, but its tr\n  --> tests/ui/no-impl.rs:7:13\n   |\n 4 | struct Error;\n-  | ------------\n-  | |\n-  | doesn't satisfy `Error: Into<anyhow::Error>`\n-  | doesn't satisfy `Error: anyhow::kind::TraitKind`\n-  | doesn't satisfy `Error: std::fmt::Display`\n+  | ------------ doesn't satisfy `Error: Into<anyhow::Error>`, `Error: anyhow::kind::TraitKind` or `Error: std::fmt::Display`\n ...\n 7 |     let _ = anyhow!(Error);\n   |             ^^^^^^^^^^^^^^ method cannot be called on `&Error` due to unsatisfied trait bounds\n@@ -28,4 +24,9 @@ note: the traits `Into` and `std::fmt::Display` must be implemented\n   |\n   | pub trait Into<T>: Sized {\n   | ^^^^^^^^^^^^^^^^^^^^^^^^\n+  = help: items from traits can only be used if the trait is implemented and in scope\n+  = note: the following traits define an item `anyhow_kind`, perhaps you need to implement one of them:\n+          candidate #1: `anyhow::kind::AdhocKind`\n+          candidate #2: `anyhow::kind::TraitKind`\n+          candidate #3: `anyhow::kind::BoxedKind`\n   = note: this error originates in the macro `anyhow` (in Nightly builds, run with -Z macro-backtrace for more info)"
+  }
+ ]
+}

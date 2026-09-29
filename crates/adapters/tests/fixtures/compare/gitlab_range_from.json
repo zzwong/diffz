@@ -1,0 +1,10 @@
+{
+ "id": "d37ec22ea341394d02242bde5bb0f5623b4e1a17",
+ "short_id": "d37ec22e",
+ "title": "Merge branch '72-release-disallow-endless-method' into 'master'",
+ "created_at": "2025-02-10T13:02:54.000+00:00",
+ "parent_ids": [
+  "92b398ac19ccd23a365f0ef0de2f3aedcd54acdd",
+  "6e0c13560f3114cc3110596628ad52f7e7107663"
+ ]
+}

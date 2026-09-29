@@ -1,0 +1,72 @@
+[
+ {
+  "name": "14.1.0",
+  "commit": {
+   "id": "8a1c38d69aa0544049422f62bb7609e4fc36aca0"
+  },
+  "release": {
+   "tag_name": "14.1.0",
+   "description": "## 14.1.0 (2026-05-18)\n\n### Added (1 change)\n\n- [Define RSpec/FeatureSpecMaxExamples cop](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/429c47231b93273cf3ecb860e2cdd60c91f8e404) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/268))\n\n### Fixed (2 changes)\n\n- [Fix UseRestrictOnSend false positives on child-node method name checks](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/d44e154a0669bb3da2faaf5f2c59481a2f2896af) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/267))\n- [Adding good and bad examples to three cops ](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/a95c95833346ec8c5e92deac3ff10a0c3f7b17bd) by @sayeedahmad ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/266))\n\n"
+  }
+ },
+ {
+  "name": "14.0.0",
+  "commit": {
+   "id": "7a4c44f50c90e9a14f8a2a6a224636398c473c1c"
+  },
+  "release": {
+   "tag_name": "14.0.0",
+   "description": "## 14.0.0 (2026-01-12)\n\n### **IMPORTANT**\n\n- [Update RuboCop version requirement to 1.81.7](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/a5684a2747d23783608a34807c7c96efcbc765f1) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/264))\n- [Enable Style/UnlessLogicalOperators RuboCop rule](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/ad4006db53267b951613fd5c74124e7c39d2b94f) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/259))\n\n### Fixed (1 change)\n\n- [Allow conditional blocks to be followed by ensure](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/8e9f5c642a5e99741ab6d666288877edb0ccf809) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/258))\n\n"
+  }
+ },
+ {
+  "name": "13.1.0",
+  "commit": {
+   "id": "d37ec22ea341394d02242bde5bb0f5623b4e1a17"
+  },
+  "release": {
+   "tag_name": "13.1.0",
+   "description": "## 13.1.0 (2025-02-10)\n\n### Added (2 changes)\n\n- [Disallow Endless Methods](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/564f9211caebb5228837abc2969d51cdf481476f) by @choznerol ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/252))\n- [ Add RSpec/RailsControllerTesting rule ](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/4c3afe61646c44bcc36cd28293ba17868bc90c00) by @mschoenlaub ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/250))\n\n### Changed (1 change)\n\n- [Bump `rubocop` from 1.69.2 to 1.71.1](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/83ce0d51c8469e9432ba8668216841036be6c3c5) by @choznerol ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/254))\n\n"
+  }
+ },
+ {
+  "name": "13.0.2",
+  "commit": {
+   "id": "b2d8f1f2c5beddeeae32277d131a50e4ad34a78d"
+  },
+  "release": {
+   "tag_name": "13.0.2",
+   "description": "## 13.0.2 (2024-11-27)\n\n### Changed (2 changes)\n\n- [Bump rubocop to 1.68.0](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/94c6ee7f1e0215176c7ebf92cccccde2ca2c926b) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/247))\n- [Style/HashSyntax: Set EnforcedShorthandSyntax to `either_consistent`](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/7ccda0c57dd88d4b52e4d38cda2f09a0f4f72bc2) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/246))\n\n"
+  }
+ },
+ {
+  "name": "13.0.1",
+  "commit": {
+   "id": "c9f3100d6c63228df228ef7279d25c8abc1326d8"
+  },
+  "release": {
+   "tag_name": "13.0.1",
+   "description": "## 13.0.1 (2024-10-16)\n\n### Added (1 change)\n\n- [Change RSpec/ExampleWithoutDescription style to single_line_only](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/55bfdbd7e9e73f9d99bcfb8d46f30e3b1cde5917) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/241))\n\n### Other (1 change)\n\n- [Upgrade RuboCop to 1.67.0](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/929a966864982c6c1ee03183c783c8880722d26a) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/242))\n\n"
+  }
+ },
+ {
+  "name": "13.0.0",
+  "commit": {
+   "id": "f2f77019656baa26843a9cb371d7405384e5eb0c"
+  },
+  "release": {
+   "tag_name": "13.0.0",
+   "description": "## 13.0.0 (2024-10-08)\n\n### Added (4 changes)\n\n- [Add an internal affairs cop to require examples](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/bb27686d81e74e563c8779306a65806c27a41e46) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/236))\n- [Add a cop to prevent interpolated Tailwind utils](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/d3e3db89636a4dfe973dd0583f18aa49aed3a53e) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/234))\n- [Add cop for formatting iso8601 dates](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/c0de5f6f6a14a4d54b7c2f1809a60b60a43361e1) by @schurzi ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/229))\n- [Enable Rails/TimeZone and Rails/Date](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/f2805be91ac3e5f9335787f6d8743747a5d476af) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/223))\n\n### Changed (3 changes)\n\n- **Breaking Change** [Upgrade RuboCop (to 1.66.0) and rubocop extensions](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/e72dc92b51f0ff2a6c0e923fc4bd23843701023f) by @schurzi ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/232))\n  - Additional steps for upgrade of `rubocop-rspec` might be neccesary, see: [Upgrade to Version 3.x](https://docs.rubocop.org/rubocop-rspec/upgrade_to_version_3.html)\n- [Use grep twice to figure out bundler version](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/836e699bbe3484affdc4f31345195b263495f8d0) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/224))\n- [CI: Use same bundle version as mentioned in Gemfile.lock](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/f7fe8b4932d7f92070b0f437dd198f2c7873d98a) ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/222))\n\n### Removed (1 change)\n\n- [Remove Cop/WithoutReactiveCache](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/730b0b2a2e1899dfde30177f8bd699eaa610d110) by @schurzi ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/231))\n\n### Other (1 change)\n\n- [Define `Naming/PredicateName` `ForbiddenPrefixes` as an array](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/commit/d3fa389ba689e14fd8826e1b4acd2c6597ad8c56) by @Earlopain ([merge request](https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles/-/merge_requests/228))"
+  }
+ },
+ {
+  "name": "12.0.1",
+  "commit": {
+   "id": "6417c6209794ad558ec80bd802097e557193e036"
+  },
+  "release": {
+   "tag_name": "12.0.1",
+   "description": "## 12.0.1 (2024-05-13)\n\n### Changed (5 changes)\n\n- [Configure and disable some GraphQL related rules](gitlab-org/ruby/gems/gitlab-styles@bf405dc9f04f972b49de0547d0e0c6600c103298) ([merge request](gitlab-org/ruby/gems/gitlab-styles!214))\n- [Upgrade RuboCop to 1.62.1 and more rubocop extensions](gitlab-org/ruby/gems/gitlab-styles@354016f894155c27963b74e2c61fe0891b34d1e3) ([merge request](gitlab-org/ruby/gems/gitlab-styles!214))\n- [Change Style/LineEndStringConcatenationIndentation](gitlab-org/ruby/gems/gitlab-styles@d2d2b83df46c48c3609d28c7e1dfd1c183306b8e) ([merge request](gitlab-org/ruby/gems/gitlab-styles!212))\n- [Hardcode Ruby target version to 3.0](gitlab-org/ruby/gems/gitlab-styles@8d302b6ea74cee3fba88902b0ab048667aa246f8) ([merge request](gitlab-org/ruby/gems/gitlab-styles!210))\n- [Use upstream cop FactoryBot/ExcessiveCreateList from FactoryBot gem](gitlab-org/ruby/gems/gitlab-styles@1338fedd2fcd062b5ebd800da2953ae48d8d03f7) ([merge request](gitlab-org/ruby/gems/gitlab-styles!207))\n\n### Performance (3 changes)\n\n- [InternalAffairs/UseRestrictOnSend: Fix offense for WithoutReactiveCache](gitlab-org/ruby/gems/gitlab-styles@1978ee7c250a5e7f882a1f739c58b244dbb17e73) ([merge request](gitlab-org/ruby/gems/gitlab-styles!211))\n- [InternalAffairs/UseRestrictOnSend: Fix offense for Cop/InBatches](gitlab-org/ruby/gems/gitlab-styles@855c1890f87c2d3d011affd33b0bed14b0d03e19) ([merge request](gitlab-org/ruby/gems/gitlab-styles!211))\n- [Enhance Cop::ActiveRecordDependent cop](gitlab-org/ruby/gems/gitlab-styles@b1a59cd2d549baeeb0b1077e745d836e1ac4258f) ([merge request](gitlab-org/ruby/gems/gitlab-styles!211))\n\n### Other (3 changes)\n\n- [Improve Cop/PolymorphicAssociations cop](gitlab-org/ruby/gems/gitlab-styles@56d6fca8a44ec416e80c5c14cfb3afd5be88b2d2) ([merge request](gitlab-org/ruby/gems/gitlab-styles!211))\n- [Enhance Cop/ActiveRecordSerialize cop](gitlab-org/ruby/gems/gitlab-styles@2851e8bf06e8545a6185fe53b4113099b32ab699) ([merge request](gitlab-org/ruby/gems/gitlab-styles!211))\n- [Dogfood 3 components](gitlab-org/ruby/gems/gitlab-styles@94c615706d992309e2c288e995b9e6c8b07335c1) ([merge request](gitlab-org/ruby/gems/gitlab-styles!208))\n\n"
+  }
+ }
+]

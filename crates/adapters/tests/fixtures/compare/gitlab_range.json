@@ -1,0 +1,687 @@
+{
+ "commit": {
+  "id": "8a1c38d69aa0544049422f62bb7609e4fc36aca0",
+  "short_id": "8a1c38d6",
+  "title": "Merge branch 'eduardosanz/bump-version-14_1_0' into 'master'",
+  "created_at": "2026-05-19T09:00:57.000+12:00",
+  "parent_ids": [
+   "8a42e177680fd828d143959492bbb2a908a305d6",
+   "1e12752e6ad92ac5a8aa32a4da9d71168586a84e"
+  ]
+ },
+ "commits": [
+  {
+   "id": "c60fa43b1f8609bbc52fbdb733d023a07a9c22f9",
+   "short_id": "c60fa43b",
+   "title": "Pin all runtime dependencies",
+   "created_at": "2025-02-17T13:56:27.000+01:00",
+   "parent_ids": [
+    "d37ec22ea341394d02242bde5bb0f5623b4e1a17"
+   ]
+  },
+  {
+   "id": "d9e7507e876cf291c85376de629fa74f6093ac99",
+   "short_id": "d9e7507e",
+   "title": "Add missing good and bad examples to cops",
+   "created_at": "2025-02-27T16:30:02.000+00:00",
+   "parent_ids": [
+    "d37ec22ea341394d02242bde5bb0f5623b4e1a17"
+   ]
+  },
+  {
+   "id": "a70b7d2e8ade1a101836ed29bd369c8ceba471e6",
+   "short_id": "a70b7d2e",
+   "title": "Merge branch 'kiran/add-missing-cop-examples-77' into 'master'",
+   "created_at": "2025-02-28T16:27:01.000+00:00",
+   "parent_ids": [
+    "d37ec22ea341394d02242bde5bb0f5623b4e1a17",
+    "d9e7507e876cf291c85376de629fa74f6093ac99"
+   ]
+  },
+  {
+   "id": "7b918480effb661d4255b83ec753af7c5e0c1d68",
+   "short_id": "7b918480",
+   "title": "Merge branch 'pl-pin-deps' into 'master'",
+   "created_at": "2025-03-03T14:22:09.000+00:00",
+   "parent_ids": [
+    "a70b7d2e8ade1a101836ed29bd369c8ceba471e6",
+    "c60fa43b1f8609bbc52fbdb733d023a07a9c22f9"
+   ]
+  },
+  {
+   "id": "9f4be34eb7085ff8cc71f84e28f06249e6a31f36",
+   "short_id": "9f4be34e",
+   "title": "Add allowlist for Tailwind max-width media queries",
+   "created_at": "2025-03-25T10:59:20.000-07:00",
+   "parent_ids": [
+    "7b918480effb661d4255b83ec753af7c5e0c1d68"
+   ]
+  },
+  {
+   "id": "baef9d140bf314169745e2e7c49b4447dc605280",
+   "short_id": "baef9d14",
+   "title": "Use dependency proxy for images in CI",
+   "created_at": "2025-03-28T16:45:15.000+01:00",
+   "parent_ids": [
+    "7b918480effb661d4255b83ec753af7c5e0c1d68"
+   ]
+  },
+  {
+   "id": "8bb33fdc20a40745da2ca6f2aafc4ae4196e09d5",
+   "short_id": "8bb33fdc",
+   "title": "Merge branch 'kev-dependency-proxy' into 'master'",
+   "created_at": "2025-03-28T16:20:54.000+00:00",
+   "parent_ids": [
+    "7b918480effb661d4255b83ec753af7c5e0c1d68",
+    "baef9d140bf314169745e2e7c49b4447dc605280"
+   ]
+  },
+  {
+   "id": "b3a4c752df285d217b8b2f6ba9d3d65133666fbc",
+   "short_id": "b3a4c752",
+   "title": "Merge branch 'add-exception-for-display-hidden' into 'master'",
+   "created_at": "2025-04-02T10:02:34.000+02:00",
+   "parent_ids": [
+    "8bb33fdc20a40745da2ca6f2aafc4ae4196e09d5",
+    "9f4be34eb7085ff8cc71f84e28f06249e6a31f36"
+   ]
+  },
+  {
+   "id": "8e9f5c642a5e99741ab6d666288877edb0ccf809",
+   "short_id": "8e9f5c64",
+   "title": "Allow conditional blocks to be followed by ensure",
+   "created_at": "2025-06-26T18:37:58.000+01:00",
+   "parent_ids": [
+    "b3a4c752df285d217b8b2f6ba9d3d65133666fbc"
+   ]
+  },
+  {
+   "id": "05591d925e31f64497cf712f51ba75ed29ee6e26",
+   "short_id": "05591d92",
+   "title": "Merge branch 'fix/conditional-block-followed-by-ensure' into 'master'",
+   "created_at": "2025-06-27T14:34:31.000+02:00",
+   "parent_ids": [
+    "b3a4c752df285d217b8b2f6ba9d3d65133666fbc",
+    "8e9f5c642a5e99741ab6d666288877edb0ccf809"
+   ]
+  },
+  {
+   "id": "ad4006db53267b951613fd5c74124e7c39d2b94f",
+   "short_id": "ad4006db",
+   "title": "Enable Style/UnlessLogicalOperators RuboCop rule",
+   "created_at": "2025-08-12T09:36:42.000+02:00",
+   "parent_ids": [
+    "05591d925e31f64497cf712f51ba75ed29ee6e26"
+   ]
+  },
+  {
+   "id": "818fea56d761ab2e276a1786fa0905e2e3cec540",
+   "short_id": "818fea56",
+   "title": "Merge branch 'abdwdd-enable-unless-logical-operators' into 'master'",
+   "created_at": "2025-08-12T09:36:42.000+02:00",
+   "parent_ids": [
+    "05591d925e31f64497cf712f51ba75ed29ee6e26",
+    "ad4006db53267b951613fd5c74124e7c39d2b94f"
+   ]
+  },
+  {
+   "id": "39e9698c46b070d66dc466c96fde6d98736b503d",
+   "short_id": "39e9698c",
+   "title": "Add impact assessment requirement to static analysis check template",
+   "created_at": "2025-09-29T15:25:14.000+13:00",
+   "parent_ids": [
+    "818fea56d761ab2e276a1786fa0905e2e3cec540"
+   ]
+  },
+  {
+   "id": "06a92d2b9592529f82b78318b54eff50e7c4162c",
+   "short_id": "06a92d2b",
+   "title": "Merge branch 'pl-mr-template-new-check-impact' into 'master'",
+   "created_at": "2025-09-29T15:25:14.000+13:00",
+   "parent_ids": [
+    "818fea56d761ab2e276a1786fa0905e2e3cec540",
+    "39e9698c46b070d66dc466c96fde6d98736b503d"
+   ]
+  },
+  {
+   "id": "ea11c491a4d960b1f8ce922dc641b19d0a7f6c10",
+   "short_id": "ea11c491",
+   "title": "Explain gem pinning strategy",
+   "created_at": "2025-12-09T10:05:09.000+13:00",
+   "parent_ids": [
+    "06a92d2b9592529f82b78318b54eff50e7c4162c"
+   ]
+  },
+  {
+   "id": "5b684ecf3dc988e3420ccb42e792187cfc6a2778",
+   "short_id": "5b684ecf",
+   "title": "Merge branch 'doc/gem-pinning-strategy' into 'master'",
+   "created_at": "2025-12-09T10:05:09.000+13:00",
+   "parent_ids": [
+    "06a92d2b9592529f82b78318b54eff50e7c4162c",
+    "ea11c491a4d960b1f8ce922dc641b19d0a7f6c10"
+   ]
+  },
+  {
+   "id": "97236c01b9d0eef9354a58542a8837c6ac059287",
+   "short_id": "97236c01",
+   "title": "Update RuboCop version requirement to 1.81.7",
+   "created_at": "2026-01-07T14:12:39.000+01:00",
+   "parent_ids": [
+    "5b684ecf3dc988e3420ccb42e792187cfc6a2778"
+   ]
+  },
+  {
+   "id": "a5684a2747d23783608a34807c7c96efcbc765f1",
+   "short_id": "a5684a27",
+   "title": "Merge branch 'duo-edit-20251215-051818' into 'master'",
+   "created_at": "2026-01-07T14:12:39.000+01:00",
+   "parent_ids": [
+    "5b684ecf3dc988e3420ccb42e792187cfc6a2778",
+    "97236c01b9d0eef9354a58542a8837c6ac059287"
+   ]
+  },
+  {
+   "id": "1ea6730205eb9eb05046e0879320bd895dd95a19",
+   "short_id": "1ea67302",
+   "title": "Release version 14.0.0",
+   "created_at": "2026-01-12T14:22:46.000+01:00",
+   "parent_ids": [
+    "a5684a2747d23783608a34807c7c96efcbc765f1"
+   ]
+  },
+  {
+   "id": "7a4c44f50c90e9a14f8a2a6a224636398c473c1c",
+   "short_id": "7a4c44f5",
+   "title": "Merge branch 'bump-to-14' into 'master'",
+   "created_at": "2026-01-12T14:22:46.000+01:00",
+   "parent_ids": [
+    "a5684a2747d23783608a34807c7c96efcbc765f1",
+    "1ea6730205eb9eb05046e0879320bd895dd95a19"
+   ]
+  },
+  {
+   "id": "a95c95833346ec8c5e92deac3ff10a0c3f7b17bd",
+   "short_id": "a95c9583",
+   "title": "Adding good and bad examples to three cops ",
+   "created_at": "2026-01-27T15:57:57.000+01:00",
+   "parent_ids": [
+    "7a4c44f50c90e9a14f8a2a6a224636398c473c1c"
+   ]
+  },
+  {
+   "id": "12fff0eca9b1aa2c2b19153672f14fce96048c3d",
+   "short_id": "12fff0ec",
+   "title": "Merge branch 'add-good-bad-examples' into 'master'",
+   "created_at": "2026-01-27T15:58:03.000+01:00",
+   "parent_ids": [
+    "7a4c44f50c90e9a14f8a2a6a224636398c473c1c",
+    "a95c95833346ec8c5e92deac3ff10a0c3f7b17bd"
+   ]
+  },
+  {
+   "id": "d44e154a0669bb3da2faaf5f2c59481a2f2896af",
+   "short_id": "d44e154a",
+   "title": "Fix UseRestrictOnSend false positives on child-node method name checks",
+   "created_at": "2026-04-22T16:21:30.000+02:00",
+   "parent_ids": [
+    "12fff0eca9b1aa2c2b19153672f14fce96048c3d"
+   ]
+  },
+  {
+   "id": "f9803f03d5c619acda96b60b9ad6828b2cbff099",
+   "short_id": "f9803f03",
+   "title": "Merge branch 'pl-use-restrict-on-send-node-name' into 'master'",
+   "created_at": "2026-04-23T11:10:53.000+02:00",
+   "parent_ids": [
+    "12fff0eca9b1aa2c2b19153672f14fce96048c3d",
+    "d44e154a0669bb3da2faaf5f2c59481a2f2896af"
+   ]
+  },
+  {
+   "id": "429c47231b93273cf3ecb860e2cdd60c91f8e404",
+   "short_id": "429c4723",
+   "title": "Define RSpec/FeatureSpecMaxExamples cop",
+   "created_at": "2026-05-08T09:50:53.000+02:00",
+   "parent_ids": [
+    "f9803f03d5c619acda96b60b9ad6828b2cbff099"
+   ]
+  },
+  {
+   "id": "8a42e177680fd828d143959492bbb2a908a305d6",
+   "short_id": "8a42e177",
+   "title": "Merge branch 'eduardosanz/add-FeatureSpecMaxExamples-cop' into 'master'",
+   "created_at": "2026-05-08T09:50:53.000+02:00",
+   "parent_ids": [
+    "f9803f03d5c619acda96b60b9ad6828b2cbff099",
+    "429c47231b93273cf3ecb860e2cdd60c91f8e404"
+   ]
+  },
+  {
+   "id": "1e12752e6ad92ac5a8aa32a4da9d71168586a84e",
+   "short_id": "1e12752e",
+   "title": "Bump version to 14.1.0",
+   "created_at": "2026-05-18T19:30:53.000+02:00",
+   "parent_ids": [
+    "8a42e177680fd828d143959492bbb2a908a305d6"
+   ]
+  },
+  {
+   "id": "8a1c38d69aa0544049422f62bb7609e4fc36aca0",
+   "short_id": "8a1c38d6",
+   "title": "Merge branch 'eduardosanz/bump-version-14_1_0' into 'master'",
+   "created_at": "2026-05-19T09:00:57.000+12:00",
+   "parent_ids": [
+    "8a42e177680fd828d143959492bbb2a908a305d6",
+    "1e12752e6ad92ac5a8aa32a4da9d71168586a84e"
+   ]
+  }
+ ],
+ "diffs": [
+  {
+   "diff": "@@ -16,7 +16,7 @@ default:\n     - gitlab-org\n \n .base-ruby-job:\n-  image: \"ruby:${RUBY_VERSION}\"\n+  image: \"${GITLAB_DEPENDENCY_PROXY}ruby:${RUBY_VERSION}\"\n   before_script:\n     - bundle_version=$(grep -A 1 \"BUNDLED WITH\" Gemfile.lock | grep -oE '[[:digit:].]+')\n     - gem install bundler --version \"$bundle_version\" --no-document  # Bundler is not installed with the image\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": ".gitlab-ci.yml",
+   "old_path": ".gitlab-ci.yml",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -11,11 +11,37 @@ Please describe the proposal and add a link to the source (for example, http://w\n   - CHOICE_A: :a:\n   - CHOICE_B: :b:\n   - Vote yourself for both choices so that people know these are the choices\n+- [ ] Provide the impact of the proposal on `gitlab-org/gitlab`\n - [ ] The MR doesn't have significant objections, and is getting a majority of :+1: vs :-1: (remember that [we don't need to reach a consensus](https://about.gitlab.com/handbook/values/#collaboration-is-not-consensus))\n - [ ] (If applicable) One style is getting a majority of vote (compared to the other choice)\n - [ ] (If applicable) Update the MR with the chosen style\n - [ ] Follow the [review process](https://docs.gitlab.com/ee/development/code_review.html) as usual\n \n+### Impact on gitlab-org/gitlab>\n+\n+<!--\n+\n+1. In monolith's Gemfile, point `gitlab-styles` gem to this very MR branch.\n+\n+    For example, in Gemfile:\n+\n+        ...\n+        gem 'gitlab-styles', '~> 13.1.0', require: false,\n+            git: 'https://gitlab.com/gitlab-org/ruby/gems/gitlab-styles.git',\n+            ref: '<MR branch>' # rubocop:disable Cop/GemFetcher\n+        ...\n+\n+2. Run `bundle update`\n+3. Run `bundle exec rubocop --only <cop/rule> | pbcopy`\n+4. Paste the output below\n+\n+-->\n+\n+```\n+[Paste the output here]\n+```\n+\n+\n /label ~\"Engineering Productivity\" ~\"development guidelines\" ~\"static code analysis\"\n \n /cc @gitlab-org/maintainers/rails-backend\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": ".gitlab/merge_request_templates/New Static Analysis Check.md",
+   "old_path": ".gitlab/merge_request_templates/New Static Analysis Check.md",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -1,27 +1,11 @@\n # This configuration was generated by\n # `rubocop --auto-gen-config --exclude-limit 10000`\n-# on 2025-02-02 02:50:28 UTC using RuboCop version 1.71.0.\n+# on 2026-01-26 16:12:08 UTC using RuboCop version 1.81.7.\n # The point is for the user to remove these configuration records\n # one by one as the offenses are removed from the code base.\n # Note that changes in the inspected code, or installation of new\n # versions of RuboCop, may require this file to be generated again.\n \n-# Offense count: 11\n-# This cop supports safe autocorrection (--autocorrect).\n-InternalAffairs/CopDescriptionWithExample:\n-  Exclude:\n-    - 'lib/rubocop/cop/fips/md5.rb'\n-    - 'lib/rubocop/cop/fips/open_ssl.rb'\n-    - 'lib/rubocop/cop/fips/sha1.rb'\n-    - 'lib/rubocop/cop/gem_fetcher.rb'\n-    - 'lib/rubocop/cop/gitlab_security/deep_munge.rb'\n-    - 'lib/rubocop/cop/in_batches.rb'\n-    - 'lib/rubocop/cop/internal_affairs/deprecate_cop_helper.rb'\n-    - 'lib/rubocop/cop/line_break_around_conditional_block.rb'\n-    - 'lib/rubocop/cop/migration/update_large_table.rb'\n-    - 'lib/rubocop/cop/performance/rubyzip.rb'\n-    - 'lib/rubocop/cop/polymorphic_associations.rb'\n-\n # Offense count: 10\n InternalAffairs/MissingCopDepartment:\n   Exclude:\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": ".rubocop_todo.yml",
+   "old_path": ".rubocop_todo.yml",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -1,15 +1,15 @@\n PATH\n   remote: .\n   specs:\n-    gitlab-styles (13.1.0)\n-      rubocop (= 1.71.1)\n-      rubocop-capybara (~> 2.21.0)\n-      rubocop-factory_bot (~> 2.26.1)\n-      rubocop-graphql (~> 1.5.4)\n-      rubocop-performance (~> 1.21.1)\n-      rubocop-rails (~> 2.26.0)\n-      rubocop-rspec (~> 3.0.4)\n-      rubocop-rspec_rails (~> 2.30.0)\n+    gitlab-styles (14.1.0)\n+      rubocop (= 1.81.7)\n+      rubocop-capybara (= 2.21.0)\n+      rubocop-factory_bot (= 2.26.1)\n+      rubocop-graphql (= 1.5.4)\n+      rubocop-performance (= 1.23.1)\n+      rubocop-rails (= 2.29.1)\n+      rubocop-rspec (= 3.4.0)\n+      rubocop-rspec_rails (= 2.30.0)\n \n GEM\n   remote: https://rubygems.org/\n@@ -101,6 +101,7 @@ GEM\n       kramdown (~> 2.0)\n     language_server-protocol (3.17.0.3)\n     lefthook (1.3.13)\n+    lint_roller (1.1.0)\n     method_source (1.0.0)\n     mini_mime (1.1.5)\n     minitest (5.18.0)\n@@ -113,9 +114,10 @@ GEM\n       sawyer (~> 0.9)\n     open4 (1.3.4)\n     parallel (1.24.0)\n-    parser (3.3.1.0)\n+    parser (3.3.10.0)\n       ast (~> 2.4.1)\n       racc\n+    prism (1.6.0)\n     proc_to_ast (0.1.0)\n       coderay\n       parser\n@@ -156,35 +158,37 @@ GEM\n       binding_of_caller\n       rspec-parameterized-core (< 2)\n     rspec-support (3.12.0)\n-    rubocop (1.71.1)\n+    rubocop (1.81.7)\n       json (~> 2.3)\n-      language_server-protocol (>= 3.17.0)\n+      language_server-protocol (~> 3.17.0.2)\n+      lint_roller (~> 1.1.0)\n       parallel (~> 1.10)\n       parser (>= 3.3.0.2)\n       rainbow (>= 2.2.2, < 4.0)\n       regexp_parser (>= 2.9.3, < 3.0)\n-      rubocop-ast (>= 1.38.0, < 2.0)\n+      rubocop-ast (>= 1.47.1, < 2.0)\n       ruby-progressbar (~> 1.7)\n       unicode-display_width (>= 2.4.0, < 4.0)\n-    rubocop-ast (1.38.0)\n-      parser (>= 3.3.1.0)\n+    rubocop-ast (1.48.0)\n+      parser (>= 3.3.7.2)\n+      prism (~> 1.4)\n     rubocop-capybara (2.21.0)\n       rubocop (~> 1.41)\n     rubocop-factory_bot (2.26.1)\n       rubocop (~> 1.61)\n     rubocop-graphql (1.5.4)\n       rubocop (>= 1.50, < 2)\n-    rubocop-performance (1.21.1)\n+    rubocop-performance (1.23.1)\n       rubocop (>= 1.48.1, < 2.0)\n       rubocop-ast (>= 1.31.1, < 2.0)\n-    rubocop-rails (2.26.0)\n+    rubocop-rails (2.29.1)\n       activesupport (>= 4.2.0)\n       rack (>= 1.1)\n       rubocop (>= 1.52.0, < 2.0)\n       rubocop-ast (>= 1.31.1, < 2.0)\n     rubocop-rake (0.6.0)\n       rubocop (~> 1.0)\n-    rubocop-rspec (3.0.4)\n+    rubocop-rspec (3.4.0)\n       rubocop (~> 1.61)\n     rubocop-rspec_rails (2.30.0)\n       rubocop (~> 1.61)\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "Gemfile.lock",
+   "old_path": "Gemfile.lock",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -19,6 +19,19 @@ Or install it yourself as:\n \n     $ gem install gitlab-styles\n \n+## Why We Pin Gem Versions\n+\n+`gitlab-styles` pins specific versions of RuboCop and related gems (e.g., `rubocop-rails`, `rubocop-rspec`, `rubocop-performance`) to ensure **consistent rule configuration and behavior across all GitLab projects**.\n+\n+When gems are left unpinned, minor or patch version updates can introduce:\n+\n+- **New or modified RuboCop rules** that may conflict with your project's configuration\n+- **Inconsistent linting results** across different environments and CI/CD pipelines\n+- **Unexpected build failures** when developers or CI systems install different versions\n+- **Configuration drift** between projects using `gitlab-styles`\n+\n+By pinning versions, we guarantee that all projects using `gitlab-styles` enforce the same coding standards and rules, regardless of when they install the gem.\n+\n ## Usage\n \n ### Inherit all rules\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "README.md",
+   "old_path": "README.md",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -22,14 +22,14 @@ Gem::Specification.new do |spec|\n   spec.executables   = spec.files.grep(%r{^exe/}) { |f| File.basename(f) }\n   spec.require_paths = ['lib']\n \n-  spec.add_dependency 'rubocop', '1.71.1'\n-  spec.add_dependency 'rubocop-capybara', '~> 2.21.0'\n-  spec.add_dependency 'rubocop-factory_bot', '~> 2.26.1'\n-  spec.add_dependency 'rubocop-graphql', '~> 1.5.4'\n-  spec.add_dependency 'rubocop-performance', '~> 1.21.1'\n-  spec.add_dependency 'rubocop-rails', '~> 2.26.0'\n-  spec.add_dependency 'rubocop-rspec', '~> 3.0.4'\n-  spec.add_dependency 'rubocop-rspec_rails', '~> 2.30.0'\n+  spec.add_dependency 'rubocop', '1.81.7'\n+  spec.add_dependency 'rubocop-capybara', '2.21.0'\n+  spec.add_dependency 'rubocop-factory_bot', '2.26.1'\n+  spec.add_dependency 'rubocop-graphql', '1.5.4'\n+  spec.add_dependency 'rubocop-performance', '1.23.1'\n+  spec.add_dependency 'rubocop-rails', '2.29.1'\n+  spec.add_dependency 'rubocop-rspec', '3.4.0'\n+  spec.add_dependency 'rubocop-rspec_rails', '2.30.0'\n \n   spec.add_development_dependency 'bundler', '~> 2.1'\n   spec.add_development_dependency 'gitlab-dangerfiles', '~> 4.6.0'\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "gitlab-styles.gemspec",
+   "old_path": "gitlab-styles.gemspec",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -2,6 +2,6 @@\n \n module Gitlab\n   module Styles\n-    VERSION = '13.1.0'\n+    VERSION = '14.1.0'\n   end\n end\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/gitlab/styles/version.rb",
+   "old_path": "lib/gitlab/styles/version.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -67,8 +67,7 @@ module Rubocop\n       end\n \n       def def?(node)\n-        node.type?(:def, :defs) ||\n-          (node.block_type? && DEF_METHODS.include?(node.method_name))\n+        node.any_def_type? || (node.block_type? && DEF_METHODS.include?(node.method_name))\n       end\n \n       def allowed?(block_node)\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/avoid_return_from_blocks.rb",
+   "old_path": "lib/rubocop/cop/avoid_return_from_blocks.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -5,6 +5,16 @@ require_relative '../../../gitlab/styles/common/banned_constants'\n module Rubocop\n   module Cop\n     module Fips\n+      # Checks for the usage of MD5, which is not FIPS-compliant.\n+      # It suggests using a FIPS-compliant alternative like SHA256.\n+      #\n+      # @example\n+      #   # bad\n+      #   OpenSSL::Digest::MD5.hexdigest('foo')\n+      #   Digest::MD5.hexdigest('foo')\n+      #\n+      #   # good\n+      #   OpenSSL::Digest::SHA256.hexdigest('foo')\n       class MD5 < RuboCop::Cop::Base\n         include Gitlab::Styles::Common::BannedConstants\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/fips/md5.rb",
+   "old_path": "lib/rubocop/cop/fips/md5.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -5,6 +5,17 @@ require_relative '../../../gitlab/styles/common/banned_constants'\n module Rubocop\n   module Cop\n     module Fips\n+      # Flags usage of the Digest class (which is not FIPS-compliant) and suggests replacing it with OpenSSL::Digest\n+      # (which is FIPS-compliant).\n+      #\n+      # @example\n+      #   # bad\n+      #   Digest::SHA1.hexdigest('foo')\n+      #   Digest::SHA512('foo')\n+      #\n+      #   # good\n+      #   OpenSSL::Digest::SHA1.hexdigest('foo')\n+      #   OpenSSL::Digest::SHA512.hexdigest('foo')\n       class OpenSSL < RuboCop::Cop::Base\n         extend RuboCop::Cop::AutoCorrector\n         include Gitlab::Styles::Common::BannedConstants\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/fips/open_ssl.rb",
+   "old_path": "lib/rubocop/cop/fips/open_ssl.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -5,6 +5,14 @@ require_relative '../../../gitlab/styles/common/banned_constants'\n module Rubocop\n   module Cop\n     module Fips\n+      # Cop that denies the use of Digest::SHA1\n+      # @example\n+      #   # bad\n+      #   OpenSSL::Digest::SHA1.hexdigest('foo')\n+      #   Digest::SHA1('ABC')\n+      #\n+      #   # good\n+      #   OpenSSL::Digest::SHA256.hexdigest('foo')\n       class SHA1 < RuboCop::Cop::Base\n         include Gitlab::Styles::Common::BannedConstants\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/fips/sha1.rb",
+   "old_path": "lib/rubocop/cop/fips/sha1.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -5,6 +5,12 @@ module Rubocop\n     # Prevents usage of the `git` and `github` arguments to `gem` in a\n     # `Gemfile` in order to avoid additional points of failure beyond\n     # rubygems.org.\n+    # @example\n+    #   # bad\n+    #   gem 'rack', git: 'https://github.com/rack/rack'\n+    #\n+    #   # good\n+    #   gem \"rack\"\n     class GemFetcher < RuboCop::Cop::Base\n       MSG = 'Do not use gems from git repositories, only use gems from RubyGems or vendored gems. ' \\\n         'See https://docs.gitlab.com/ee/development/gemfile.html#no-gems-fetched-from-git-repositories'\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/gem_fetcher.rb",
+   "old_path": "lib/rubocop/cop/gem_fetcher.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -13,7 +13,17 @@ module RuboCop\n       #   # bad\n       #   config.action_dispatch.perform_deep_munge = false\n       #\n+      #   # bad\n+      #   config.action_dispatch.perform_deep_munge = !true\n+      #\n+      #   # good\n+      #   config.action_dispatch.perform_deep_munge = true\n+      #\n+      #   # good\n+      #   # Deep munge is not explicitly disabled\n+      #\n       # See CVE-2012-2660, CVE-2012-2694, and CVE-2013-0155.\n+\n       class DeepMunge < RuboCop::Cop::Base\n         MSG = 'Never disable the deep munge security option.'\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/gitlab_security/deep_munge.rb",
+   "old_path": "lib/rubocop/cop/gitlab_security/deep_munge.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -3,6 +3,14 @@\n module Rubocop\n   module Cop\n     # Cop that prevents the use of `in_batches`\n+    # @example\n+    #   # bad\n+    #   Foo.in_batches do |relation|\n+    #   end\n+    #\n+    #   # good\n+    #   Foo.each_batch do |relation|\n+    #   end\n     class InBatches < RuboCop::Cop::Base\n       MSG = 'Do not use `in_batches`, use `each_batch` from the EachBatch module instead'\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/in_batches.rb",
+   "old_path": "lib/rubocop/cop/in_batches.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -81,7 +81,7 @@ module Rubocop\n           index_of_example = lines.index { |line| line.text.match?(/# @example( |$)/) }\n           return false unless index_of_example\n \n-          lines_after_example = lines[index_of_example + 1..]\n+          lines_after_example = lines[(index_of_example + 1)..]\n \n           lines_after_example.any? { |line| line.text.downcase.match?(/#   # good( |$)/) } &&\n             lines_after_example.any? { |line| line.text.downcase.match?(/#   # bad( |$)/) }\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/internal_affairs/cop_description_with_example.rb",
+   "old_path": "lib/rubocop/cop/internal_affairs/cop_description_with_example.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -4,6 +4,18 @@ module Rubocop\n   module Cop\n     module InternalAffairs\n       # Cop that denies the use of CopHelper.\n+      # @example\n+      #   # bad\n+      #   include CopHelper\n+      #\n+      #   inspect_source(<<~RUBY)\n+      #     #....\n+      #   RUBY\n+      #\n+      #   # good\n+      #   expect_offense(<<~RUBY)\n+      #     # ....\n+      #   RUBY\n       class DeprecateCopHelper < RuboCop::Cop::Base\n         MSG = 'Do not use `CopHelper` or methods from it, use improved patterns described in https://www.rubydoc.info/gems/rubocop/RuboCop/RSpec/ExpectOffense'\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/internal_affairs/deprecate_cop_helper.rb",
+   "old_path": "lib/rubocop/cop/internal_affairs/deprecate_cop_helper.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -45,37 +45,35 @@ module RuboCop\n         MSG = 'Define constant `RESTRICT_ON_SEND` to speed up calls to `on_send`. ' \\\n           'The following line is then no longer necessary:'\n \n-        # @!method method_name_plain(node)\n+        # @!method method_name_plain(node, send_param)\n         def_node_matcher :method_name_plain, <<~PATTERN\n           {\n-            (send _ :method_name _ ...)       # method_name(node)\n-            (send\n-              (send _ :children) :[] (int 1)  # node.children[1]\n-            )\n+            (send _ :method_name (lvar %1) ...)           # method_name(on_send_param)\n+            (send (send (lvar %1) :children) :[] (int 1)) # on_send_param.children[1]\n           }\n         PATTERN\n \n-        # @!method method_name_call(node)\n+        # @!method method_name_call(node, send_param, local_assignments)\n         def_node_matcher :method_name_call, <<~PATTERN\n           {\n-            #method_name_plain\n-            (lvar %1)\n+            #method_name_plain(%1)  # direct method_name/children[1] call on the on_send param\n+            (lvar %2)               # local variable previously assigned from such a call\n           }\n         PATTERN\n \n-        # @!method method_name_assignment(node)\n+        # @!method method_name_assignment(node, send_param)\n         def_node_search :method_name_assignment, <<~PATTERN\n-          (lvasgn $_name #method_name_plain)\n+          (lvasgn $_ #method_name_plain(%1))\n         PATTERN\n \n-        # @!method method_name_check(node)\n+        # @!method method_name_check(node, send_param, local_assignments)\n         def_node_search :method_name_check, <<~PATTERN\n           (if\n             ${\n-              (send #method_name_call(%1) {:== :!=} _) # method_name(node) == foo\n-              (send _ :include? #method_name_call(%1)) # a.include?(method_name(node))\n+              (send #method_name_call(%1, %2) {:== :!=} _) # method_name(on_send_param) == foo\n+              (send _ :include? #method_name_call(%1, %2)) # a.include?(method_name(on_send_param))\n             }\n-            {!nil? nil? | nil? !nil?}                  # has either `if` or `else` branch - not both\n+            {!nil? nil? | nil? !nil?}                      # has either `if` or `else` branch - not both\n           )\n         PATTERN\n \n@@ -83,9 +81,12 @@ module RuboCop\n           return unless node.method?(:on_send)\n           return if @restrict_on_send_set\n \n-          local_assignments = method_name_assignment(node).to_set\n+          send_param = node.first_argument&.name\n+          return unless send_param\n \n-          method_name_check(node, local_assignments) do |call_node|\n+          local_assignments = method_name_assignment(node, send_param).to_set\n+\n+          method_name_check(node, send_param, local_assignments) do |call_node|\n             add_offense(call_node)\n           end\n         end\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/internal_affairs/use_restrict_on_send.rb",
+   "old_path": "lib/rubocop/cop/internal_affairs/use_restrict_on_send.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -5,43 +5,43 @@ module Rubocop\n     # Ensures a line break around conditional blocks.\n     #\n     # @example\n-    #    # bad\n-    #    do_something\n-    #    if condition\n-    #      do_extra_stuff\n-    #    end\n-    #    do_something_more\n+    #   # bad\n+    #   do_something\n+    #   if condition\n+    #     do_extra_stuff\n+    #   end\n+    #   do_something_more\n     #\n-    #    # good\n-    #    do_something\n+    #   # good\n+    #   do_something\n     #\n-    #    if condition\n-    #      do_extra_stuff\n-    #    end\n+    #   if condition\n+    #     do_extra_stuff\n+    #   end\n     #\n-    #    do_something_more\n+    #   do_something_more\n     #\n-    #    # bad\n-    #    do_something\n-    #    unless condition\n-    #      do_extra_stuff\n-    #    end\n+    #   # bad\n+    #   do_something\n+    #   unless condition\n+    #     do_extra_stuff\n+    #   end\n     #\n-    #    do_something_more\n+    #   do_something_more\n     #\n-    #    # good\n-    #    def a_method\n-    #      if condition\n-    #        do_something\n-    #      end\n-    #    end\n+    #   # good\n+    #   def a_method\n+    #     if condition\n+    #       do_something\n+    #     end\n+    #   end\n     #\n-    #    # good\n-    #    on_block do\n-    #      if condition\n-    #        do_something\n-    #      end\n-    #    end\n+    #   # good\n+    #   on_block do\n+    #     if condition\n+    #       do_something\n+    #     end\n+    #   end\n     class LineBreakAroundConditionalBlock < RuboCop::Cop::Base\n       extend RuboCop::Cop::AutoCorrector\n       include RuboCop::Cop::RangeHelp\n@@ -100,7 +100,7 @@ module Rubocop\n       end\n \n       def end_clause_line?(line)\n-        line =~ /^\\s*(#|rescue|else|elsif|when)/\n+        line =~ /^\\s*(#|rescue|else|elsif|when|ensure)/\n       end\n \n       def begin_line?(line)\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/line_break_around_conditional_block.rb",
+   "old_path": "lib/rubocop/cop/line_break_around_conditional_block.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -8,10 +8,33 @@ module Rubocop\n       # Checks for methods that may lead to batch type issues on a table that's been\n       # explicitly denied because of its size.\n       #\n-      # Even though though these methods perform functions to avoid\n+      # Even though these methods perform functions to avoid\n       # downtime, using it with tables with millions of rows still causes a\n       # significant delay in the deploy process and is best avoided.\n       #\n+      # @example\n+      #\n+      #   # bad\n+      #   class ExampleMigration < ActiveRecord::Migration[7.0]\n+      #     def change\n+      #       denied_method(:denied_table, column: :value)\n+      #     end\n+      #   end\n+      #\n+      #   # good\n+      #   class ExampleMigration < ActiveRecord::Migration[7.0]\n+      #     def change\n+      #       denied_method(:allowed_table, column: :value)\n+      #     end\n+      #   end\n+      #\n+      #   # good\n+      #   class ExampleMigration < ActiveRecord::Migration[7.0]\n+      #     def change\n+      #       allowed_method(:denied_table, column: :value)\n+      #     end\n+      #   end\n+      #\n       # See https://gitlab.com/gitlab-com/infrastructure/issues/1602 for more\n       # information.\n       class UpdateLargeTable < RuboCop::Cop::Base\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/migration/update_large_table.rb",
+   "old_path": "lib/rubocop/cop/migration/update_large_table.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -8,6 +8,12 @@ module Rubocop\n       # files and directories, this can be very expensive even when the archive's size\n       # in bytes is small.\n       #\n+      # @example\n+      #   # bad\n+      #   Zip::File.open('file_path.zip', &block)\n+      #\n+      #   # good\n+      #   Zip::InputStream.open('file_path.zip')\n       # See also:\n       # - https://github.com/rubyzip/rubyzip/issues/506\n       # - https://github.com/rubyzip/rubyzip#notes-on-zipinputstream\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/performance/rubyzip.rb",
+   "old_path": "lib/rubocop/cop/performance/rubyzip.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -3,6 +3,17 @@\n module Rubocop\n   module Cop\n     # Cop that prevents the use of polymorphic associations\n+    # @example\n+    #   # bad\n+    #   class Comment < ApplicationRecord\n+    #     belongs_to :commentable, polymorphic: true\n+    #   end\n+    #\n+    #   # good\n+    #   class Comment < ApplicationRecord\n+    #     belongs_to :post\n+    #     belongs_to :article\n+    #   end\n     class PolymorphicAssociations < RuboCop::Cop::Base\n       MSG = 'Do not use polymorphic associations, use separate tables instead'\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/polymorphic_associations.rb",
+   "old_path": "lib/rubocop/cop/polymorphic_associations.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -0,0 +1,45 @@\n+# frozen_string_literal: true\n+\n+require 'rubocop-rspec'\n+require_relative 'base'\n+\n+module Rubocop\n+  module Cop\n+    module RSpec\n+      # Limits the number of examples in feature spec files.\n+      #\n+      # Feature specs with too many examples are slow to run, hard to maintain,\n+      # and often indicate the file should be split into smaller, focused specs.\n+      #\n+      # The maximum number of examples can be configured with the `Max` option\n+      # (default: 25).\n+      #\n+      # @example Max: 25 (default)\n+      #\n+      #   # bad\n+      #   # A feature spec file with more than 25 examples.\n+      #\n+      #   # good\n+      #   # A feature spec file with 25 or fewer examples.\n+      class FeatureSpecMaxExamples < Base\n+        MSG = 'Feature spec file has %<count>d examples, which exceeds the maximum of %<max>d. ' \\\n+          'Consider splitting into smaller, focused files grouped by user flow or feature area.'\n+\n+        def on_new_investigation\n+          super\n+          @example_count = 0\n+          @max = cop_config['Max'] || 25\n+        end\n+\n+        def on_block(node)\n+          @example_count += 1 if example?(node)\n+        end\n+        alias_method :on_numblock, :on_block\n+\n+        def on_investigation_end\n+          add_global_offense(format(MSG, count: @example_count, max: @max)) if @example_count > @max\n+        end\n+      end\n+    end\n+  end\n+end\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/rspec/feature_spec_max_examples.rb",
+   "old_path": "lib/rubocop/cop/rspec/feature_spec_max_examples.rb",
+   "a_mode": "0",
+   "b_mode": "100644",
+   "new_file": true,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -14,7 +14,8 @@ module Rubocop\n       #   css_classes = [\"gl-mt-3\", \"md:gl-mt-5\"]\n       #   %div{ class: [\"gl-mt-3\", \"md:gl-mt-5\"] }\n       class MaxWidthMediaQueries < RuboCop::Cop::Base\n-        TAILWIND_CSS_CLASS = /max-(sm|md|lg|xl):gl-/\n+        ALLOWLIST = ['hidden'].freeze\n+        TAILWIND_CSS_CLASS = /max-(sm|md|lg|xl):gl-(?!#{ALLOWLIST.join('|')})/\n         MSG = 'Do not use max-width media query utility classes unless absolutely necessary. ' \\\n           'Use min-width media query utility classes instead.'\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "lib/rubocop/cop/tailwind/max_width_media_queries.rb",
+   "old_path": "lib/rubocop/cop/tailwind/max_width_media_queries.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -48,7 +48,7 @@ Naming/MethodParameterName:\n # NamePrefix: is_, has_, have_\n # NamePrefixBlacklist: is_, has_, have_\n # NameWhitelist: is_a?\n-Naming/PredicateName:\n+Naming/PredicatePrefix:\n   Enabled: true\n   ForbiddenPrefixes:\n     - is_\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "rubocop-naming.yml",
+   "old_path": "rubocop-naming.yml",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -96,6 +96,12 @@ RSpec/ExpectChange:\n RSpec/ExpectOutput:\n   Enabled: true\n \n+# Limits the number of examples in feature spec files to encourage splitting\n+# large specs into smaller, focused files.\n+RSpec/FeatureSpecMaxExamples:\n+  Enabled: false\n+  Max: 25\n+\n # Checks if there are focused specs.\n RSpec/Focus:\n   Enabled: true\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "rubocop-rspec.yml",
+   "old_path": "rubocop-rspec.yml",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -475,6 +475,10 @@ Style/TrailingCommaInArguments:\n   Enabled: true\n   EnforcedStyleForMultiline: no_comma\n \n+# Checks for the use of logical operators in an unless condition.\n+Style/UnlessLogicalOperators:\n+  Enabled: true\n+\n # Don't interpolate global, instance and class variables directly in strings.\n Style/VariableInterpolation:\n   Enabled: true\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "rubocop-style.yml",
+   "old_path": "rubocop-style.yml",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -196,6 +196,84 @@ RSpec.describe RuboCop::Cop::InternalAffairs::UseRestrictOnSend do\n     end\n   end\n \n+  context 'when method name check is on a child node, not the on_send parameter' do\n+    it 'ignores method_name called with a non-param variable' do\n+      expect_no_offenses(<<~RUBY)\n+        def on_send(node)\n+          child = node.children[2]\n+          return unless method_name(child) == :foo\n+        end\n+      RUBY\n+    end\n+\n+    it 'ignores local var assigned from method_name(child_node) then compared' do\n+      expect_no_offenses(<<~RUBY)\n+        def on_send(node)\n+          child = node.children[2]\n+          name = method_name(child)\n+          return unless name == :foo\n+        end\n+      RUBY\n+    end\n+\n+    it 'ignores children[1] access on a non-param variable (direct)' do\n+      expect_no_offenses(<<~RUBY)\n+        def on_send(node)\n+          child = node.children[2]\n+          return unless child.children[1] == :foo\n+        end\n+      RUBY\n+    end\n+\n+    it 'ignores local var assigned from child.children[1] then compared' do\n+      expect_no_offenses(<<~RUBY)\n+        def on_send(node)\n+          child = node.children[2]\n+          name = child.children[1]\n+          return unless name == :foo\n+        end\n+      RUBY\n+    end\n+\n+    it 'ignores Array#include? with method_name(child_node)' do\n+      expect_no_offenses(<<~RUBY)\n+        def on_send(node)\n+          child = node.children[2]\n+          return if METHOD_NAMES.include?(method_name(child))\n+        end\n+      RUBY\n+    end\n+  end\n+\n+  context 'when on_send parameter has a non-standard name' do\n+    it 'flags method_name check using the actual parameter name' do\n+      expect_offense(<<~RUBY)\n+        def on_send(send_node)\n+          return unless method_name(send_node) == :some_method_name\n+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Define constant `RESTRICT_ON_SEND`[...]\n+        end\n+      RUBY\n+    end\n+\n+    it 'ignores method_name called with a different variable' do\n+      expect_no_offenses(<<~RUBY)\n+        def on_send(send_node)\n+          child = send_node.children[2]\n+          return unless method_name(child) == :foo\n+        end\n+      RUBY\n+    end\n+  end\n+\n+  context 'when on_send has no parameters' do\n+    it 'ignores the method without raising' do\n+      expect_no_offenses(<<~RUBY)\n+        def on_send\n+        end\n+      RUBY\n+    end\n+  end\n+\n   it_behaves_like 'checking for missing RESTRICT_ON_SEND', 'method_name(node)'\n   it_behaves_like 'checking for missing RESTRICT_ON_SEND', 'node.children[1]'\n end\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "spec/rubocop/cop/internal_affairs/use_restrict_on_send_spec.rb",
+   "old_path": "spec/rubocop/cop/internal_affairs/use_restrict_on_send_spec.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -229,6 +229,18 @@ RSpec.describe Rubocop::Cop::LineBreakAroundConditionalBlock, type: :rubocop do\n       RUBY\n     end\n \n+    it \"doesn't flag violation for #{conditional} followed by an ensure\" do\n+      expect_no_offenses(<<~RUBY)\n+           def a_method\n+             #{conditional} condition_c\n+               do_something_extra\n+             end\n+           ensure\n+             ensure_something\n+           end\n+      RUBY\n+    end\n+\n     it \"doesn't flag violation for #{conditional} preceded by a when\" do\n       expect_no_offenses(<<~RUBY)\n            case field\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "spec/rubocop/cop/line_break_around_conditional_block_spec.rb",
+   "old_path": "spec/rubocop/cop/line_break_around_conditional_block_spec.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -0,0 +1,105 @@\n+# frozen_string_literal: true\n+\n+require 'spec_helper'\n+\n+require_relative '../../../../lib/rubocop/cop/rspec/feature_spec_max_examples'\n+\n+RSpec.describe Rubocop::Cop::RSpec::FeatureSpecMaxExamples do\n+  let(:max) { 3 }\n+\n+  let(:cop_config) { { 'Max' => max } }\n+\n+  context 'when the number of examples is within the limit' do\n+    it 'does not register an offense' do\n+      expect_no_offenses(<<~RUBY)\n+        RSpec.describe 'Feature' do\n+          it 'test 1' do\n+          end\n+\n+          it 'test 2' do\n+          end\n+\n+          it 'test 3' do\n+          end\n+        end\n+      RUBY\n+    end\n+  end\n+\n+  context 'when the number of examples exceeds the limit' do\n+    it 'registers an offense on the describe block' do\n+      expect_offense(<<~RUBY)\n+        RSpec.describe 'Feature' do\n+        ^{} Feature spec file has 4 examples, which exceeds the maximum of 3. Consider splitting into smaller, focused files grouped by user flow or feature area.\n+          it 'test 1' do\n+          end\n+\n+          it 'test 2' do\n+          end\n+\n+          it 'test 3' do\n+          end\n+\n+          it 'test 4' do\n+          end\n+        end\n+      RUBY\n+    end\n+  end\n+\n+  context 'when the number of examples greatly exceeds the limit' do\n+    it 'still registers only a single offense on the describe block' do\n+      expect_offense(<<~RUBY)\n+        RSpec.describe 'Feature' do\n+        ^{} Feature spec file has 5 examples, which exceeds the maximum of 3. Consider splitting into smaller, focused files grouped by user flow or feature area.\n+          it 'test 1' do\n+          end\n+\n+          it 'test 2' do\n+          end\n+\n+          it 'test 3' do\n+          end\n+\n+          it 'test 4' do\n+          end\n+\n+          it 'test 5' do\n+          end\n+        end\n+      RUBY\n+    end\n+  end\n+\n+  context 'when examples use specify instead of it' do\n+    it 'counts specify blocks toward the limit' do\n+      expect_offense(<<~RUBY)\n+        RSpec.describe 'Feature' do\n+        ^{} Feature spec file has 4 examples, which exceeds the maximum of 3. Consider splitting into smaller, focused files grouped by user flow or feature area.\n+          specify 'test 1' do\n+          end\n+\n+          specify 'test 2' do\n+          end\n+\n+          specify 'test 3' do\n+          end\n+\n+          specify 'test 4' do\n+          end\n+        end\n+      RUBY\n+    end\n+  end\n+\n+  context 'when there are no examples' do\n+    it 'does not register an offense' do\n+      expect_no_offenses(<<~RUBY)\n+        RSpec.describe 'Feature' do\n+          context 'some context' do\n+          end\n+        end\n+      RUBY\n+    end\n+  end\n+end\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "spec/rubocop/cop/rspec/feature_spec_max_examples_spec.rb",
+   "old_path": "spec/rubocop/cop/rspec/feature_spec_max_examples_spec.rb",
+   "a_mode": "0",
+   "b_mode": "100644",
+   "new_file": true,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -57,5 +57,22 @@ RSpec.describe Rubocop::Cop::Tailwind::MaxWidthMediaQueries do\n         end\n       end\n     end\n+\n+    context 'when there are max-width media query utils for hidden classes' do\n+      where(:code) do\n+        [\n+          '[\"max-lg:gl-hidden\"]',\n+          '{ \"max-lg:gl-hidden\" => true }',\n+          '\".max-lg:gl-hidden\"',\n+          '\"max-lg:gl-hidden\"'\n+        ]\n+      end\n+\n+      with_them do\n+        it 'does not register an offense' do\n+          expect_no_offenses(code)\n+        end\n+      end\n+    end\n   end\n end\n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "spec/rubocop/cop/tailwind/max_width_media_queries_spec.rb",
+   "old_path": "spec/rubocop/cop/tailwind/max_width_media_queries_spec.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  },
+  {
+   "diff": "@@ -11,7 +11,7 @@ RSpec.describe \"provided .yml files\", :integration do\n \n     with_them do\n       it \"runs successfully\" do\n-        _output, error, status = Open3.capture3(\"bundle exec rubocop -c #{yml}\")\n+        _output, error, status = Open3.capture3(\"bundle exec rubocop --disable-pending-cops -c #{yml}\")\n \n         expect(error).to be_empty\n         expect(status.exitstatus).not_to eq(2)\n@@ -23,7 +23,7 @@ RSpec.describe \"provided .yml files\", :integration do\n     let(:yml) { 'rubocop-default.yml' }\n \n     it \"load all defined configurations\" do\n-      output, error, status = Open3.capture3(\"bundle exec rubocop -d -c #{yml}\")\n+      output, error, status = Open3.capture3(\"bundle exec rubocop --disable-pending-cops -d -c #{yml}\")\n \n       loaded = output.scan(/^Inheriting .*(rubocop.*\\.yml)$/).flatten(1)\n \n",
+   "collapsed": false,
+   "too_large": false,
+   "new_path": "spec/yml_spec.rb",
+   "old_path": "spec/yml_spec.rb",
+   "a_mode": "100644",
+   "b_mode": "100644",
+   "new_file": false,
+   "renamed_file": false,
+   "deleted_file": false,
+   "generated_file": null
+  }
+ ],
+ "compare_timeout": false,
+ "compare_same_ref": false
+}

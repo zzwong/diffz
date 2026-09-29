@@ -584,6 +584,9 @@ impl Workbench {
                             ),
                         ));
                     }
+                    if let Some(timeline) = self.release_timeline(cx) {
+                        body = body.child(timeline);
+                    }
                     body=body.child(if let Some(description)=&active.snapshot.overview.description {
                         if description.trim().is_empty() {div().text_color(skin.muted).child("This review has no description.").into_any_element()}
                         else {TextView::markdown("pr-description",visible_markdown(description)).selectable(true).text_size(px(13.)).into_any_element()}
@@ -1075,5 +1078,187 @@ impl Workbench {
             .w(px(self.overview_width))
             .flex_shrink_0()
             .into_any_element()
+    }
+    /// A compare's releases, oldest first: each narrows the tree or opens as its own compare.
+    fn release_timeline(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let skin = self.skin();
+        let snapshot = &self.active.as_ref()?.snapshot;
+        let refs = snapshot.remote.as_ref()?.compare.as_ref()?;
+        let releases = &snapshot.overview.releases;
+        if releases.is_empty() {
+            return self.releases_pending.as_ref().map(|_| {
+                div()
+                    .text_size(px(12.))
+                    .text_color(skin.muted)
+                    .child("Loading releases…")
+                    .into_any_element()
+            });
+        }
+        let mut timeline = div().v_flex().gap_2().flex_shrink_0().child(
+            div()
+                .h_flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(format!("Releases · {}", releases.len())),
+                )
+                .when(self.release_filter.is_some(), |d| {
+                    d.child(
+                        Button::new("release-all")
+                            .ghost()
+                            .xsmall()
+                            .cursor_pointer()
+                            .label("Show all files")
+                            .tooltip("Stop narrowing the file tree to one release")
+                            .on_click(cx.listener(|a, _, _, c| a.filter_release(None, c))),
+                    )
+                }),
+        );
+        for (index, r) in releases.iter().enumerate() {
+            let selected = self.release_filter == Some(index);
+            let open_notes = self.release_notes.contains(&index);
+            let (additions, deletions) = r
+                .files
+                .iter()
+                .fold((0, 0), |(a, d), f| (a + f.additions, d + f.deletions));
+            let name = match &r.tag {
+                Some(tag) => tag.clone(),
+                None => format!("{} (untagged)", refs.head),
+            };
+            let mut card = div()
+                .v_flex()
+                .gap_1()
+                .p_2()
+                .w_full()
+                .flex_shrink_0()
+                .border_1()
+                .border_color(if selected { skin.accent } else { skin.border })
+                .rounded_md()
+                .bg(if selected {
+                    skin.accent.opacity(0.08)
+                } else {
+                    skin.base.opacity(0.45)
+                })
+                .child(
+                    div()
+                        .h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(div().size(px(8.)).rounded_full().bg(if selected {
+                            skin.accent
+                        } else {
+                            skin.muted
+                        }))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_ellipsis()
+                                .font_family(crate::theme::code_font())
+                                .text_size(px(12.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(name.clone()),
+                        )
+                        .when_some(r.date.as_deref(), |d, at| {
+                            d.child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(skin.muted)
+                                    .child(short_timestamp(at)),
+                            )
+                        }),
+                )
+                .child(
+                    div()
+                        .h_flex()
+                        .gap_2()
+                        .text_size(px(11.))
+                        .text_color(skin.muted)
+                        .child(format!("{} commits · {} files", r.commits, r.files.len()))
+                        .child(
+                            div()
+                                .text_color(skin.positive)
+                                .child(format!("+{additions}")),
+                        )
+                        .child(
+                            div()
+                                .text_color(skin.negative)
+                                .child(format!("−{deletions}")),
+                        ),
+                );
+            let mut actions = div()
+                .h_flex()
+                .gap_1()
+                // A release whose files the compare leaves out would narrow the tree to nothing.
+                .when(!r.files.is_empty(), |d| {
+                    d.child(
+                        Button::new(("release-files", index))
+                            .ghost()
+                            .xsmall()
+                            .cursor_pointer()
+                            .label(if selected {
+                                "Show all files"
+                            } else {
+                                "Show its files"
+                            })
+                            .when(selected, |b| b.text_color(skin.accent))
+                            .tooltip(format!("Narrow the file tree to the files {name} touched"))
+                            .on_click(cx.listener(move |a, _, _, c| {
+                                let next = (a.release_filter != Some(index)).then_some(index);
+                                a.filter_release(next, c)
+                            })),
+                    )
+                })
+                .child(
+                    Button::new(("release-open", index))
+                        .ghost()
+                        .xsmall()
+                        .cursor_pointer()
+                        .label("Open this step")
+                        .tooltip("Open this release's changes as a compare of their own")
+                        .on_click(cx.listener(move |a, _, _, c| a.open_release_step(index, c))),
+                );
+            if r.notes.is_some() {
+                actions = actions.child(
+                    Button::new(("release-notes", index))
+                        .ghost()
+                        .xsmall()
+                        .cursor_pointer()
+                        .label(if open_notes { "Hide notes" } else { "Notes" })
+                        .on_click(cx.listener(move |a, _, _, c| {
+                            if !a.release_notes.remove(&index) {
+                                a.release_notes.insert(index);
+                            }
+                            c.notify();
+                        })),
+                );
+            }
+            if let Some(url) = r.url.clone() {
+                actions = actions.child(
+                    Button::new(("release-link", index))
+                        .ghost()
+                        .xsmall()
+                        .cursor_pointer()
+                        .label("↗")
+                        .tooltip(url.clone())
+                        .accessibility_label("Open the release page")
+                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                );
+            }
+            card = card.child(actions);
+            if let Some(notes) = r.notes.as_deref().filter(|_| open_notes) {
+                card = card.child(
+                    TextView::markdown(format!("release-notes-{index}"), visible_markdown(notes))
+                        .selectable(true)
+                        .text_size(px(12.)),
+                );
+            }
+            timeline = timeline.child(card);
+        }
+        Some(timeline.into_any_element())
     }
 }
