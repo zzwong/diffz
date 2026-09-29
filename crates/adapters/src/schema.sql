@@ -5,6 +5,14 @@ CREATE TABLE IF NOT EXISTS snapshots (
  data TEXT NOT NULL,
  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+-- Additive schema: older binaries ignore these rows and still read snapshots.
+CREATE TABLE IF NOT EXISTS snapshot_blame (
+ snapshot_id TEXT NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+ path TEXT NOT NULL,
+ releases_key TEXT NOT NULL,
+ data TEXT NOT NULL,
+ PRIMARY KEY(snapshot_id, path, releases_key)
+);
 CREATE TABLE IF NOT EXISTS drafts (
  id TEXT PRIMARY KEY NOT NULL,
  snapshot_id TEXT NOT NULL REFERENCES snapshots(id),

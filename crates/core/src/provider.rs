@@ -151,9 +151,14 @@ pub trait WorkbenchServices: Send + Sync {
     ) -> Result<crate::review_details::BlameRead, ServiceError> {
         Err("Release attribution cannot be read here".into())
     }
-    /// Saves a snapshot with the release attribution read so far; what could not be read is
-    /// left out, so a later session asks again.
-    fn save_blame(&self, _snapshot: &Snapshot) -> Result<(), ServiceError> {
+    /// Saves only newly read release attribution. Unreadable paths stay in memory for this
+    /// session, so a later session asks again.
+    fn save_blame(
+        &self,
+        _snapshot: &SnapshotId,
+        _releases_key: &str,
+        _found: &crate::review_details::BlameRead,
+    ) -> Result<(), ServiceError> {
         Err("Release attribution cannot be saved here".into())
     }
     fn save_draft(&self, draft: Draft) -> Result<u64, ServiceError>;

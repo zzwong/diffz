@@ -674,7 +674,13 @@ mod loaded {
             .unwrap();
         assert_eq!(found.len(), 4);
         assert!(found.values().all(Option::is_none));
-        services.save_blame(&with_blame(&s, found)).unwrap();
+        services
+            .save_blame(
+                &s.id,
+                &diffz_core::review_details::releases_key(&s.overview.releases),
+                &found,
+            )
+            .unwrap();
         let back = open(resume());
         assert!(back.overview.blame.is_empty());
         // The next session reads them again. A path GitHub answers with no ranges is unavailable.
@@ -684,10 +690,16 @@ mod loaded {
             .unwrap();
         assert!(found["src/lib.rs"].as_ref().is_some_and(|b| !b.is_empty()));
         assert!(found["src/fmt.rs"].is_none());
-        let merged = with_blame(&back, found);
+        let merged = with_blame(&back, found.clone());
         let warning = merged.overview.unblamed_warning().unwrap();
         assert!(warning.contains("src/fmt.rs"), "{warning}");
-        services.save_blame(&merged).unwrap();
+        services
+            .save_blame(
+                &back.id,
+                &diffz_core::review_details::releases_key(&back.overview.releases),
+                &found,
+            )
+            .unwrap();
         let saved = open(resume()).overview.blame.clone();
         assert_eq!(
             saved.keys().collect::<Vec<_>>(),

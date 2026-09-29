@@ -67,6 +67,7 @@ pub(crate) enum SourceMode {
 }
 pub(crate) struct Active {
     pub snapshot: Arc<Snapshot>,
+    pub blame: diffz_core::review_details::BlameRead,
     pub drafts: Vec<Draft>,
     pub view: SavedView,
     pub view_ack: u64,

@@ -4,6 +4,7 @@ use diffz_core::{
     domain::*,
     provider::{Opened, RecentSession, ReviewRules, SavedView},
     review::*,
+    review_details::{BlameRead, Blamed, releases_key},
 };
 use fs2::FileExt;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -146,16 +147,41 @@ impl Store {
         }
         // Encoding a large patch must not hold up settings and other readers of the store.
         let data = compress(serde_json::to_string(s)?.as_bytes())?;
-        self.db()?.execute("INSERT INTO snapshots(id,title,data) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET title=excluded.title,data=excluded.data,updated_at=unixepoch()",params![s.id.0,s.title,data])?;
+        let mut c = self.db()?;
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM snapshot_blame WHERE snapshot_id=?1", [&s.id.0])?;
+        tx.execute("INSERT INTO snapshots(id,title,data) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET title=excluded.title,data=excluded.data,updated_at=unixepoch()",params![s.id.0,s.title,data])?;
+        tx.commit()?;
+        Ok(())
+    }
+    /// Writes only successful blame reads. The release key prevents a late write from an old
+    /// compare from being applied when a refresh changes release numbering under the same id.
+    pub fn save_blame(&self, id: &SnapshotId, key: &str, found: &BlameRead) -> Result<()> {
+        let mut c = self.db()?;
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for (path, ranges) in found {
+            let Some(ranges) = ranges else { continue };
+            let data = serde_json::to_string(ranges)?;
+            tx.execute(
+                "INSERT INTO snapshot_blame(snapshot_id,path,releases_key,data) VALUES(?1,?2,?3,?4)
+                 ON CONFLICT(snapshot_id,path,releases_key) DO UPDATE SET data=excluded.data",
+                params![id.0, path, key, data],
+            )?;
+        }
+        tx.execute(
+            "UPDATE snapshots SET updated_at=unixepoch() WHERE id=?1",
+            [&id.0],
+        )?;
+        tx.commit()?;
         Ok(())
     }
     pub fn snapshot(&self, id: &SnapshotId) -> Result<Snapshot> {
+        let c = self.db()?;
         let raw: rusqlite::types::Value =
-            self.db()?
-                .query_row("SELECT data FROM snapshots WHERE id=?1", [&id.0], |r| {
-                    r.get(0)
-                })?;
-        let s: Snapshot = match raw {
+            c.query_row("SELECT data FROM snapshots WHERE id=?1", [&id.0], |r| {
+                r.get(0)
+            })?;
+        let mut s: Snapshot = match raw {
             rusqlite::types::Value::Text(json) => serde_json::from_str(&json)?,
             rusqlite::types::Value::Blob(packed) => {
                 use std::io::Read;
@@ -167,6 +193,19 @@ impl Store {
         };
         if !s.verify_identity() {
             return Err("saved snapshot integrity check failed".into());
+        }
+        let key = releases_key(&s.overview.releases);
+        let mut q = c.prepare(
+            "SELECT path,data FROM snapshot_blame WHERE snapshot_id=?1 AND releases_key=?2",
+        )?;
+        let rows = q.query_map(params![id.0, key], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (path, data) = row?;
+            s.overview
+                .blame
+                .insert(path, Some(serde_json::from_str::<Vec<Blamed>>(&data)?));
         }
         Ok(s)
     }
