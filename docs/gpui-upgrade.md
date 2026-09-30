@@ -18,6 +18,8 @@ Focused magnification, anchored-menu, and exact-live-cache tests pass on both
 the 0.3.3 baseline and the port to 0.3.7. These are headless tests, not native
 screen-reader or high-refresh rendering validation. Oversized overlays can still
 exceed the visible viewport; fitting position alone does not resize their content.
+Diffz's four focused `magnify` library tests also pass with the polished 0.3.3
+dependency pin, including live cache retention at the zoom cap.
 
 ## Snapshot port
 
