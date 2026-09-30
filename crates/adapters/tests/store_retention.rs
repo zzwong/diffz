@@ -4,6 +4,7 @@ use diffz_core::{
     patch::{ParseLimits, parse_patch},
     provider::SavedView,
     review::*,
+    review_details::{BlameRead, Blamed, releases_key},
 };
 
 fn snapshot(i: usize) -> Snapshot {
@@ -81,6 +82,19 @@ fn pruning_keeps_recent_and_pending_work_and_removes_the_rest() {
     store.transition(&rejected, &GithubRules).unwrap();
     store.save_view(&s[2].id, &SavedView::default()).unwrap();
     store.hide_recent(Some(&s[2].id)).unwrap();
+    let mut blame = BlameRead::new();
+    blame.insert(
+        "a".into(),
+        Some(vec![Blamed {
+            start: 1,
+            end: 1,
+            release: 0,
+            commit: "abc".into(),
+        }]),
+    );
+    store
+        .save_blame(&s[2].id, &releases_key(&s[2].overview.releases), &blame)
+        .unwrap();
 
     assert_eq!(store.prune(2).unwrap(), 2);
     for kept in [0, 1, 4, 5] {
@@ -89,6 +103,15 @@ fn pruning_keeps_recent_and_pending_work_and_removes_the_rest() {
     for gone in [2, 3] {
         assert!(store.snapshot(&s[gone].id).is_err(), "s{gone}");
     }
+    let db = rusqlite::Connection::open(temp.path().join("review.sqlite3")).unwrap();
+    let remaining: i64 = db
+        .query_row(
+            "SELECT count(*) FROM snapshot_blame WHERE snapshot_id=?1",
+            [&s[2].id.0],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(remaining, 0);
     assert_eq!(store.drafts(&s[0].id).unwrap().len(), 1);
     assert_eq!(store.outbox().unwrap().len(), 2);
     assert_eq!(store.prune(2).unwrap(), 0);

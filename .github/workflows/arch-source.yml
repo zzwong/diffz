@@ -1,0 +1,62 @@
+name: Arch source
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/arch-source.yml'
+      - 'packaging/arch/PKGBUILD'
+      - 'scripts/package-arch.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-source-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container: archlinux:base-devel
+    env:
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - name: Install Git for checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The package recipe pins a source commit that may precede this ref.
+          fetch-depth: 0
+
+      - name: Verify the pinned source and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          source packaging/arch/PKGBUILD
+
+          if ! git cat-file -e "$_commit^{commit}"; then
+            echo "Arch source commit $_commit is not present in the checkout." >&2
+            exit 1
+          fi
+
+          # Keep the release workflow's source-coverage check on PRs that edit
+          # the recipe. Workflow-only changes still exercise checksum
+          # verification without requiring a new release pin.
+          if [[ "$GITHUB_EVENT_NAME" != pull_request || -z "$PR_BASE_SHA" ]] \
+            || ! git diff --quiet "$PR_BASE_SHA" HEAD -- packaging/arch/PKGBUILD; then
+            if ! git diff --quiet "$_commit" HEAD -- \
+              Cargo.toml Cargo.lock rust-toolchain.toml crates fixtures \
+              packaging/linux LICENSE THIRD_PARTY_NOTICES.md; then
+              echo 'Update the Arch source commit and checksum to include the application changes.' >&2
+              exit 1
+            fi
+          fi
+
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- bash scripts/package-arch.sh --prepare-only
