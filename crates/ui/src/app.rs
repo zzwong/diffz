@@ -88,6 +88,7 @@ pub(crate) struct PanelResizeState {
 pub(crate) struct Workbench {
     pub services: Arc<dyn WorkbenchServices>,
     pub registry: Arc<Registry>,
+    window_handle: AnyWindowHandle,
     pub active: Option<Active>,
     pub viewport: Option<Rc<RefCell<Viewport>>>,
     pub open_input: Entity<InputState>,
@@ -357,6 +358,7 @@ impl Workbench {
         let mut this = Self {
             services,
             registry,
+            window_handle: window.window_handle(),
             active: None,
             viewport: None,
             open_input,

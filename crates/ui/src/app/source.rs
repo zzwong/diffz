@@ -178,6 +178,7 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
                 .into();
         self.refresh_recent(cx);
         self.refresh_outbox(cx);
+        defer_scene_capacity_reclaim(replacing, self.window_handle, cx);
         if replacing {
             #[cfg(all(target_os = "linux", target_env = "gnu"))]
             self.trim_allocator_after_switch(cx);
@@ -548,6 +549,17 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         }
     }
 }
+fn defer_scene_capacity_reclaim(replacing: bool, window_handle: AnyWindowHandle, cx: &mut App) {
+    if !replacing {
+        return;
+    }
+    cx.defer(move |cx| {
+        let _ = window_handle.update(cx, |_, window, _| {
+            window.reclaim_scene_capacity();
+        });
+    });
+}
+
 /// Whether the composer holds text that `saved`, the body of the draft it edits, does not.
 fn composing(text: &str, saved: Option<&str>) -> bool {
     !text.trim().is_empty() && saved != Some(text)
@@ -574,8 +586,51 @@ fn mode_after_detection(chosen: &SourceMode, found: Option<&OpenRequest>) -> Sou
 }
 #[cfg(test)]
 mod tests {
-    use super::{SourceMode, composing, handoff_blocker, mode_after_detection};
+    use super::{
+        SourceMode, composing, defer_scene_capacity_reclaim, handoff_blocker, mode_after_detection,
+    };
     use diffz_core::{domain::ProviderId, provider::OpenRequest};
+    use gpui_kit::{
+        TestAppContext,
+        gpui::{Context, IntoElement, Render, Window, div},
+    };
+    use std::{cell::Cell, rc::Rc};
+
+    struct RenderCounter(Rc<Cell<usize>>);
+
+    impl Render for RenderCounter {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            self.0.set(self.0.get() + 1);
+            div()
+        }
+    }
+
+    #[gpui_kit::gpui::test]
+    fn source_replacement_defers_and_coalesces_scene_reclamation(cx: &mut TestAppContext) {
+        let render_count = Rc::new(Cell::new(0));
+        let window = cx.add_window({
+            let render_count = render_count.clone();
+            move |_, _| RenderCounter(render_count)
+        });
+        cx.run_until_parked();
+        let initial_renders = render_count.get();
+
+        cx.update(|cx| {
+            defer_scene_capacity_reclaim(false, window.into(), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(render_count.get(), initial_renders);
+
+        cx.update(|cx| {
+            // Several successful replacements in one effect cycle share one pending GPUI request.
+            defer_scene_capacity_reclaim(true, window.into(), cx);
+            defer_scene_capacity_reclaim(true, window.into(), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(render_count.get(), initial_renders + 1);
+        cx.run_until_parked();
+        assert_eq!(render_count.get(), initial_renders + 1);
+    }
 
     #[test]
     fn unsaved_comments_block_a_handoff() {
