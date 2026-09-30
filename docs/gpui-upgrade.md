@@ -24,7 +24,10 @@ exceed the visible viewport; fitting position alone does not resize their conten
 `zzwong/gpui-pre` branch `codex/gpui-pre-0.3.7` imports the published 0.3.7
 snapshot (Zed `1a28cff4b409169bac058bca40dfbfeb7621d19b`) and carries the
 magnification, exact-live-raster, and viewport/accessibility polish patches.
-The port adapts glyph caching to the upstream owned atlas-key API.
+The port adapts glyph caching to the upstream owned atlas-key API. All 377
+GPUI library tests and library Clippy with warnings denied pass with
+`test-support`. The standalone crate's existing SVG font fixtures were supplied
+through local-only include paths; those paths are not committed.
 
 This branch is not yet the dependency used by diffz. GPUI Kit 0.7.0 pins
 gpui-pre 0.3.7 and changes Root/window/overlay hosting, so upgrading only the
