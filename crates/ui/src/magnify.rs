@@ -20,16 +20,16 @@ pub(crate) fn pinch_enabled() -> bool {
 
 /// Magnifies the window for one pinch event. The point under the fingers stays put.
 pub(crate) fn pinch(event: &PinchEvent, window: &mut Window) {
-    if event.phase == TouchPhase::Started {
-        window.set_magnification_live(true);
-    }
     let scale = next_scale(window.magnification().scale, event.delta);
     window.magnify_about(event.position, scale);
-    if event.phase == TouchPhase::Ended {
-        window.set_magnification_live(false);
-        if settle(window.magnification().scale) == 1.0 {
-            window.reset_magnification();
-        }
+    // Keep live caches at the cap so reversing the pinch can reuse them.
+    window.set_magnification_live(matches!(
+        event.phase,
+        TouchPhase::Started | TouchPhase::Moved
+    ));
+    window.set_magnification_live_raster_exact(scale >= MAX_SCALE);
+    if event.phase == TouchPhase::Ended && settle(window.magnification().scale) == 1.0 {
+        window.reset_magnification();
     }
 }
 
@@ -99,7 +99,47 @@ fn parse_debug(value: &str) -> Option<(f32, Point<Pixels>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{MAX_SCALE, next_scale, parse_debug, pinch, settle};
+    use gpui_kit::{EmptyView, PinchEvent, Point, TestAppContext, TouchPhase, point, px};
+
+    #[gpui_kit::gpui::test]
+    fn pinch_cap_keeps_live_caches_until_the_gesture_ends(cx: &mut TestAppContext) {
+        cx.skip_drawing();
+        let handle = cx.add_window(|_, _| EmptyView);
+        handle
+            .update(cx, |_, window, _| {
+                let mut event = PinchEvent {
+                    delta: 1.0,
+                    phase: TouchPhase::Started,
+                    ..Default::default()
+                };
+                pinch(&event, window);
+                assert_eq!(window.magnification().scale, 2.0);
+                assert!(window.is_magnification_live());
+
+                event.phase = TouchPhase::Moved;
+                event.delta = 2.0;
+                pinch(&event, window);
+                assert_eq!(window.magnification().scale, MAX_SCALE);
+                assert!(window.is_magnification_live());
+
+                event.delta = 0.1;
+                pinch(&event, window);
+                assert_eq!(window.magnification().scale, MAX_SCALE);
+                assert!(window.is_magnification_live());
+
+                event.delta = -0.2;
+                pinch(&event, window);
+                assert_eq!(window.magnification().scale, 4.0);
+                assert!(window.is_magnification_live());
+
+                event.delta = 0.0;
+                event.phase = TouchPhase::Ended;
+                pinch(&event, window);
+                assert!(!window.is_magnification_live());
+            })
+            .unwrap();
+    }
 
     #[::core::prelude::v1::test]
     fn pinch_steps_grow_by_their_fraction_and_clamp() {
