@@ -26,10 +26,8 @@ pub(crate) fn pinch(event: &PinchEvent, window: &mut Window) {
     window.set_magnification_live(
         scale < MAX_SCALE && matches!(event.phase, TouchPhase::Started | TouchPhase::Moved),
     );
-    if event.phase == TouchPhase::Ended {
-        if settle(window.magnification().scale) == 1.0 {
-            window.reset_magnification();
-        }
+    if event.phase == TouchPhase::Ended && settle(window.magnification().scale) == 1.0 {
+        window.reset_magnification();
     }
 }
 
