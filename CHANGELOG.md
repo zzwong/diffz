@@ -9,6 +9,13 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Experimental, off by default: with `DIFFZ_PINCH_MAGNIFY=1`, a trackpad pinch
+  magnifies the whole window like Safari, up to 5x, around the point under your
+  fingers. Layout and the code font size stay as they are and text is redrawn
+  sharp at the new size. Scrolling pans the magnified view before it scrolls the
+  diff; pinching back out or pressing Escape returns to normal size.
+  `DIFFZ_DEBUG_MAGNIFY=2@400,300` opens the window already magnified. This uses
+  a patched `gpui-pre`, pinned in `Cargo.toml`.
 - `scripts/profile-macos.sh` measures memory and CPU on macOS over a fixed set of
   scenarios, each in a fresh process on a quiet machine, and compares a run
   against an earlier one. `docs/performance.md` describes the method and records

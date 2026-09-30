@@ -740,6 +740,7 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                 let result = cx.open_window(options_window, |window, cx| {
                     diffz_core::timing::mark("window");
                     window.set_window_title("diffz");
+                    crate::magnify::apply_debug_magnification(window);
                     let view = cx.new(|cx| {
                         Workbench::new(
                             services,

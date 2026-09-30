@@ -38,6 +38,8 @@ allow-git = [
     "https://github.com/gleam-lang/tree-sitter-gleam",
     # Temporary; see the [patch.crates-io] comment in Cargo.toml.
     "https://github.com/zzwong/gpui-pre-wgpu",
+    # Spike; see the gpui-pre line in Cargo.toml's [patch.crates-io].
+    "https://github.com/zzwong/gpui-pre",
     "https://github.com/zzwong/gpui-base",
     "https://github.com/zzwong/gpui-pre-macos",
 ]
