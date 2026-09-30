@@ -595,12 +595,14 @@ impl Workbench {
                     .with_code_background(skin.surface)
                     .with_border(skin.border)
                     .with_paragraph_gap(rems(0.8))
-                    .with_heading_base_font_size(px(16.))
-                    .with_heading_font_size(|level, base| match level {
-                        1 => base * 1.6,
-                        2 => base * 1.35,
-                        3 => base * 1.15,
-                        _ => base,
+                    .with_heading(|level| {
+                        let scale = match level {
+                            1 => 1.6,
+                            2 => 1.35,
+                            3 => 1.15,
+                            _ => 1.,
+                        };
+                        StyleRefinement::default().text_size(px(16.) * scale)
                     })
                     .with_code_block(
                         StyleRefinement::default()

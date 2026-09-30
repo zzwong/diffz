@@ -31,20 +31,42 @@ GPUI library tests and library Clippy with warnings denied pass with
 `test-support`. The standalone crate's existing SVG font fixtures were supplied
 through local-only include paths; those paths are not committed.
 
-This branch is not yet the dependency used by diffz. GPUI Kit 0.7.0 pins
-gpui-pre 0.3.7 and changes Root/window/overlay hosting, so upgrading only the
-core crate would not produce a compatible application dependency graph.
+The `codex/gpui-0.3.7` diffz branch uses this core port with GPUI Kit 0.7.0
+and the complete 0.3.7 snapshot family. Window creation uses Kit's new
+`open_window` helper, which owns Base Root/overlay hosting. Comment preview
+heading sizes are preserved through the new heading-style callback.
 
-## Before switching diffz to 0.3.7
+The supporting forks retain Vulkan-first startup, lazy frame-sized path
+textures, macOS display-link demand/idle handling, and inactive-window/idle
+caret handling. The caret port preserves upstream's newer 300 ms typing pause,
+stale-task guard, and stop cleanup. The vendored Linux snapshot retains the X11
+frame-demand patch alongside upstream's visibility, power, and recovery changes.
+Its exact patch applies cleanly to the published 0.3.7 source.
 
-- Port and verify Vulkan-first startup and on-demand path textures in WGPU.
-- Port and verify the vendored X11 frame-demand patch.
-- Port the macOS display-link idle fix and check it on macOS.
-- Check the caret-idle patch against GPUI Base 0.7.0; retain behavior not supplied
-  by the newer caret lifecycle fixes.
-- Upgrade GPUI Kit and its complete snapshot family together; migrate window
-  creation and overlay hosting according to the 0.7.0 release notes.
-- Run workspace tests, Clippy, native CI, and visible pinch/reversal checks.
+## Integration validation
+
+All-feature workspace tests and all-feature, all-target workspace Clippy pass,
+with warnings denied. The UI suite passes 95 tests, including all four zoom
+tests; its two benchmarks and the separate native desktop probe remain ignored.
+All 45 WGPU library tests pass, including the new lazy path-texture regression
+test. The standalone snapshot omits the upstream font fixtures and Naga shader
+test dependency; these were supplied locally without changing the published pin.
+All nine focused caret tests pass, including idle settling, input-driven resume,
+pause/blur cleanup, and inactive-window behavior. The standalone Base test
+setup redirects its README fixture locally and omits unused benchmark-only
+development dependencies; none of these setup changes are in the published pin.
+Formatting and diff checks pass. The dependency audit remains for CI because
+`cargo-deny` is not installed on this machine.
+The new headless WGPU regression test checks that quad-only frames allocate no
+path textures, the first path frame allocates them, and subsequent path frames
+resize them correctly after a quad-only resize.
+
+## Native follow-up
+
+- Run native macOS/Windows CI and visible pinch/reversal checks.
+- Check the macOS display-link patch on macOS; it cannot be tested natively here.
+- Validate X11 idle/wake behavior in a real Xorg session; setup is deferred on
+  this machine.
 - Check accessibility highlighting/clicks, IME positioning, menus, tooltips,
   resizing, window chrome, and scale-factor changes while magnified.
 
