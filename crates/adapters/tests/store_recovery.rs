@@ -2,6 +2,7 @@ use diffz_adapters::store::Store;
 use diffz_core::{
     domain::*,
     patch::{ParseLimits, parse_patch},
+    review_details::{BlameRead, Blamed, releases_key},
 };
 fn snapshot() -> Snapshot {
     Snapshot::new(
@@ -106,4 +107,74 @@ fn settings_are_global_and_survive_restart() {
     assert_eq!(s.wrap, Some(false));
     assert_eq!(s.font_size, 15.0);
     assert_eq!(s.theme, Some("tokyo-night".into()));
+}
+
+#[test]
+fn blame_rows_leave_snapshot_blob_unchanged_and_survive_restart() {
+    let d = tempfile::tempdir().unwrap();
+    let s = snapshot();
+    let key = releases_key(&s.overview.releases);
+    let mut found = BlameRead::new();
+    found.insert(
+        "a.md".into(),
+        Some(vec![Blamed {
+            start: 1,
+            end: 1,
+            release: 0,
+            commit: "abc".into(),
+        }]),
+    );
+    found.insert("unavailable.md".into(), None);
+    {
+        let db = Store::open(d.path()).unwrap();
+        db.put_snapshot(&s).unwrap();
+        let conn = rusqlite::Connection::open(d.path().join("review.sqlite3")).unwrap();
+        let before: Vec<u8> = conn
+            .query_row("SELECT data FROM snapshots WHERE id=?1", [&s.id.0], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        db.save_blame(&s.id, &key, &found).unwrap();
+        let after: Vec<u8> = conn
+            .query_row("SELECT data FROM snapshots WHERE id=?1", [&s.id.0], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(after, before);
+    }
+    let db = Store::open(d.path()).unwrap();
+    let loaded = db.snapshot(&s.id).unwrap();
+    assert_eq!(
+        loaded.overview.blame["a.md"].as_ref().unwrap()[0].commit,
+        "abc"
+    );
+    assert!(!loaded.overview.blame.contains_key("unavailable.md"));
+    db.save_blame(&s.id, "stale-release-list", &found).unwrap();
+    assert_eq!(db.snapshot(&s.id).unwrap().overview.blame.len(), 1);
+    db.put_snapshot(&s).unwrap();
+    assert!(db.snapshot(&s.id).unwrap().overview.blame.is_empty());
+}
+
+#[test]
+fn embedded_blame_from_an_older_database_remains_readable() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = snapshot();
+    s.overview.blame.insert(
+        "a.md".into(),
+        Some(vec![Blamed {
+            start: 1,
+            end: 1,
+            release: 0,
+            commit: "legacy".into(),
+        }]),
+    );
+    let db = Store::open(d.path()).unwrap();
+    db.put_snapshot(&s).unwrap();
+    assert_eq!(
+        db.snapshot(&s.id).unwrap().overview.blame["a.md"]
+            .as_ref()
+            .unwrap()[0]
+            .commit,
+        "legacy"
+    );
 }

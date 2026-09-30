@@ -255,9 +255,14 @@ impl WorkbenchServices for Services {
             })
             .collect())
     }
-    fn save_blame(&self, s: &Snapshot) -> std::result::Result<(), ServiceError> {
+    fn save_blame(
+        &self,
+        id: &SnapshotId,
+        releases_key: &str,
+        found: &diffz_core::review_details::BlameRead,
+    ) -> std::result::Result<(), ServiceError> {
         self.store
-            .put_snapshot(s)
+            .save_blame(id, releases_key, found)
             .map_err(|e| ServiceError::from(e.to_string()))
     }
     fn open(&self, r: OpenRequest, c: Cancellation) -> std::result::Result<Opened, ServiceError> {
@@ -404,6 +409,10 @@ impl WorkbenchServices for Services {
             s.patch.files.iter().map(|f| f.display_path()).collect();
         for r in &mut releases {
             r.files.retain(|f| paths.contains(&f.path));
+        }
+        if s.overview.releases != releases {
+            // Embedded blame from older databases uses indexes into the old list.
+            s.overview.blame.clear();
         }
         s.overview.releases = releases;
         for w in warnings {
@@ -920,9 +929,20 @@ mod tests {
             let (_temp, services) = services(Fake::default());
             let opened = open(&services);
             assert!(opened.snapshot.overview.releases.is_empty());
+            let mut with_legacy_blame = opened.snapshot.clone();
+            with_legacy_blame.overview.blame.insert(
+                "a.rs".into(),
+                Some(vec![diffz_core::review_details::Blamed {
+                    start: 1,
+                    end: 1,
+                    release: 999,
+                    commit: "old".into(),
+                }]),
+            );
             let s = services
-                .releases(&opened.snapshot, Cancellation::default())
+                .releases(&with_legacy_blame, Cancellation::default())
                 .unwrap();
+            assert!(s.overview.blame.is_empty());
             assert_eq!(s.id, opened.snapshot.id);
             // Files outside the compare are dropped, leaving v3 with none to narrow the tree to.
             let files: Vec<Vec<&str>> = s

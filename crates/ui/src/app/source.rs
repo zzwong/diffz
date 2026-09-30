@@ -95,6 +95,8 @@ impl Workbench {
             cx.notify();
             return;
         }
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        self.cancel_allocator_trim();
         self.open_cancel.cancel();
         let (cancel, pending) = match pending {
             Some((cancel, task)) => (cancel, Some(task)),
@@ -115,18 +117,26 @@ impl Workbench {
             };
             diffz_core::timing::mark("snapshot opened");
             let _=this.update(cx,|app,cx|{if app.open_generation!=generation{return}app.loading=false;match result{
-                Ok(opened)=>{if refresh&&app.active.as_ref().is_some_and(|a|a.snapshot.id!=opened.snapshot.id){app.offered=Some(opened);app.status="New revision available. The snapshot on screen has not changed.".into();}
-                    else if refresh{let snapshot=Arc::new(opened.snapshot);if let Some(a)=&mut app.active{a.snapshot=snapshot.clone();}
+                Ok(opened)=>{if refresh&&app.active.as_ref().is_some_and(|a|a.snapshot.id!=opened.snapshot.id){app.offered=Some(opened);app.status="New revision available. The snapshot on screen has not changed.".into();
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+if app.active.is_some(){app.trim_allocator_after_switch(cx);}}
+                    else if refresh{let mut refreshed=opened.snapshot;let blame=std::mem::take(&mut refreshed.overview.blame);let snapshot=Arc::new(refreshed);if let Some(a)=&mut app.active{a.snapshot=snapshot.clone();a.blame=blame;}
 if let Some(v)=&app.viewport{v.borrow_mut().snapshot=snapshot;}
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+if app.active.is_some(){app.trim_allocator_after_switch(cx);}
 // The release list is read again, so indexes into the old one no longer hold.
 app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);app.mark_releases();app.fetch_blame(cx);
 app.status="Source unchanged; comment list and review state refreshed without moving the view.".into();}
-                    else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>app.status=e.message,
+                    else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>{app.status=e.message;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
             }cx.notify();});
         }).detach();
         cx.notify();
     }
     pub fn install(&mut self, opened: Opened, cx: &mut Context<Self>) {
+        let mut opened = opened;
+        let blame = std::mem::take(&mut opened.snapshot.overview.blame);
         let replacing = self.active.is_some();
         let ack = opened.view.revision;
         let selected = opened
@@ -138,6 +148,7 @@ app.status="Source unchanged; comment list and review state refreshed without mo
         self.verdict = opened.view.review_verdict.unwrap_or(Verdict::Comment);
         self.active = Some(Active {
             snapshot: Arc::new(opened.snapshot),
+            blame,
             drafts: opened.drafts,
             view: opened.view,
             view_ack: ack,
@@ -168,7 +179,8 @@ app.status="Source unchanged; comment list and review state refreshed without mo
         self.refresh_recent(cx);
         self.refresh_outbox(cx);
         if replacing {
-            self.profile_trim_after_switch();
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            self.trim_allocator_after_switch(cx);
         }
     }
     pub fn filter_files(&mut self, cx: &mut Context<Self>) {
@@ -343,10 +355,12 @@ app.status="Source unchanged; comment list and review state refreshed without mo
                 }
                 app.releases_pending = None;
                 match result {
-                    Ok(snapshot) => {
+                    Ok(mut snapshot) => {
+                        let blame = std::mem::take(&mut snapshot.overview.blame);
                         let snapshot = Arc::new(snapshot);
                         if let Some(a) = &mut app.active {
                             a.snapshot = snapshot.clone();
+                            a.blame = blame;
                         }
                         if let Some(v) = &app.viewport {
                             v.borrow_mut().snapshot = snapshot;
@@ -381,6 +395,7 @@ app.status="Source unchanged; comment list and review state refreshed without mo
             .skip(start)
             .take(AHEAD + 1)
             .filter_map(|id| a.snapshot.file(id))
+            .filter(|f| !a.blame.contains_key(&f.display_path()))
             .filter(|f| diffz_core::review_details::blame_span(&a.snapshot.overview, f).is_some())
             .map(|f| f.display_path())
             .collect();
@@ -395,32 +410,29 @@ app.status="Source unchanged; comment list and review state refreshed without mo
             let read = from.clone();
             let cancelled = cancel.clone();
             let result = cx
-                .background_spawn(async move {
-                    let found = services.blame(read.clone(), paths, cancel)?;
-                    Ok::<_, ServiceError>(Arc::new(diffz_core::review_details::with_blame(
-                        &read, found,
-                    )))
-                })
+                .background_spawn(async move { services.blame(read, paths, cancel) })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.blame_busy = false;
                 match result {
-                    Ok(s)
+                    Ok(found)
                         if app.active.as_ref().is_some_and(|a| {
                             diffz_core::review_details::blame_applies(&a.snapshot, &from)
                         }) =>
                     {
-                        if let Some(v) = &app.viewport {
-                            v.borrow_mut().snapshot = s.clone();
-                        }
                         if let Some(a) = &mut app.active {
-                            a.snapshot = s.clone();
+                            a.blame.extend(found.clone());
                         }
                         app.mark_releases();
                         let services = app.services.clone();
+                        let id = from.id.clone();
+                        let releases_key =
+                            diffz_core::review_details::releases_key(&from.overview.releases);
                         cx.spawn(async move |this, cx| {
                             let saved = cx
-                                .background_spawn(async move { services.save_blame(&s) })
+                                .background_spawn(async move {
+                                    services.save_blame(&id, &releases_key, &found)
+                                })
                                 .await;
                             if let Err(e) = saved {
                                 let _ = this.update(cx, |app, cx| {
@@ -474,7 +486,11 @@ app.status="Source unchanged; comment list and review state refreshed without mo
         for row in file.hunks.iter().flat_map(|h| &h.rows) {
             let (key, mark) = match (row.kind, row.old_line, row.new_line) {
                 (RowKind::Added, _, Some(line)) => {
-                    let Some(b) = s.overview.row_release(&path, row) else {
+                    let Some(b) = diffz_core::review_details::row_release(&a.blame, &path, row)
+                    else {
+                        continue;
+                    };
+                    let Some(release) = releases.get(b.release) else {
                         continue;
                     };
                     (
@@ -483,7 +499,7 @@ app.status="Source unchanged; comment list and review state refreshed without mo
                             release: Some(b.release),
                             label: format!(
                                 "Changed in {} · {}",
-                                releases[b.release].name(head),
+                                release.name(head),
                                 &b.commit[..b.commit.len().min(7)]
                             ),
                             dim: focus.is_some_and(|f| f != b.release),

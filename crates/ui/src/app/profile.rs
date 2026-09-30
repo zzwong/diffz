@@ -21,17 +21,46 @@ pub(super) fn steps() -> Option<usize> {
 }
 
 impl Workbench {
-    /// Optional experiment for issue #70; normal launches never trim here.
-    pub(super) fn profile_trim_after_switch(&self) {
-        #[cfg(all(target_os = "linux", target_env = "gnu"))]
-        if std::env::var_os("DIFFZ_PROFILE_MALLOC_TRIM").is_some() {
-            unsafe extern "C" {
-                fn malloc_trim(pad: usize) -> i32;
+    /// Lets snapshot readers release their references before asking glibc to return free pages.
+    /// A newer replacement cancels this pending trim. The optional profile flag only enables
+    /// logging its return value; the production trim itself is always scheduled on Linux/glibc.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    pub(super) fn trim_allocator_after_switch(&mut self, cx: &mut Context<Self>) {
+        const TRIM_DELAY: Duration = Duration::from_secs(3);
+        self.cancel_allocator_trim();
+        let cancel = Cancellation::default();
+        self.allocator_trim_cancel = cancel.clone();
+        let profile_log = std::env::var_os("DIFFZ_PROFILE_MALLOC_TRIM").is_some();
+
+        cx.spawn(async move |_this, cx| {
+            smol::Timer::after(TRIM_DELAY).await;
+            if cancel.cancelled() {
+                return;
             }
-            // SAFETY: malloc_trim is glibc's process-wide allocator release operation.
-            let released = unsafe { malloc_trim(0) };
-            eprintln!("diffz-profile malloc_trim {released}");
-        }
+            let still_current = cancel.clone();
+            let _ = cx
+                .background_spawn(async move {
+                    if still_current.cancelled() {
+                        return;
+                    }
+                    unsafe extern "C" {
+                        fn malloc_trim(pad: usize) -> i32;
+                    }
+                    // SAFETY: malloc_trim is glibc's process-wide allocator release operation.
+                    let released = unsafe { malloc_trim(0) };
+                    if profile_log {
+                        eprintln!("diffz-profile malloc_trim {released}");
+                    }
+                })
+                .await;
+        })
+        .detach();
+    }
+
+    /// Prevent a pending trim from contending with a source load.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    pub(super) fn cancel_allocator_trim(&mut self) {
+        self.allocator_trim_cancel.cancel();
     }
     /// Redraw on each of the next `frames` frames while profiling.
     pub(super) fn saturate_frames(
