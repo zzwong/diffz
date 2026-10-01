@@ -17,7 +17,7 @@ use diffz_core::{
     theme::Theme as AppTheme,
 };
 use gpui_kit::component::{
-    Root, Theme, ThemeMode,
+    Theme, ThemeMode,
     input::{InputEvent, InputState, TextareaState},
 };
 use gpui_kit::{prelude::*, *};
@@ -736,41 +736,46 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
             };
             let handoffs = options.handoffs;
             cx.spawn(async move |cx| {
-                let mut workbench = None;
-                let result = cx.open_window(options_window, |window, cx| {
-                    diffz_core::timing::mark("window");
-                    window.set_window_title("diffz");
-                    crate::magnify::apply_debug_magnification(window);
-                    let view = cx.new(|cx| {
-                        Workbench::new(
-                            services,
-                            options.registry,
-                            options.font_family,
-                            options.theme,
-                            window,
-                            cx,
-                        )
-                    });
-                    match options.initial.zip(initial_task) {
-                        Some((request, task)) => {
-                            view.update(cx, |app, cx| {
-                                app.open_pending(request, false, Some((initial_cancel, task)), cx);
-                            });
-                            view.read(cx).diff_focus.clone().focus(window, cx);
+                let result = cx.update(|cx| {
+                    gpui_kit::open_window(options_window, cx, |window, cx| {
+                        diffz_core::timing::mark("window");
+                        window.set_window_title("diffz");
+                        crate::magnify::apply_debug_magnification(window);
+                        let view = cx.new(|cx| {
+                            Workbench::new(
+                                services,
+                                options.registry,
+                                options.font_family,
+                                options.theme,
+                                window,
+                                cx,
+                            )
+                        });
+                        match options.initial.zip(initial_task) {
+                            Some((request, task)) => {
+                                view.update(cx, |app, cx| {
+                                    app.open_pending(
+                                        request,
+                                        false,
+                                        Some((initial_cancel, task)),
+                                        cx,
+                                    );
+                                });
+                                view.read(cx).diff_focus.clone().focus(window, cx);
+                            }
+                            None => view.update(cx, |app, cx| {
+                                app.command(commands::Command::Open, window, cx);
+                                app.refresh_recent(cx);
+                            }),
                         }
-                        None => view.update(cx, |app, cx| {
-                            app.command(commands::Command::Open, window, cx);
-                            app.refresh_recent(cx);
-                        }),
-                    }
-                    view.update(cx, |app, cx| {
-                        app.saturate_frames(profile::SATURATE_FRAMES, window, cx)
-                    });
-                    workbench = Some(view.clone());
-                    cx.new(|cx| Root::new(view, window, cx))
+                        view.update(cx, |app, cx| {
+                            app.saturate_frames(profile::SATURATE_FRAMES, window, cx)
+                        });
+                        view
+                    })
                 });
-                let window = match result {
-                    Ok(window) => window,
+                let (window, workbench) = match result {
+                    Ok(result) => result,
                     Err(e) => {
                         eprintln!("could not create native window: {e}");
                         WINDOW_FAILED.store(true, std::sync::atomic::Ordering::Release);
@@ -778,7 +783,7 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                         return;
                     }
                 };
-                let (Some(handoffs), Some(workbench)) = (handoffs, workbench) else {
+                let Some(handoffs) = handoffs else {
                     return;
                 };
                 while let Ok(handoff) = handoffs.recv().await {

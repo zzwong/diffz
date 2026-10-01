@@ -34,7 +34,7 @@ fs2 = "=0.4.3"
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 libc = "0.2"
 tempfile = "3"
-gpui-kit = "=0.6.0"
+gpui-kit = "=0.7.0"
 
 smol = "2"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
@@ -44,18 +44,19 @@ unicode-linebreak = "0.1.5"
 # going upstream to zed-industries/zed. Remove this and the deny.toml allow-git entry
 # once a gpui-pre snapshot ships them.
 [patch.crates-io]
-gpui-pre-wgpu = { git = "https://github.com/zzwong/gpui-pre-wgpu", rev = "c74eb0aa61c314c94769f98c887cb3659cd24b3f" }
-# Spike: visual (pinch) magnification, branch diffz/visual-zoom. Not proposed upstream yet.
-gpui-pre = { git = "https://github.com/zzwong/gpui-pre", rev = "ee8aad5ffbfa82e6ffedc18eb032b199d6c15c82" }
+gpui-pre-wgpu = { git = "https://github.com/zzwong/gpui-pre-wgpu", rev = "f86535844a24dbb11e1adc49a701cc17d9233651" }
+# Temporary GPUI 0.3.7 port of visual magnification and viewport/accessibility polish.
+# The fork uses diffz/main for integrated patches; keep this review pin exact.
+gpui-pre = { git = "https://github.com/zzwong/gpui-pre", rev = "c4b1252378b02877d1f035d5fd1d06d0e8c4b1ab" }
 # Temporary: stops the input cursor blink after 5 s idle and in an inactive window (#69),
 # pending longbridge/gpui-kit. Remove it with its deny.toml allow-git entry.
-gpui-base = { git = "https://github.com/zzwong/gpui-base", rev = "218a2ee56442845f936bb9d180e555351fb4be82" }
-# Temporary X11 frame-demand fix for #88, from gpui-pre-linux 0.3.3.
-# The exact delta is in patches/gpui-pre-linux-0.3.3-x11-demand.patch.
+gpui-base = { git = "https://github.com/zzwong/gpui-base", rev = "1749e6876d9f96f6010467feb6ec45c68c4300e5" }
+# Temporary X11 frame-demand fix for #88, from gpui-pre-linux 0.3.7.
+# The exact delta is in patches/gpui-pre-linux-0.3.7-x11-demand.patch.
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 # Temporary: stops the idle macOS display link (#76); remove with its deny.toml entry
 # when gpui-pre-macos includes the demand-driven frame source.
-gpui-pre-macos = { git = "https://github.com/zzwong/gpui-pre-macos", rev = "35b9012109fff737f234ea95818de71001d4aee5" }
+gpui-pre-macos = { git = "https://github.com/zzwong/gpui-pre-macos", rev = "21665eb9da62f5e415cdb93fcb1810d33a886e72" }
 
 [profile.dev]
 debug = 1
