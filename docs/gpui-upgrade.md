@@ -1,89 +1,100 @@
-# GPUI upgrade and visual magnification
+# GPUI upgrade status
 
-## Current decision
+## Branch and revision policy
 
-Keep the Zed-derived `gpui-pre` stack while evaluating framework migrations
-separately. GPUI-CE supplies pinch input, but its current `Window` implementation
-does not supply diffz's whole-window visual magnification or live raster policy.
-GPUI Kit pins the Zed-derived snapshot, so CE is not a dependency-only replacement.
+Keep `zzwong/gpui-pre`'s `diffz/main` as the single integration branch. The
+accepted integration remains on the 0.3.3 snapshot; the 0.3.7 port is a review
+candidate and is not merged or released. Diffz pins the candidate by exact Git
+revision, `c4b1252378b02877d1f035d5fd1d06d0e8c4b1ab` (tree
+`dfca58e437addb1a58212fe2fb976e159e42067d`). The GPUI review branch head is
+`6477260ac00e66b030eff57d5826a3f79bc40592`; its tree matches the pinned code.
+GitHub automatically deletes merged PR branches; archive tags preserve the
+older 0.3.3 snapshots.
 
-## Zoom polish
+The former 0.3.3 work branches are preserved as archive tags:
 
-The `codex/magnification-polish` branch of `zzwong/gpui-pre` maps accessibility
-rectangles to magnified window/device coordinates and fits anchored menus and
-tooltips against the visible content viewport. Layout and accessibility click
-targets remain in content coordinates.
+- `archive/0.3.3-upstream-baseline` — `7746cf44a006f2320cf062818f352bcc6f9444e1`
+- `archive/0.3.3-visual-zoom` — `38a1ce299869b9e84967444a46755c043e8338aa`
+- `archive/0.3.3-live-pinch-exact-raster` — `ee8aad5ffbfa82e6ffedc18eb032b199d6c15c82`
+- `archive/0.3.3-magnification-polish` — `286f1e1313f21ebe213ca0b1f6fed390be7160c1`
 
-Focused magnification, anchored-menu, and exact-live-cache tests pass on both
-the 0.3.3 baseline and the port to 0.3.7. These are headless tests, not native
-screen-reader or high-refresh rendering validation. Oversized overlays can still
-exceed the visible viewport; fitting position alone does not resize their content.
-Diffz's four focused `magnify` library tests also pass with the polished 0.3.3
-dependency pin, including live cache retention at the zoom cap.
+The 0.3.7 port imports the published snapshot, then carries visual
+magnification, exact live-raster behavior, and viewport/accessibility polish.
+The diffz candidate also ports the app to GPUI Kit 0.7.0 and the complete 0.3.7
+snapshot family. Keep the candidate pin exact until the upgrade is accepted.
+The supporting pins preserve Vulkan-first startup, lazy path textures, idle
+caret handling, macOS display-link demand/idle handling, and the X11
+frame-demand patch.
 
-## Snapshot port
+## Validation record
 
-`zzwong/gpui-pre` branch `codex/gpui-pre-0.3.7` imports the published 0.3.7
-snapshot (Zed `1a28cff4b409169bac058bca40dfbfeb7621d19b`) and carries the
-magnification, exact-live-raster, and viewport/accessibility polish patches.
-The port adapts glyph caching to the upstream owned atlas-key API. All 377
-GPUI library tests and library Clippy with warnings denied pass with
-`test-support`. The standalone crate's existing SVG font fixtures were supplied
-through local-only include paths; those paths are not committed.
+On Linux, app commit `6affe7e9119b0034363a25b86cb24c2a2fabe3e7` (tree
+`5748dcf50404d8736e90cea693c348f29622cfb3`) passed:
 
-The `codex/gpui-0.3.7` diffz branch uses this core port with GPUI Kit 0.7.0
-and the complete 0.3.7 snapshot family. Window creation uses Kit's new
-`open_window` helper, which owns Base Root/overlay hosting. Comment preview
-heading sizes are preserved through the new heading-style callback.
+- `cargo fmt --all -- --check`
+- `cargo test --locked --workspace --all-features` (including 95 UI tests; two
+  benchmark tests and the separate native probe were ignored)
+- `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings`
+- `cargo build --locked --release -p diffz`
 
-The supporting forks retain Vulkan-first startup, lazy frame-sized path
-textures, macOS display-link demand/idle handling, and inactive-window/idle
-caret handling. The caret port preserves upstream's newer 300 ms typing pause,
-stale-task guard, and stop cleanup. The vendored Linux snapshot retains the X11
-frame-demand patch alongside upstream's visibility, power, and recovery changes.
-Its exact patch applies cleanly to the published 0.3.7 source.
+Four GitHub checks passed at this app commit. Automated test and lint checks
+run on Ubuntu; the macOS packaging job is not native runtime validation, and
+there is no Windows runtime result.
 
-## Integration validation
+The release binary is
+`/home/aaron/Projects/diffz/target/release/diffz`, SHA-256
+`89d9c331929616617f2c0e98acf4518fa32341c5c45fd639ad81055616a122e1`
+(63,528,368 bytes). It was built from the app commit above with the exact GPUI
+revision and tree recorded above.
 
-All-feature workspace tests and all-feature, all-target workspace Clippy pass,
-with warnings denied. The UI suite passes 95 tests, including all four zoom
-tests; its two benchmarks and the separate native desktop probe remain ignored.
-All 45 WGPU library tests pass, including the new lazy path-texture regression
-test. The standalone snapshot omits the upstream font fixtures and Naga shader
-test dependency; these were supplied locally without changing the published pin.
-All nine focused caret tests pass, including idle settling, input-driven resume,
-pause/blur cleanup, and inactive-window behavior. The standalone Base test
-setup redirects its README fixture locally and omits unused benchmark-only
-development dependencies; none of these setup changes are in the published pin.
-Formatting and diff checks pass. The dependency audit remains for CI because
-`cargo-deny` is not installed on this machine.
-The new headless WGPU regression test checks that quad-only frames allocate no
-path textures, the first path frame allocates them, and subsequent path frames
-resize them correctly after a quad-only resize.
+## Linux Wayland smoke
 
-## Native follow-up
+Two short native Wayland launches ran under Hyprland 0.56.2 in a leased unused
+workspace. Per-launch rules placed the client silently and suppressed focus
+activation; the user's active workspace and focused window were unchanged
+before and after, and the lease was released. Both clients were native Wayland
+(not Xwayland) and reported `first render`, `snapshot opened`, and
+`first content paint` without app errors:
 
-- Run native macOS/Windows CI and visible pinch/reversal checks.
-- Check the macOS display-link patch on macOS; it cannot be tested natively here.
-- Validate X11 idle/wake behavior in a real Xorg session; setup is deferred on
-  this machine.
-- Check accessibility highlighting/clicks, IME positioning, menus, tooltips,
-  resizing, window chrome, and scale-factor changes while magnified.
+- Normal launch: fixture F01, with `DIFFZ_DEBUG_MAGNIFY` unset; initial client
+  geometry was 1050×750 at (150, 90).
+- Magnified launch: fixture F01 with `DIFFZ_DEBUG_MAGNIFY=2@100,100` and
+  `DIFFZ_TIMING=1`; initial geometry was 1050×750 at (150, 90). A second
+  invocation handed off fixture F02 and returned `status: handed_off`. The
+  client remained alive. Resizing that client produced compositor geometry
+  900×650 at (225, 140).
 
-Any native diffz test on this machine must use a leased unused workspace and
-silent placement without changing the user's active workspace or focus.
+These off-workspace runs confirm startup, fixture open/handoff, and compositor
+geometry only. They do not verify presented pixels, visible magnification or
+pinch gestures, repaint/exposure behavior, or frame pacing. Logs and before,
+handoff, resize, and cleanup state captures are in
+`/home/aaron/.cache/diffz-gpui-upgrade/native-wayland-20261001T015702Z/`.
+
+## Remaining native checks
+
+- Verify visible magnification, pinch/reversal, repaint after exposure, and
+  scale-factor changes on a user-visible surface.
+- Check accessibility highlighting and clicks, IME positioning, menus,
+  tooltips, resizing, and window chrome while magnified.
+- Validate macOS display-link behavior on native macOS.
+- Check caret visibility immediately after programmatic focus of an active
+  input across platforms. This remains a follow-up; no fork-specific regression
+  is established.
+- Validate X11 idle/wake behavior in a real Xorg session. No Windows runtime
+  validation has been performed.
+
+Any further native diffz test on this machine must use a leased unused
+workspace and silent placement without changing the user's active workspace or
+focus.
 
 ## Upstream references
 
-- Pinch input: https://github.com/zed-industries/zed/pull/47351 and
+- Zed pinch input: https://github.com/zed-industries/zed/pull/47351 and
   https://github.com/zed-industries/zed/pull/51354
 - Atlas changes: https://github.com/zed-industries/zed/pull/64331
-- Renderer benchmark sessions: https://github.com/zed-industries/zed/pull/64109
-- Kit migration: https://github.com/longbridge/gpui-kit/releases/tag/v0.7.0
-- Community Edition: https://github.com/gpui-ce/gpui-ce
+- GPUI Kit 0.7.0: https://github.com/longbridge/gpui-kit/releases/tag/v0.7.0
+- GPUI Community Edition: https://github.com/gpui-ce/gpui-ce
 
-Introduce whole-window magnification upstream as a framework design proposal;
-do not describe existing pinch input support as new work. Include the cache
-lifetime/raster quality separation and benchmark limitations. Native platform
-validation and overlay sizing remain outstanding before claiming a fully
-production-ready upstream implementation.
+Treat whole-window magnification as a separate upstream design proposal:
+existing pinch input support is not itself new work, and native platform and
+visible interaction checks remain outstanding.
