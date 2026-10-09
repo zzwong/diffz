@@ -68,6 +68,27 @@ jobs:
             dist/SHA256SUMS
           if-no-files-found: error
 
+  # Start from the base image again so build dependencies cannot hide missing
+  # runtime requirements. Reuse exactly the RPM uploaded by the Linux build.
+  linux-smoke:
+    needs: linux
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the built Linux packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: diffz-linux-release
+          path: dist
+
+      - name: Install and smoke-test the RPM
+        run: bash scripts/smoke-linux-rpm.sh dist
+
   arch:
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
@@ -144,7 +165,7 @@ jobs:
 
   publish:
     if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
-    needs: [linux, arch, debian, macos]
+    needs: [linux, linux-smoke, arch, debian, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
