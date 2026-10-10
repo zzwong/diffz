@@ -37,23 +37,58 @@ processes started against the private state directories.
 | --- | --- | --- |
 | `pss_bytes` | `/proc/PID/smaps_rollup` | Proportional resident memory. Shared pages are split across processes. |
 | `private_dirty_bytes` | `smaps_rollup` | Private dirty CPU-mapped pages, including glibc arenas and other mutable regions. |
-| `gpu_memory_bytes` | `drm-memory-vram` plus `drm-memory-gtt` in `/proc/PID/fdinfo` | Driver-accounted GPU memory where exposed. This can include non-swapchain resources and omit compositor-owned buffers. Raw categories are in `drm_memory_bytes`. |
-| `heap_in_use_bytes` | glibc `mallinfo2().uordblks` | glibc allocations in use. Other allocators and direct mappings may not be included. |
-| `heap_arena_bytes` | glibc `mallinfo2().arena + hblkhd` | Memory obtained by glibc arenas and direct mapped blocks. The gap to in-use is allocator retention and fragmentation. |
+| `gpu_memory_bytes` | Resident DRM categories in `/proc/PID/fdinfo` | Sum of per-client resident bytes by region, deduplicating matching `(drm-pdev, drm-client-id)` descriptors. Legacy `drm-memory-*` keys normalize to `drm-resident-*`; this client-accounting total is not unique physical GPU bytes because shared buffers may be charged to multiple clients. |
+| `heap_in_use_bytes` | glibc `mallinfo2().uordblks` | glibc allocator in-use counter. It includes freed chunks retained in per-thread tcache and excludes mmap-backed bytes in `hblkhd`, so it is not exact application-live memory. |
+| `heap_arena_bytes` | glibc `mallinfo2().arena + hblkhd` | Legacy combined arena-plus-mmap counter. `arena`, `fordblks`, and `hblkhd` are separate raw fields in `heap.jsonl`; the difference between this combined value and `uordblks` does not isolate allocator retention or fragmentation. |
 | `cpu_percent` | `/proc/PID/stat` | Process user plus system CPU time over the sample period, where 100% is one core. |
 | `voluntary_csw_per_s` | `/proc/PID/status` | Voluntary context switches per second, a wakeup proxy. Nonvoluntary switches are also saved. |
+
+The DRM parser reads `drm-resident-<region>` and the deprecated amdgpu
+`drm-memory-<region>` alias. It emits per-region totals in `drm_memory_bytes`
+under canonical `drm-resident-<region>` keys and uses resident values only; it
+does not add `drm-total-*`, `drm-shared-*`, `drm-active-*`, or
+`drm-purgeable-*`, which are separate or overlapping views and are not additive
+to resident accounting. No resident keys means
+`gpu_memory_bytes` is null; present keys whose values are all zero produce
+zero. The kernel format accepts bytes with optional `KiB` or `MiB` units.
+
+The parser deduplicates descriptors by device and client ID, then adds distinct
+clients. The resulting client-accounting total is not unique physical GPU bytes:
+buffers shared between clients may be charged to each client, and aggregate
+fdinfo values cannot identify and deduplicate those shared buffers. When a
+resident-bearing descriptor lacks `drm-client-id`, it uses a conservative
+per-device, per-region maximum; descriptors without `drm-pdev` but with a
+client ID remain distinct by the globally unique client ID. If both device and
+client identity are missing, descriptors use one shared unknown-device bucket.
+This fallback avoids double-counting aliased file descriptors but can
+undercount independent clients; the sample and run record
+`gpu_memory_estimated: true` and should not be called an exact total. See the
+kernel's [DRM client usage statistics
+format](https://docs.kernel.org/gpu/drm-usage-stats.html#memory).
+Older profile summaries used per-category maxima and counted only VRAM and GTT;
+the corrected parser sums distinct clients and all resident regions. Keep the
+older GPU figures as historical observations, and rerun both sides with the
+corrected parser before making a GPU-memory A/B comparison.
 
 The heap sampler is compiled only on glibc Linux and starts only with
 `DIFFZ_PROFILE_HEAP` set. `heap.jsonl` and per-second `proc.json` are kept under
 each run's `raw/` directory. Missing DRM fdinfo or heap fields stay null in the
-summary; do not interpret them as zero. These figures overlap, so do not sum
-PSS, private dirty, DRM and heap. `/proc` cannot directly count swapchain
-images; check the wgpu surface configuration and driver traces before claiming
-a specific image count. GPUI's Wayland window requests Mailbox and falls back to
-FIFO if unsupported; its X11 window uses FIFO. The wgpu surface configuration
-requests maximum frame latency 2; its Vulkan backend asks for at least three
-swapchain images (`maximum_frame_latency + 1`). The actual compositor allocation
-needs a separate observation, as recorded in the Wayland baseline below.
+summary; do not interpret them as zero. The glibc counters are distinct:
+`arena` is system bytes held by allocator arenas, `fordblks` is free arena
+chunks reported by the allocator, `uordblks` is its in-use counter, and
+`hblkhd` is the separate mmap-backed byte total. Tcache-held frees are omitted from
+`fordblks` and therefore remain in `uordblks`; direct mmap bytes are reported
+separately in `hblkhd`. Do not infer retained/free arena bytes by subtracting
+`uordblks` from the combined `arena + hblkhd` summary field.
+
+These figures overlap, so do not sum PSS, private dirty, GPU resident and heap
+values. `/proc` cannot directly count swapchain images; check the wgpu surface
+configuration and driver traces before claiming a specific image count. GPUI's
+Wayland window requests Mailbox and falls back to FIFO if unsupported; its X11
+window uses FIFO. The wgpu surface configuration requests maximum frame latency
+2; its Vulkan backend asks for at least three swapchain images
+(`maximum_frame_latency + 1`). The actual compositor allocation needs a separate
+observation, as recorded in the Wayland baseline below.
 
 On Linux/glibc, diffz schedules glibc `malloc_trim(0)` on a background thread
 three seconds after an active snapshot is replaced. A later replacement cancels
@@ -77,7 +112,7 @@ The run used Vulkan and a real GPU. Numbers below are median decimal MB or
 percent of one CPU core; the complete min–max ranges and raw samples are in
 `target/profile/wayland-amd-7e2dc6f/` on the measurement host.
 
-| Scenario | PSS | Private dirty | DRM memory | glibc in use | glibc arena | CPU % | voluntary csw/s |
+| Scenario | PSS | Private dirty | GPU resident | allocator in-use counter | glibc arena + mmap | CPU % | voluntary csw/s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Open panel | 77.9 | 17.3 | 58.5 | 8.7 | 16.7 | 0.93 | 6.0 |
 | F01 | 87.6 | 26.1 | 58.5 | 14.0 | 26.5 | 0.07 | 0 |
@@ -92,35 +127,41 @@ percent of one CPU core; the complete min–max ranges and raw samples are in
 Unrelated Cargo builds started during parts of the run. The script flagged two
 of three Open panel, F01, patch, small compare and idle samples, and one of
 three large compare and hand-off samples as busy. CPU values above are the
-observed medians, not a quiet-machine CPU baseline. Private dirty, glibc and
-DRM totals stayed close across repeats. PSS moved substantially when shared
-pages were charged differently: the idle range was 70.9–130.8 MB while private
-dirty stayed within 65.7–65.9 MB. Repeat the CPU baseline when the host stays
-quiet for a full pass.
+observed medians, not a quiet-machine CPU baseline. Private dirty, glibc
+allocator counters and GPU-resident totals stayed close across repeats. PSS
+moved substantially when shared pages were charged differently: the idle range
+was 70.9–130.8 MB while private dirty stayed within 65.7–65.9 MB. Repeat the CPU
+baseline when the host stays quiet for a full pass.
 
 The Open panel woke about six times a second and used 0.83–0.93% CPU, consistent
 with the cursor-blink issue #69. Review views showed zero voluntary context
 switches in many 30-second samples and 0.03–0.13% CPU, supporting a parked
 Wayland frame loop rather than the macOS display-link problem in #76. A hand-off
-to F01 left 50.9 MB more private dirty memory, 5.2 MB more live glibc heap and
-61.4 MB more glibc arena than a fresh F01 process; it did not increase the DRM
-total. This motivates the #70 allocator experiment and the #71 cache work.
+to F01 left 50.9 MB more private dirty memory, 5.2 MB more allocator in-use
+counter and 61.4 MB more combined glibc arena-plus-mmap bytes than a fresh F01
+process; GPU residency did not increase. Because `uordblks` includes
+tcache-held frees and `hblkhd` is separate mmap accounting, these counters do
+not isolate retained arena memory. This motivates the #70 allocator experiment
+and the #71 cache work.
 
 An earlier diagnostic used the same binary with `--malloc-trim`: three
 hand-off repeats returned `malloc_trim 1` and lowered the medians to 48.0 MB
 private dirty and 101.7 MB PSS, from 77.1 MB and 130.2 MB without trim. The
-ranges were 47.6–49.1 MB private dirty and 101.5–103.0 MB PSS. Live heap stayed
-at 19.2 MB and DRM memory at 58.6 MB. The glibc arena stayed near 88 MB because
-its address space remained reserved while pages became clean or unmapped. This
-diagnostic informed the delayed production trim; verify its effect and
-navigation behavior with the A/B protocol before claiming a production result.
+ranges were 47.6–49.1 MB private dirty and 101.5–103.0 MB PSS. The allocator
+in-use counter stayed at 19.2 MB and GPU residency at 58.6 MB. The combined
+glibc arena-plus-mmap counter stayed near 88 MB; because `hblkhd` is separate
+mmap-backed accounting, that combined value cannot establish how many arena
+pages remained reserved. `malloc_trim` can also reduce resident pages without
+changing the arena's reported address-space size. This diagnostic informed the
+delayed production trim; verify its effect and navigation behavior with the A/B
+protocol before claiming a production result.
 
 The Vulkan code requests a 1360×900 window and up to two frames of latency.
 A one-off diagnostic build instrumented `wgpu-hal`'s Vulkan swapchain creation
 and queried the returned images. On this Wayland session, after an initial
 64×64 FIFO surface and a 1360×900 Mailbox surface, the settled window had
 **four 1700×1125 Mailbox images**. The final extent reflects the compositor's
-1.25 scale. The ordinary profile measured 58.4–58.6 MB of DRM memory, which
+1.25 scale. The ordinary profile measured 58.4–58.6 MB of GPU-resident memory, which
 also includes resources other than those four images. The diagnostic
 instrumentation was kept outside this repository and excluded from the baseline
 binary. Issues #69 and #71–#73 remain open at this baseline, so their proposed
@@ -130,10 +171,10 @@ There is no Xorg session on this host. An Xwayland diagnostic can test the X11
 client path, but the required real Xorg baseline remains open. For that
 diagnostic, `WAYLAND_DISPLAY=` forced GPUI's X11 backend while GNOME Wayland
 continued as compositor. The offline Open panel, F01 and large patch scenarios
-used 90.5–90.8 MB DRM memory, about 32 MB more than Wayland. The Vulkan
+used 90.5–90.8 MB GPU-resident memory, about 32 MB more than Wayland. The Vulkan
 diagnostic found **three 2720×1800 FIFO images** in the settled
 Xwayland window, after an initial 64×64 FIFO surface. The larger image extent
-accounts for much of the DRM memory difference; it reflects Xwayland's scaling
+accounts for much of the GPU-resident difference; it reflects Xwayland's scaling
 on this host and may differ in a real Xorg session. Three repeated
 Open panel runs showed 65.3–65.9 voluntary switches/s and 0.70–0.73% CPU;
 three F01 runs showed 60.13 switches/s and 0.10–0.17% CPU. The X11 backend's
