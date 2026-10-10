@@ -18,9 +18,9 @@ rust-version = "1.98"
 authors = ["Aaron Wong"]
 
 [workspace.dependencies]
-diffz-core = { path = "crates/core" }
-diffz-adapters = { path = "crates/adapters" }
-diffz-ui = { path = "crates/ui" }
+diffz-core = { path = "crates/core", version = "0.3.1" }
+diffz-adapters = { path = "crates/adapters", version = "0.3.1" }
+diffz-ui = { path = "crates/ui", version = "0.3.1" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = "0.11"
@@ -56,6 +56,9 @@ gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 # Temporary: stops the idle macOS display link (#76); remove with its deny.toml entry
 # when gpui-pre-macos includes the demand-driven frame source.
 gpui-pre-macos = { git = "https://github.com/zzwong/gpui-pre-macos", rev = "35b9012109fff737f234ea95818de71001d4aee5" }
+# The highlight and injection queries diffz uses are newer than the 1.0.0 release.
+# diffz-core's `gleam` feature depends on this patch.
+tree-sitter-gleam = { git = "https://github.com/gleam-lang/tree-sitter-gleam", rev = "c610c282ef73f830d80c1f0999dce8e83f024ef5" }
 
 [profile.dev]
 debug = 1
