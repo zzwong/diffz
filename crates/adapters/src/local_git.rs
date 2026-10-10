@@ -92,6 +92,9 @@ impl LocalGit {
         cancel: Cancellation,
     ) -> Result<PatchReport> {
         let mut args: Vec<OsString> = [
+            // The counted patch parser requires a prefix even on blank context rows.
+            "-c",
+            "diff.suppressBlankEmpty=false",
             "diff",
             "--no-color",
             "--no-ext-diff",
