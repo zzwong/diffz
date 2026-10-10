@@ -6,6 +6,7 @@ covers successful installation and the real installed binary/payload.
 """
 
 import hashlib
+from fnmatch import fnmatchcase
 import os
 from pathlib import Path
 import re
@@ -150,16 +151,27 @@ exit "${LDD_STATUS:-71}"
 
 
 class ReleaseWiringTests(unittest.TestCase):
+    def setUp(self):
+        self.workflow = (REPO / ".github/workflows/linux-release.yml").read_text()
+
+    def section(self, name, indent=0, source=None):
+        padding = " " * indent
+        match = re.search(
+            rf"(?ms)^{padding}{re.escape(name)}:\n(.*?)(?=^{padding}\S|\Z)",
+            self.workflow if source is None else source,
+        )
+        self.assertIsNotNone(match, name)
+        return match.group(1)
+
+    def job(self, name):
+        return self.section(name, indent=2, source=self.section("jobs"))
+
     def test_fresh_smoke_consumes_build_artifact_and_gates_existing_publish(self):
-        workflow = (REPO / ".github/workflows/linux-release.yml").read_text()
-
-        def job(name):
-            match = re.search(
-                rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  \S|\Z)", workflow)
-            self.assertIsNotNone(match, name)
-            return match.group(1)
-
-        smoke = job("linux-smoke")
+        build = self.job("linux")
+        self.assertIn("    container: fedora:44\n", build)
+        self.assertIn("cargo build --locked --release -p diffz\n", build)
+        self.assertIn("name: diffz-linux-release\n", build)
+        smoke = self.job("linux-smoke")
         self.assertIn("    needs: linux\n", smoke)
         self.assertIn("    container: fedora:44\n", smoke)
         self.assertIn("name: diffz-linux-release\n", smoke)
@@ -167,12 +179,62 @@ class ReleaseWiringTests(unittest.TestCase):
         self.assertNotIn("continue-on-error", smoke)
         self.assertNotIn("cargo ", smoke)
         self.assertNotIn("dnf ", smoke)
-        publish = job("publish")
+        publish = self.job("publish")
         needs = re.search(r"(?m)^    needs: \[([^\]]+)\]$", publish)
         self.assertIsNotNone(needs)
         self.assertIn("linux-smoke", [name.strip() for name in needs.group(1).split(",")])
         self.assertNotIn("always()", publish)
-        self.assertEqual(workflow.count('gh release create '), 1)
+        self.assertEqual(self.workflow.count('gh release create '), 1)
+
+    def test_pull_requests_cover_fedora_build_and_packaging_inputs(self):
+        events = self.section("on")
+        pull_request = self.section("pull_request", indent=2, source=events)
+        paths = re.findall(r"(?m)^      - '([^']+)'$", pull_request)
+        for path in (
+            ".github/workflows/linux-release.yml", "Cargo.toml", "Cargo.lock",
+            "rust-toolchain.toml", "crates/app/src/main.rs",
+            "vendor/gpui-pre-linux/src/lib.rs", "fixtures/example.patch",
+            "packaging/linux/rpm/diffz.spec",
+            "packaging/linux/io.github.zzwong.Diffz.desktop",
+            "scripts/package-linux-rpm.sh", "scripts/package-linux-tarball.sh",
+            "scripts/stage-linux.sh", "scripts/smoke-linux-rpm.sh",
+            "scripts/tests/test_smoke_linux_rpm.py", "docs/linux.md",
+            "LICENSE", "THIRD_PARTY_NOTICES.md",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(any(fnmatchcase(path, pattern) for pattern in paths))
+        self.assertNotIn("pull_request_target", events)
+
+    def test_pull_requests_only_run_existing_read_only_fedora_jobs(self):
+        self.assertEqual(self.section("permissions").strip(), "contents: read")
+        for name in ("linux", "linux-smoke"):
+            with self.subTest(job=name):
+                job = self.job(name)
+                self.assertNotRegex(job, r"(?m)^    (if|permissions):")
+                self.assertIn("          persist-credentials: false\n", job)
+                self.assertNotIn("secrets.", job)
+        for name in ("arch", "debian", "macos"):
+            with self.subTest(job=name):
+                self.assertIn(
+                    "    if: ${{ github.event_name != 'pull_request' }}\n",
+                    self.job(name),
+                )
+
+    def test_publication_remains_exclusive_to_version_tag_pushes(self):
+        events = self.section("on")
+        self.assertEqual(
+            self.section("push", indent=2, source=events).strip(),
+            "tags:\n      - 'v*'",
+        )
+        self.assertIn("  workflow_dispatch:\n", events)
+        publish = self.job("publish")
+        self.assertIn(
+            "    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}\n",
+            publish,
+        )
+        self.assertIn("    needs: [linux, linux-smoke, arch, debian, macos]\n", publish)
+        self.assertIn("      contents: write\n", publish)
+        self.assertEqual(self.workflow.count("contents: write"), 1)
 
 
 if __name__ == "__main__":

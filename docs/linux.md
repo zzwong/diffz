@@ -49,6 +49,11 @@ A failed smoke job blocks the existing GitHub release publication. This is
 headless installation coverage; GPU rendering and live Wayland/X11 behavior
 still need separate desktop validation.
 
+Pull requests that change Fedora build or packaging inputs run these same
+build and smoke jobs. They upload workflow artifacts for inspection, skip the
+other release platforms, and cannot publish a release. Publication still runs
+only for version-tag pushes after all release jobs pass.
+
 The smoke helper is intended for a disposable Fedora container: it installs
 the RPM into the running system. Its regression tests use mocked package
 commands and do not install packages or compile Diffz:
