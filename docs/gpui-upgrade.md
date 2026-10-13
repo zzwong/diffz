@@ -26,6 +26,20 @@ The supporting pins preserve Vulkan-first startup, lazy path textures, idle
 caret handling, macOS display-link demand/idle handling, and the X11
 frame-demand patch.
 
+## October 13 refresh
+
+The candidate now includes main's 0.4.0 version bump. The release notes record
+the GPUI upgrade, and the Arch source recipe is refreshed against this candidate
+so its pinned archive includes the upgraded application tree.
+
+Visible Linux checks still require a native computer-use surface. In this
+chat, CUA reports only in-app browser and MCP Apps browser surfaces;
+`cua.listApps` is unavailable. The absence of native app control prevents new
+rendered interaction verification. Automated CI does not establish that result.
+Actual trackpad pinch input also requires hardware or an input tool that can
+send the native gesture; startup magnification exercises only the magnified
+rendering and interaction state.
+
 ## October 12 refresh
 
 Code commit `a3cd938` merges current main into this candidate while retaining
