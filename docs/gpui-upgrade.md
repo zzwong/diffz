@@ -40,6 +40,22 @@ Actual trackpad pinch input also requires hardware or an input tool that can
 send the native gesture; startup magnification exercises only the magnified
 rendering and interaction state.
 
+After restarting into ChatGPT 26.1007.21434, this chat exposed the generic
+Node REPL. The bundled `@oai/cua` initializer connected to the browser surfaces
+but returned `Native apps: UnreachableCaseError`; native window discovery
+through both `@oai/sky` and the initialized CUA computer client returned
+`Trusted RPC service is not configured: sky`. No native window was launched.
+
+CI at `c89dc22` passed the native, packaging, Arch source, and font jobs but
+failed the core job's retention test at its expected `s4` snapshot. The fixture
+assumed that insertion and a later blame write shared a wall-clock second;
+`save_blame` advances `updated_at`, which can instead promote that snapshot
+into the recent window. Giving the blame snapshot a timestamp one second newer
+reproduced the exact failure. Commit `5b395c3` fixes only the fixture by assigning
+an explicit oldest-to-newest timestamp order before pruning. The retention
+suite, full adapter suite, and strict workspace Clippy pass locally. Evidence is
+in `/home/aaron/.local/state/diffz/evidence/102-2026-10-13/`.
+
 ## October 12 refresh
 
 Code commit `a3cd938` merges current main into this candidate while retaining
