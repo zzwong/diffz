@@ -29,6 +29,12 @@ SCENARIOS = [
 METRICS = ("pss_bytes", "private_dirty_bytes", "gpu_memory_bytes", "heap_in_use_bytes",
            "heap_arena_bytes", "cpu_percent", "voluntary_csw_per_s", "nonvoluntary_csw_per_s")
 ROOT = Path(__file__).resolve().parent.parent
+DRM_MEMORY_RE = re.compile(
+    r"^(drm-(?:resident|memory)-([\w-]+)):\s*(\d+)\s*(KiB|MiB|B)?\s*$", re.M
+)
+DRM_PDEV_RE = re.compile(r"^drm-pdev:\s*([^\s]+)\s*$", re.M)
+DRM_CLIENT_ID_RE = re.compile(r"^drm-client-id:\s*(\d+)\s*$", re.M)
+DRM_UNIT_BYTES = {"KiB": 1024, "MiB": 1024 * 1024, "B": 1, "": 1}
 
 
 def command(*args):
@@ -67,6 +73,66 @@ def make_patch(path):
     path.write_text("\n".join(out) + "\n")
 
 
+def parse_drm_memory(fdinfo_texts):
+    """Return resident bytes, canonical per-region totals, and whether identity is estimated.
+
+    Duplicate descriptors for an identified DRM client are collapsed by
+    (drm-pdev, drm-client-id). If a device has memory-bearing descriptors with
+    no client ID, per-device/category maxima are used for that whole device:
+    this avoids counting aliased FDs twice but can undercount distinct clients.
+    """
+    by_device = {}
+    for info in fdinfo_texts:
+        pdev_match = DRM_PDEV_RE.search(info)
+        client_match = DRM_CLIENT_ID_RE.search(info)
+        pdev = pdev_match.group(1) if pdev_match else None
+        client_id = client_match.group(1) if client_match else None
+        legacy_regions = {}
+        resident_regions = {}
+        for key, region, value, unit in DRM_MEMORY_RE.findall(info):
+            amount = int(value) * DRM_UNIT_BYTES[unit or ""]
+            # drm-memory-* is the deprecated amdgpu alias for the corresponding
+            # drm-resident-* key. Prefer the modern spelling when both occur;
+            # max() only collapses repeated observations of the same spelling.
+            values = resident_regions if key.startswith("drm-resident-") else legacy_regions
+            values[region] = max(values.get(region, 0), amount)
+        regions = legacy_regions
+        regions.update(resident_regions)
+        if regions:
+            by_device.setdefault(pdev, []).append((client_id, regions))
+
+    if not by_device:
+        return None, {}, None
+
+    totals = {}
+    estimated = False
+    for clients in by_device.values():
+        if any(client_id is None for client_id, _ in clients):
+            # Without drm-client-id there is no generic way to tell separate
+            # clients from duplicate FDs. Use conservative per-region maxima.
+            estimated = True
+            device_totals = {}
+            for _, regions in clients:
+                for region, amount in regions.items():
+                    device_totals[region] = max(device_totals.get(region, 0), amount)
+            client_totals = [device_totals]
+        else:
+            # Multiple descriptors can refer to the same open DRM file.
+            by_client = {}
+            for client_id, regions in clients:
+                client_totals = by_client.setdefault(client_id, {})
+                for region, amount in regions.items():
+                    client_totals[region] = max(client_totals.get(region, 0), amount)
+            client_totals = by_client.values()
+
+        for regions in client_totals:
+            for region, amount in regions.items():
+                totals[region] = totals.get(region, 0) + amount
+
+    categories = {f"drm-resident-{region}": amount for region, amount in sorted(totals.items())}
+    return sum(totals.values()), categories, estimated
+
+
 def read_proc(pid):
     root = Path(f"/proc/{pid}")
     stat = (root / "stat").read_text().rsplit(")", 1)[1].split()
@@ -74,20 +140,18 @@ def read_proc(pid):
     rollup = (root / "smaps_rollup").read_text()
     fields = {k: int(v) * 1024 for k, v in re.findall(r"^(Pss|Private_Dirty|Rss):\s+(\d+) kB", rollup, re.M)}
     switches = {k: int(v) for k, v in re.findall(r"^(voluntary_ctxt_switches|nonvoluntary_ctxt_switches):\s+(\d+)", status, re.M)}
-    gpu = {}
+    fdinfo_texts = []
     for fd in (root / "fdinfo").iterdir():
         try:
             info = fd.read_text()
         except (OSError, PermissionError):
             continue
-        for key, value, unit in re.findall(r"^(drm-memory-[\w-]+):\s+(\d+)\s*(KiB|MiB|B)?", info, re.M):
-            # Several handles can report the same DRM client. Keep each category's maximum.
-            amount = int(value) * {"KiB": 1024, "MiB": 1024 * 1024, "B": 1, "": 1}[unit]
-            gpu[key] = max(gpu.get(key, 0), amount)
-    gpu_total = sum(gpu[k] for k in ("drm-memory-vram", "drm-memory-gtt") if k in gpu)
+        fdinfo_texts.append(info)
+    gpu_total, gpu_categories, gpu_estimated = parse_drm_memory(fdinfo_texts)
     return {"pss_bytes": fields.get("Pss"), "private_dirty_bytes": fields.get("Private_Dirty"),
-            "rss_bytes": fields.get("Rss"), "gpu_memory_bytes": gpu_total if any(k in gpu for k in ("drm-memory-vram", "drm-memory-gtt")) else None,
-            "drm_memory_bytes": gpu, "cpu_ticks": int(stat[11]) + int(stat[12]),
+            "rss_bytes": fields.get("Rss"), "gpu_memory_bytes": gpu_total,
+            "drm_memory_bytes": gpu_categories, "gpu_memory_estimated": gpu_estimated,
+            "cpu_ticks": int(stat[11]) + int(stat[12]),
             "voluntary_csw": switches.get("voluntary_ctxt_switches"),
             "nonvoluntary_csw": switches.get("nonvoluntary_ctxt_switches")}
 
@@ -219,6 +283,7 @@ def run_one(bin_path, spec, run, out, temp, idle_seconds, sample_seconds, malloc
             result = {
                 "pss_bytes": end["pss_bytes"], "private_dirty_bytes": end["private_dirty_bytes"],
                 "gpu_memory_bytes": end["gpu_memory_bytes"], "drm_memory_bytes": end["drm_memory_bytes"],
+                "gpu_memory_estimated": end["gpu_memory_estimated"],
                 "heap_in_use_bytes": h.get("uordblks"), "heap_arena_bytes": h.get("arena", 0) + h.get("hblkhd", 0) if h else None,
                 "cpu_percent": round(100 * (end["cpu_ticks"] - start["cpu_ticks"]) / ticks / sample_seconds, 3),
                 "voluntary_csw_per_s": round((end["voluntary_csw"] - start["voluntary_csw"]) / sample_seconds, 2),
@@ -256,6 +321,7 @@ def summarize(out, env):
         scenarios[name] = {
             "metrics": {key: spread([r.get(key) for r in runs]) for key in METRICS},
             "runs": runs,
+            "gpu_memory_estimated_runs": sum(r.get("gpu_memory_estimated") is True for r in runs),
             "failed_runs": sum("failed" in r for r in runs),
             "settle_timeouts": sum(bool(r.get("settle_timeout")) for r in runs),
             "busy_samples": sum(bool(r.get("busy")) for r in runs),
@@ -266,9 +332,14 @@ def summarize(out, env):
             ("failed_runs", "runs failed"), ("settle_timeouts", "settle timeouts"),
             ("busy_samples", "busy sample"), ("short_steps", "runs stepped short"),
             ("failed_handoffs", "hand-offs failed")) if scenarios[name][key]]
+        if scenarios[name]["gpu_memory_estimated_runs"]:
+            count = scenarios[name]["gpu_memory_estimated_runs"]
+            scenarios[name]["flags"].append(
+                f"{count} run{'s' if count != 1 else ''} use conservative DRM identity fallback"
+            )
     summary = {"env": env, "scenarios": scenarios}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-    lines = [f"# diffz Linux profile: {env['label']}", "", f"Commit `{env['git_sha'][:12]}`, {env['session_type']} on {env['desktop']}, {env['gpu']}, {env['driver']}; {env['repeat']} runs.", "", "MB are decimal; medians with min–max.", "", "| Scenario | PSS MB | Private dirty MB | DRM memory MB | Heap in use MB | Heap arena MB | CPU % | voluntary csw/s | runs |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    lines = [f"# diffz Linux profile: {env['label']}", "", f"Commit `{env['git_sha'][:12]}`, {env['session_type']} on {env['desktop']}, {env['gpu']}, {env['driver']}; {env['repeat']} runs.", "", "MB are decimal; medians with min–max.", "", "| Scenario | PSS MB | Private dirty MB | GPU resident MB | Allocator in-use MB | glibc arena + mmap MB | CPU % | voluntary csw/s | runs |", "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for name, row in scenarios.items():
         cells = []
         for key in ("pss_bytes", "private_dirty_bytes", "gpu_memory_bytes", "heap_in_use_bytes", "heap_arena_bytes", "cpu_percent", "voluntary_csw_per_s"):
@@ -284,8 +355,8 @@ def summarize(out, env):
 
 def compare(old, new):
     print(f"Compare: {old['env']['label']} → {new['env']['label']}")
-    labels = ("PSS MB", "private dirty MB", "DRM memory MB", "heap in use MB",
-              "heap arena MB", "CPU %", "voluntary csw/s", "nonvoluntary csw/s")
+    labels = ("PSS MB", "private dirty MB", "GPU resident MB", "allocator in-use MB",
+              "glibc arena + mmap MB", "CPU %", "voluntary csw/s", "nonvoluntary csw/s")
     print("Δ is new − old medians; ≈ marks a change inside the old min–max range.\n")
     print("| Scenario | " + " | ".join(labels) + " | runs (old → new) | flags |")
     print("| --- | " + " | ".join("---:" for _ in METRICS) + " | ---: | --- |")

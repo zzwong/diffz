@@ -27,7 +27,7 @@ tempfile = { workspace = true }
 [features]
 default = ["desktop", "syntax", "wasm"]
 desktop = ["dep:diffz-ui", "dep:smol"]
-syntax = ["diffz-core/syntax", "diffz-ui?/syntax"]
+syntax = ["diffz-core/syntax", "diffz-core/gleam", "diffz-ui?/syntax"]
 wasm = ["syntax", "diffz-core/wasm"]
 
 [[bin]]

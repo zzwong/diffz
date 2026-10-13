@@ -360,6 +360,7 @@ mod enabled {
         tree_sitter_heex::INJECTIONS_QUERY,
         ""
     );
+    #[cfg(feature = "gleam")]
     grammar!(
         GLEAM,
         build_gleam,
@@ -391,6 +392,7 @@ mod enabled {
             "css" => Some(&CSS),
             "ex" | "exs" => Some(&ELIXIR),
             "heex" => Some(&HEEX),
+            #[cfg(feature = "gleam")]
             "gleam" => Some(&GLEAM),
             _ => None,
         }
@@ -642,6 +644,7 @@ mod tests {
             ("a.css", "div { color: red }"),
             ("a.ex", "defmodule A do\n  def f, do: 1\nend"),
             ("a.heex", "<div :if={@x}>hi</div>"),
+            #[cfg(feature = "gleam")]
             ("a.gleam", "pub fn add(a: Int) -> Int { a }"),
         ];
         for (path, source) in samples {

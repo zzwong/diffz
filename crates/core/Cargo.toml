@@ -4,14 +4,17 @@ description = "Patch parsing, snapshot state, and the review model"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-publish.workspace = true
+publish = true
 repository.workspace = true
 homepage.workspace = true
-readme.workspace = true
+readme = "README.md"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 authors.workspace = true
+
+[package.metadata.docs.rs]
+features = ["syntax"]
 
 [dependencies]
 serde = { workspace = true }
@@ -43,8 +46,11 @@ syntax = [
     "dep:tree-sitter-css",
     "dep:tree-sitter-elixir",
     "dep:tree-sitter-heex",
-    "dep:tree-sitter-gleam",
 ]
+# Separate from `syntax` because the grammar needs a newer commit than its only
+# crates.io release; the workspace patches it in, so this feature does not build
+# against the published 1.0.0.
+gleam = ["syntax", "dep:tree-sitter-gleam"]
 # Builds wasmtime, which needs cmake.
 wasm = ["syntax", "tree-sitter/wasm", "dep:wasmtime"]
 
@@ -112,6 +118,5 @@ optional = true
 version = "0.8"
 optional = true
 [dependencies.tree-sitter-gleam]
-git = "https://github.com/gleam-lang/tree-sitter-gleam"
-rev = "c610c282ef73f830d80c1f0999dce8e83f024ef5"
+version = "1.0.0"
 optional = true

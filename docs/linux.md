@@ -39,6 +39,29 @@ Packages and the checksum manifest are written to `dist/`. Verify each
 downloaded or copied package with `sha256sum -c --ignore-missing SHA256SUMS`
 from that directory.
 
+The release workflow builds Fedora 44 x86_64 packages, then installs the
+checksummed RPM in a separate, fresh Fedora 44 container. DNF resolves the
+RPM's required dependencies with weak dependencies disabled; no build tools
+or extra runtime libraries are installed by the smoke job. The gate checks
+linked libraries, `--version`, `--help`, patch inspection, and the installed
+desktop entry, AppStream metadata, icon, license, and third-party notices.
+A failed smoke job blocks the existing GitHub release publication. This is
+headless installation coverage; GPU rendering and live Wayland/X11 behavior
+still need separate desktop validation.
+
+Pull requests that change Fedora build or packaging inputs run these same
+build and smoke jobs. They upload workflow artifacts for inspection, skip the
+other release platforms, and cannot publish a release. Publication still runs
+only for version-tag pushes after all release jobs pass.
+
+The smoke helper is intended for a disposable Fedora container: it installs
+the RPM into the running system. Its regression tests use mocked package
+commands and do not install packages or compile Diffz:
+
+```sh
+python3 scripts/tests/test_smoke_linux_rpm.py -v
+```
+
 ### Debian and Ubuntu
 
 Debian and Ubuntu use the same application code and `.deb` packaging helper.
