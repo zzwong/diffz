@@ -26,6 +26,33 @@ The supporting pins preserve Vulkan-first startup, lazy path textures, idle
 caret handling, macOS display-link demand/idle handling, and the X11
 frame-demand patch.
 
+## October 12 refresh
+
+Code commit `a3cd938` merges current main into this candidate while retaining
+its exact GPUI 0.3.7 / Kit 0.7.0 patch pins. It preserves rusqlite 0.40.2,
+thiserror 2.0.21, the Wasmtime 48.0.5 security refresh, Rust 1.99.0, and the
+Gleam grammar patch needed by the published core feature layout.
+
+On Linux at that code commit, formatting, the locked all-feature application
+compile, all-feature workspace tests, and strict all-target Clippy passed.
+The first parallel test run failed
+`handoff::tests::stale_socket_is_removed_when_the_lock_is_free` with
+`Unanswered` instead of `NotRunning`. The isolated test, a serial workspace
+run, and a subsequent normal parallel workspace run all passed. The cause is
+not established; no handoff code was changed. Logs are retained at
+`/home/aaron/.local/state/diffz/evidence/102-2026-10-12/`.
+
+Visible UI tests remain pending at the user's request. This chat exposed only
+browser computer-use surfaces, with no native app control or Agent Workspace
+MCP tools. No new native window was launched, and no new rendered interaction
+result is claimed.
+
+Dependabot #107 now targets Kit 0.7.1. Its upstream release pins the GPUI family
+to 0.3.8, so it cannot use this candidate's 0.3.7 patches as a version-only
+change. The inspected fork branches contain the 0.3.3 and 0.3.7 ports, with no
+prepared 0.3.8 port. Port and validate the patched stack before adopting it.
+See https://github.com/longbridge/gpui-kit/releases/tag/v0.7.1.
+
 ## Validation record
 
 On Linux, app commit `6affe7e9119b0034363a25b86cb24c2a2fabe3e7` (tree
