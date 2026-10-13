@@ -1,0 +1,215 @@
+# Based on gpui-pre-linux 0.3.7 (Zed snapshot 1a28cff4b409169bac058bca40dfbfeb7621d19b).
+# Apply inside that crate source tree with: patch -p1 < gpui-pre-linux-0.3.7-x11-demand.patch
+--- a/src/linux/x11/client.rs
++++ b/src/linux/x11/client.rs
+@@ -83,4 +83,5 @@
+     window: X11WindowStatePtr,
+     refresh_state: Option<RefreshState>,
++    frame_requested: bool,
+     last_visibility: Visibility,
+     is_mapped: bool,
+@@ -116,4 +117,7 @@
+         refresh_rate: Duration,
+     },
++    Idle {
++        refresh_rate: Duration,
++    },
+     PeriodicRefresh {
+         refresh_rate: Duration,
+@@ -244,4 +248,29 @@
+     }
+
++    pub fn request_frame(&self, x_window: u32) {
++        let Some(client) = self.get_client() else {
++            return;
++        };
++        let mut state = client.0.borrow_mut();
++        if let Some(window) = state.windows.get_mut(&x_window) {
++            window.frame_requested = true;
++        }
++        state.update_refresh_loop(x_window);
++    }
++
++    pub fn try_request_frame(&self, x_window: u32) -> bool {
++        let Some(client) = self.get_client() else {
++            return true;
++        };
++        let Ok(mut state) = client.0.try_borrow_mut() else {
++            return false;
++        };
++        if let Some(window) = state.windows.get_mut(&x_window) {
++            window.frame_requested = true;
++        }
++        state.update_refresh_loop(x_window);
++        true
++    }
++
+     pub fn drop_window(&self, x_window: u32) {
+         let Some(client) = self.get_client() else {
+@@ -1679,4 +1708,5 @@
+             window: window.0.clone(),
+             refresh_state: None,
++            frame_requested: true,
+             last_visibility: Visibility::UNOBSCURED,
+             is_mapped: false,
+@@ -1920,21 +1950,34 @@
+         };
+         let is_visible = window_ref.visibility().is_visible();
+-        match (is_visible, window_ref.refresh_state.take()) {
+-            (false, refresh_state @ Some(RefreshState::Hidden { .. }))
+-            | (false, refresh_state @ None)
+-            | (true, refresh_state @ Some(RefreshState::PeriodicRefresh { .. })) => {
+-                window_ref.refresh_state = refresh_state;
+-            }
+-            (
+-                false,
++        let frame_requested = window_ref.frame_requested;
++        let current = window_ref.refresh_state.take();
++
++        if !is_visible {
++            window_ref.refresh_state = match current {
+                 Some(RefreshState::PeriodicRefresh {
+                     refresh_rate,
+                     event_loop_token,
+-                }),
+-            ) => {
+-                self.loop_handle.remove(event_loop_token);
+-                window_ref.refresh_state = Some(RefreshState::Hidden { refresh_rate });
+-            }
+-            (true, Some(RefreshState::Hidden { refresh_rate })) => {
++                }) => {
++                    self.loop_handle.remove(event_loop_token);
++                    Some(RefreshState::Hidden { refresh_rate })
++                }
++                Some(RefreshState::Idle { refresh_rate }) => {
++                    Some(RefreshState::Hidden { refresh_rate })
++                }
++                state => state,
++            };
++            return;
++        }
++
++        match current {
++            Some(state @ RefreshState::PeriodicRefresh { .. }) => {
++                window_ref.refresh_state = Some(state);
++            }
++            Some(RefreshState::Idle { refresh_rate }) if !frame_requested => {
++                window_ref.refresh_state = Some(RefreshState::Idle { refresh_rate });
++            }
++            Some(RefreshState::Idle { refresh_rate })
++            | Some(RefreshState::Hidden { refresh_rate }) => {
++                window_ref.frame_requested = false;
+                 let event_loop_token = self.start_refresh_loop(x_window, refresh_rate);
+                 let Some(window_ref) = self.windows.get_mut(&x_window) else {
+@@ -1946,5 +1989,5 @@
+                 });
+             }
+-            (true, None) => {
++            None => {
+                 let Some(screen_resources) = get_reply(
+                     || "Failed to get screen resources",
+@@ -1983,4 +2026,5 @@
+                 };
+
++                window_ref.frame_requested = false;
+                 let event_loop_token = self.start_refresh_loop(x_window, refresh_rate);
+                 let Some(window_ref) = self.windows.get_mut(&x_window) else {
+@@ -2004,20 +2048,39 @@
+             .insert_source(calloop::timer::Timer::immediate(), {
+                 move |mut instant, (), client| {
+-                    let xcb_connection = {
++                    let (xcb_connection, keep_running) = {
+                         let mut state = client.0.borrow_mut();
+                         let xcb_connection = state.xcb_connection.clone();
+-                        if let Some(window) = state.windows.get_mut(&x_window) {
+-                            let window = window.window.clone();
+-                            drop(state);
+-                            window.refresh(RequestFrameOptions {
+-                                require_presentation: false,
+-                                force_render: false,
+-                            });
++                        let Some(window_ref) = state.windows.get_mut(&x_window) else {
++                            return calloop::timer::TimeoutAction::Drop;
++                        };
++                        window_ref.frame_requested = false;
++                        let window = window_ref.window.clone();
++                        drop(state);
++
++                        window.refresh(RequestFrameOptions {
++                            require_presentation: false,
++                            force_render: false,
++                        });
++
++                        let mut state = client.0.borrow_mut();
++                        let Some(window_ref) = state.windows.get_mut(&x_window) else {
++                            return calloop::timer::TimeoutAction::Drop;
++                        };
++                        let recovery_pending =
++                            window_ref.window.state.borrow().force_render_after_recovery;
++                        let keep_running = window_ref.frame_requested || recovery_pending;
++                        if !keep_running {
++                            window_ref.refresh_state = Some(RefreshState::Idle { refresh_rate });
+                         }
+-                        xcb_connection
++                        (xcb_connection, keep_running)
+                     };
+                     client.process_x11_events(&xcb_connection).log_err();
+
+-                    // Take into account that some frames have been skipped
++                    if !keep_running {
++                        return calloop::timer::TimeoutAction::Drop;
++                    }
++
++                    // Keep work aligned to the monitor cadence if a frame took longer than
++                    // one interval. A frame-demand wake starts this same paced loop.
+                     let now = Instant::now();
+                     while instant < now {
+--- a/src/linux/x11/window.rs
++++ b/src/linux/x11/window.rs
+@@ -284,5 +284,5 @@
+     visibility: WindowVisibility,
+     hovered: bool,
+-    force_render_after_recovery: bool,
++    pub(crate) force_render_after_recovery: bool,
+     fullscreen: bool,
+     client_side_decorations_supported: bool,
+@@ -1384,4 +1384,14 @@
+ }
+
++fn wake_frame_source(client: &X11ClientStatePtr, executor: &ForegroundExecutor, x_window: u32) {
++    if !client.try_request_frame(x_window) {
++        // Input callbacks can invalidate while the client is still borrowed to dispatch the X11 event.
++        let client = client.clone();
++        executor
++            .spawn(async move { client.request_frame(x_window) })
++            .detach();
++    }
++}
++
+ impl PlatformWindow for X11Window {
+     fn bounds(&self) -> Bounds<Pixels> {
+@@ -1698,4 +1708,14 @@
+     }
+
++    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
++        let state = self.0.state.borrow();
++        let client = state.client.clone();
++        let executor = state.executor.clone();
++        let x_window = self.0.x_window;
++        Some(Rc::new(move || {
++            wake_frame_source(&client, &executor, x_window)
++        }))
++    }
++
+     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
+         self.0.callbacks.borrow_mut().request_frame = Some(callback);
+@@ -1745,4 +1765,9 @@
+     }
+
++    fn schedule_frame(&self) {
++        let state = self.0.state.borrow();
++        wake_frame_source(&state.client, &state.executor, self.0.x_window);
++    }
++
+     fn draw(&self, scene: &Scene) {
+         let mut inner = self.0.state.borrow_mut();
