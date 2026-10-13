@@ -7,6 +7,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
 ### Added
 
 - Experimental, off by default: with `DIFFZ_PINCH_MAGNIFY=1`, a trackpad pinch
@@ -34,6 +36,10 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Upgrade bundled SQLite via rusqlite 0.40.2, refresh thiserror to 2.0.21,
+  and pin the build toolchain to Rust 1.99.0.
+- Update Wasmtime and its Cranelift dependencies to the patched 48.0.5 line.
+
 - The file tree folds a folder that holds a single changed file into that file's
   row, showing the folder path dimmed before the file name, so such folders no
   longer take a row of their own.
@@ -54,6 +60,12 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and restarts when the window needs a frame.
 
 ### Fixed
+
+- Local Git snapshots preserve blank context lines rather than treating them
+  as malformed hunks.
+- Linux profiling reads current DRM GPU residency counters.
+- Fedora release validation installs the RPM in a clean runtime before
+  publication.
 
 - The title-bar pill says "Merged" for a merged pull request or merge request
   instead of "Closed". A review saved before this shows "Closed" until it is
