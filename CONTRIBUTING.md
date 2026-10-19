@@ -46,12 +46,15 @@ argument, so `make run ARGS=--doctor` omits `--foreground` and the state
 directory.
 
 On Linux, `make install-dev` builds the same way and installs
-`~/.local/bin/diffz-dev`, a "Diffz (dev)" launcher
+a `~/.local/bin/diffz-dev` wrapper, its binary payload at
+`~/.local/libexec/diffz-dev`, a "Diffz (dev)" launcher
 (`io.github.zzwong.Diffz.Dev.desktop`) and its icon under `~/.local/share`,
 using the development state directory. It never replaces the release's
 `diffz` files, and it does not register for patch files, so the release stays
-their default handler. `make uninstall-dev` removes those three files and leaves
-the state directory. Both take absolute `PREFIX` and `DATADIR` (default
+their default handler. The wrapper passes the configured `DEV_STATE_DIR` before
+CLI arguments, so a later `--state-dir` overrides it; standalone `--doctor` is
+passed through without extra arguments. `make uninstall-dev` removes those four
+files and leaves the state directory. Both take absolute `PREFIX` and `DATADIR` (default
 `$XDG_DATA_HOME` or `PREFIX/share`) paths. Add `KACHE=0` to build with regular
 Cargo, or `BIN=target/debug/diffz` to install a binary that is already built.
 Windows opened by either build share the `io.github.zzwong.Diffz` app ID.
