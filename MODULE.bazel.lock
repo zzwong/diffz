@@ -222,7 +222,7 @@
         "usagesDigest": "cjofBCtZQL2aJmnvloNEaqP58zxYT1dJ5Dh79l0cfTg=",
         "recordedFileInputs": {
           "@@//Cargo.lock": "bc39b5cb69e541311705c09060971027bd16fa1bca59b5c4b36a1a3d9cd76563",
-          "@@//Cargo.toml": "66b999fdc24c6b7c9d5ce489927a7e61f1740fad18f67d4eec63bd8555167a9c",
+          "@@//Cargo.toml": "c0690eb685d6371b3cb4c464dc2fd61a0f698bc9d3a65394b7513aca4184b254",
           "@@//crates/adapters/Cargo.toml": "af5bb5b18d61d64ed3394a2630557c2a798dad39abce2fb73c11dea51a04a73f",
           "@@//crates/app/Cargo.toml": "084daa6ffee24e8d9d053da87dce4cd6b4747ace760bd109d6e0a5c88422fc5c",
           "@@//crates/core/Cargo.toml": "a781f4cf0dad4b615ba5257f8cfed5951ce0354f66a592a78a2150a7381a1bd5",
