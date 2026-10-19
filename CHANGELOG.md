@@ -7,6 +7,11 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Upgrade the patched GPUI stack to 0.3.9 and GPUI Kit to 0.7.3, preserving
+  the existing magnification and idle-frame behavior.
+
 ## [0.4.0] - 2026-10-12
 
 ### Added
@@ -35,9 +40,6 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   submodule change.
 
 ### Changed
-
-- Upgrade the patched GPUI stack to 0.3.9 and GPUI Kit to 0.7.3, preserving
-  the existing magnification and idle-frame behavior.
 
 - Upgrade bundled SQLite via rusqlite 0.40.2, refresh thiserror to 2.0.21,
   and pin the build toolchain to Rust 1.99.0.
