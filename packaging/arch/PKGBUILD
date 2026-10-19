@@ -17,9 +17,9 @@ optdepends=('xdg-utils: open review links in a browser'
             'glab: load GitLab merge requests'
             'vulkan-driver: GPU rendering (choose the driver for your hardware)')
 # A fixed application source snapshot is exported from this checkout.
-_commit=0e10065467e03e91e39d486fe63b67bb681bc057
+_commit=77c088d386efb5513ecbe3622a11e7ec78ba3d62
 source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('07dea280849e3eb7ce22d10261cf2c28dc5b56df2a9b6627fef8d38a0895b2a6')
+sha256sums=('a05ad22a885545ae17ea00038cc801eac6d1f9c79c96ce3a8f0ace492ef80804')
 # Cargo.toml owns LTO and strips symbols, so makepkg's debug option would only
 # compile debuginfo that is discarded; retain makepkg's other build policies.
 options=('!lto' '!debug')
