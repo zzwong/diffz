@@ -157,3 +157,26 @@ loopback and has no authentication; these instructions reuse the trusted local
 trial, not a public service. For disk-only operation, unset the remote endpoint
 and read-only variables. Keep the same configuration on seed and consumer
 builds; do not create a separate shared-cache namespace for each commit.
+
+## Updating the trial
+
+Cargo remains the source of dependency versions. When changing `Cargo.lock`, run
+`build //:all_build` and `test //:tests` with the wrapper and commit the regenerated
+`MODULE.bazel.lock`. The vendored Linux GPUI target in `bazel/vendor_linux.bzl`
+currently names resolved crate versions explicitly; update those labels when its
+dependency versions change. The override in `MODULE.bazel` must also match the
+vendored GPUI package version. This extra maintenance is one reason the trial
+has not replaced Cargo CI.
+
+When changing `rust-toolchain.toml`, update the Rust version and the five official
+archive SHA-256 values in `MODULE.bazel` together, then rebuild and test. Bazel
+reads the workspace application version directly from `Cargo.toml`; it does not
+need a separate application-version edit. The current integration uses Rust
+1.99.0 and diffz 0.4.0. The performance reports describe the earlier `fe0581b` /
+Rust 1.98.1 trial; their timings have not been relabeled as current-main results.
+
+Install the Linux native dependencies listed in [Linux setup](linux.md) before
+building. The trial uses `/usr/bin/gcc` and `/usr/bin/g++`, plus CMake and
+pkg-config from `/usr/bin` or the standard Linuxbrew prefix. The native tools
+are host dependencies, so reuse a shared cache only between compatible trusted
+build environments.

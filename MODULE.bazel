@@ -3,13 +3,13 @@ bazel_dep(name = "rules_rust", version = "0.74.0")
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2024",
-    versions = ["1.98.1"],
+    versions = ["1.99.0"],
     sha256s = {
-        "rustc-1.98.1-x86_64-unknown-linux-gnu.tar.xz": "e974f036b28565f37c0f3bd92ddefa809bee16c04f9dcf07b9ed96e05aaaf7c4",
-        "clippy-1.98.1-x86_64-unknown-linux-gnu.tar.xz": "e167f333be24e1d5eea56ea563c7def0aa0bd613f5ce3445976c93b0288799d1",
-        "cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz": "ea1de9f9e23107d97ee2b41a72c552f34064a593da503789218387aee59f3ba4",
-        "llvm-tools-1.98.1-x86_64-unknown-linux-gnu.tar.xz": "56d58ca2dfa848359ab23c872791509c6f592448d2f6c146ed530ec50ee45371",
-        "rust-std-1.98.1-x86_64-unknown-linux-gnu.tar.xz": "fa3ff450172a16c026944030230c5069947af93c728d9179971d44e5e0cfb561",
+        "rustc-1.99.0-x86_64-unknown-linux-gnu.tar.xz": "77171ba2a0345fdf2abc4fedda55d6de078dae7a68527c28be8c77dcc9604bd5",
+        "clippy-1.99.0-x86_64-unknown-linux-gnu.tar.xz": "982442e32ad8dd3f0bb3a30db74038da5f71fd9bf1a865cc71da8ea5d4ec71ec",
+        "cargo-1.99.0-x86_64-unknown-linux-gnu.tar.xz": "d7674918d28093097614cd9728b6ca60db9ea3038f640f0bd1e9a4188c7568ce",
+        "llvm-tools-1.99.0-x86_64-unknown-linux-gnu.tar.xz": "91a6db5668c08ee68e330e5b0fda27c11b79b90592627e89f7c5db12af2ff0ba",
+        "rust-std-1.99.0-x86_64-unknown-linux-gnu.tar.xz": "3e58dff2d0b72196b5ea4e90536e174d400de88564a52694686b81e091169933",
     },
     extra_target_triples = [],
     opt_level = {"fastbuild": "2", "dbg": "0", "opt": "3"},
@@ -131,3 +131,6 @@ crate.annotation(crate = "rust-embed", rustc_flags = ["-Cdebug-assertions=no"])
 
 # Reserve the CPUs requested by parallel native build scripts.
 single_version_override(module_name = "rules_rust", version = "0.74.0", patches = ["//bazel:build-script-resources.patch"], patch_strip = 1)
+
+workspace_metadata = use_repo_rule("//bazel:workspace_metadata.bzl", "workspace_metadata")
+workspace_metadata(name = "diffz_metadata", manifest = "//:Cargo.toml")

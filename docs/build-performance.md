@@ -18,6 +18,10 @@ test native parallelism, pipelining, Nextest, incremental Rust workers, and
 artifact reuse across checkouts. They also fix sandbox-dependent Wasmtime crate
 hashes; the worker mode remains a separate upstream-draft experiment.
 
+The setup was subsequently ported to main at `8cae3d4` (Rust 1.99.0, diffz
+0.4.0). The measurements below remain results from the original trial revision;
+see [cache setup](bazel-cache-setup.md) for maintenance and current configuration.
+
 ## Build and test timings
 
 Wall-clock medians of three runs, except artifact-cold builds (one run each).

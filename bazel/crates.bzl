@@ -1,4 +1,5 @@
 """Experimental all-feature desktop build and Cargo-equivalent test targets."""
+load("@diffz_metadata//:metadata.bzl", "PACKAGE_VERSION")
 load("@crates//:defs.bzl", "all_crate_deps", "aliases")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_binary", "rust_test")
 load("//bazel:cargo_test.bzl", "cargo_test")
@@ -17,7 +18,7 @@ def diffz_crate(name, package, crate_name, features, deps):
         edition = "2024",
         crate_features = features,
         rustc_flags = _FLAGS,
-        rustc_env = {"CARGO_MANIFEST_DIR": package, "CARGO_PKG_VERSION": "0.3.1"},
+        rustc_env = {"CARGO_MANIFEST_DIR": package, "CARGO_PKG_VERSION": PACKAGE_VERSION},
         aliases = aliases(package_name = package),
         proc_macro_deps = all_crate_deps(package_name = package, proc_macro = True, proc_macro_dev = True),
         deps = deps + all_crate_deps(package_name = package, normal = True, normal_dev = True),
@@ -34,7 +35,7 @@ def diffz_crate(name, package, crate_name, features, deps):
     for source in native.glob([package + "/tests/*.rs"], allow_empty = True):
         stem = source.split("/")[-1][:-3]
         target = name + "_" + stem
-        env = {"CARGO_MANIFEST_DIR": package, "CARGO_PKG_VERSION": "0.3.1"}
+        env = {"CARGO_MANIFEST_DIR": package, "CARGO_PKG_VERSION": PACKAGE_VERSION}
         if name == "app":
             env["CARGO_BIN_EXE_diffz"] = "diffz"
         rust_test(
