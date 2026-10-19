@@ -26,6 +26,24 @@ and cold-build cost. For a full cold seed, run `cargo clean` first; that also
 removes the bootstrapped Kache binary, so the next Make invocation installs it
 again. A package-scoped clean such as `cargo clean -p diffz` preserves Kache.
 
+See [build performance](docs/build-performance.md) for measured local build/test
+costs, targeted iteration commands, and the Bazel evaluation. Core checks group
+the feature-free packages into one Cargo invocation, then test syntax and Wasm
+separately to preserve coverage. The opt-in Linux trial can build the full desktop
+with `scripts/bazel-trial.sh build //:diffz` or run all-feature tests with
+`scripts/bazel-trial.sh test //:tests`; existing Make targets and CI keep Cargo.
+The [follow-up trials](docs/bazel-tuning.md) cover native parallelism, pipelining,
+Nextest, cache reuse, and the opt-in `scripts/bazel-worker-trial.sh` experiment.
+The [cold-build profiling](docs/bazel-cold-builds.md) compares further scheduling
+and compiler changes against Cargo, with an optional `fast-dev` Cargo
+profile and a repeatable `scripts/benchmark-cold-builds.py` runner.
+The [shared-cache trials](docs/bazel-shared-cache.md) compare fresh checkouts,
+artifact downloads, and semantic edits against Cargo. The [cache setup
+guide](docs/bazel-cache-setup.md) covers the opt-in local cache, shared gRPC
+endpoint, reusable toolchains, and stable test environment. Use
+`--config=fast-dev` for the measured Bazel settings; `--config=cache-eager`
+also downloads intermediate artifacts before editing.
+
 ### Development builds beside an installed release
 
 A second diffz using the release's state directory hands its request to the
@@ -46,12 +64,15 @@ argument, so `make run ARGS=--doctor` omits `--foreground` and the state
 directory.
 
 On Linux, `make install-dev` builds the same way and installs
-`~/.local/bin/diffz-dev`, a "Diffz (dev)" launcher
+a `~/.local/bin/diffz-dev` wrapper, its binary payload at
+`~/.local/libexec/diffz-dev`, a "Diffz (dev)" launcher
 (`io.github.zzwong.Diffz.Dev.desktop`) and its icon under `~/.local/share`,
 using the development state directory. It never replaces the release's
 `diffz` files, and it does not register for patch files, so the release stays
-their default handler. `make uninstall-dev` removes those three files and leaves
-the state directory. Both take absolute `PREFIX` and `DATADIR` (default
+their default handler. The wrapper passes the configured `DEV_STATE_DIR` before
+CLI arguments, so a later `--state-dir` overrides it; standalone `--doctor` is
+passed through without extra arguments. `make uninstall-dev` removes those four
+files and leaves the state directory. Both take absolute `PREFIX` and `DATADIR` (default
 `$XDG_DATA_HOME` or `PREFIX/share`) paths. Add `KACHE=0` to build with regular
 Cargo, or `BIN=target/debug/diffz` to install a binary that is already built.
 Windows opened by either build share the `io.github.zzwong.Diffz` app ID.

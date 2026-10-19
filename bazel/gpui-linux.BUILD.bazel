@@ -1,0 +1,1 @@
+alias(name = "gpui_linux", actual = "@@//:gpui_linux", visibility = ["//visibility:public"])

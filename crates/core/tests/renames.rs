@@ -35,8 +35,14 @@ fn reading_similarity_leaves_stored_bytes_unchanged() {
 #[test]
 fn pure_rename_explains_the_empty_reader() {
     let r = parse(
-        &String::from_utf8(std::fs::read("../../fixtures/rename-only/change.patch").unwrap())
+        &String::from_utf8(
+            std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fixtures/rename-only/change.patch"
+            ))
             .unwrap(),
+        )
+        .unwrap(),
     );
     let f = &r.files[0];
     assert!(f.hunks.is_empty());

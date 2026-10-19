@@ -96,17 +96,16 @@ fn pruning_keeps_recent_and_pending_work_and_removes_the_rest() {
         .save_blame(&s[2].id, &releases_key(&s[2].overview.releases), &blame)
         .unwrap();
 
-    // Give pruning a fixed recency order. Saving blame touches updated_at,
-    // so wall-clock writes can otherwise reorder snapshots at a second boundary.
+    // Saving blame refreshes s2's timestamp. Set the fixture's recency order
+    // explicitly so crossing a wall-clock second cannot change what is kept.
     let db = rusqlite::Connection::open(temp.path().join("review.sqlite3")).unwrap();
     for (i, snap) in s.iter().enumerate() {
         db.execute(
             "UPDATE snapshots SET updated_at=?1 WHERE id=?2",
-            rusqlite::params![i as i64, &snap.id.0],
+            rusqlite::params![i as i64, snap.id.0],
         )
         .unwrap();
     }
-    drop(db);
 
     assert_eq!(store.prune(2).unwrap(), 2);
     for kept in [0, 1, 4, 5] {
@@ -115,7 +114,6 @@ fn pruning_keeps_recent_and_pending_work_and_removes_the_rest() {
     for gone in [2, 3] {
         assert!(store.snapshot(&s[gone].id).is_err(), "s{gone}");
     }
-    let db = rusqlite::Connection::open(temp.path().join("review.sqlite3")).unwrap();
     let remaining: i64 = db
         .query_row(
             "SELECT count(*) FROM snapshot_blame WHERE snapshot_id=?1",

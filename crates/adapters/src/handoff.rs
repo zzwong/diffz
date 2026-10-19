@@ -434,9 +434,24 @@ mod tests {
     }
     #[test]
     fn stale_socket_is_removed_when_the_lock_is_free() {
+        const FIXTURE: &str = "DIFFZ_TEST_STALE_SOCKET_FIXTURE";
+        if let Some(path) = std::env::var_os(FIXTURE) {
+            drop(UnixListener::bind(path).unwrap());
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
-        // A listener that is gone leaves its socket file behind; connecting is refused.
-        drop(UnixListener::bind(socket_path(dir.path())).unwrap());
+        // Create the stale listener in a separate process. Other tests fork to
+        // launch commands; their children must not inherit this listener and
+        // briefly keep it alive after we drop it.
+        let fixture = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "handoff::tests::stale_socket_is_removed_when_the_lock_is_free",
+            ])
+            .env(FIXTURE, socket_path(dir.path()))
+            .output()
+            .unwrap();
+        assert!(fixture.status.success(), "{fixture:?}");
         std::fs::write(dir.path().join("writer.lock"), "").unwrap();
         assert!(socket_path(dir.path()).exists());
         assert_eq!(
