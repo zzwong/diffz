@@ -1,0 +1,26 @@
+# Experimental Linux build; Cargo remains the default build system.
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("//bazel:crates.bzl", "diffz_crate", "workspace_rustc_flags")
+load("//bazel:vendor_linux.bzl", "vendor_linux")
+
+exports_files(["Cargo.toml", "Cargo.lock", "crates/core/Cargo.toml", "crates/adapters/Cargo.toml", "crates/ui/Cargo.toml", "crates/app/Cargo.toml", "vendor/gpui-pre-linux/Cargo.toml"])
+filegroup(name = "fixtures", srcs = glob(["fixtures/**", "crates/*/tests/fixtures/**"]))
+
+CORE_TESTS = diffz_crate(name = "core", package = "crates/core", crate_name = "diffz_core", features = ["default", "syntax", "gleam", "wasm"], deps = [])
+ADAPTER_TESTS = diffz_crate(name = "adapters", package = "crates/adapters", crate_name = "diffz_adapters", features = [], deps = [":core"])
+UI_TESTS = diffz_crate(name = "ui", package = "crates/ui", crate_name = "diffz_ui", features = ["default", "syntax"], deps = [":core"])
+APP_TESTS = diffz_crate(name = "app", package = "crates/app", crate_name = "diffz", features = ["default", "desktop", "syntax", "wasm"], deps = [":core", ":adapters", ":ui"])
+
+vendor_linux()
+rust_binary(
+    name = "store_size",
+    crate_root = "crates/adapters/examples/store_size.rs",
+    srcs = ["crates/adapters/examples/store_size.rs"],
+    edition = "2024",
+    deps = [":core", ":adapters"] + all_crate_deps(package_name = "crates/adapters", normal = True, normal_dev = True),
+    rustc_flags = workspace_rustc_flags(),
+)
+
+test_suite(name = "tests", tests = CORE_TESTS + ADAPTER_TESTS + UI_TESTS + APP_TESTS)
+filegroup(name = "all_build", testonly = True, srcs = [":diffz", ":store_size"] + CORE_TESTS + ADAPTER_TESTS + UI_TESTS + APP_TESTS)

@@ -217,7 +217,9 @@ mod loaded {
 
     fn program(dir: &Path) -> std::path::PathBuf {
         let path = dir.join("fake-cli");
-        let script = include_str!("support/fake_compare.py").replace("FIXTURES", FIXTURES);
+        let fixtures = std::fs::canonicalize(FIXTURES).unwrap();
+        let script = include_str!("support/fake_compare.py")
+            .replace("FIXTURES", &fixtures.to_string_lossy());
         fake_cli::write_executable(&path, &script);
         path
     }
