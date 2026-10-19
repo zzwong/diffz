@@ -1,0 +1,28 @@
+--- a/src/bindgen.rs
++++ b/src/bindgen.rs
+@@ -56,20 +56,11 @@
+ 
+         src = format!("include!({path:?});");
+     }
+-    let mut contents = src.parse::<TokenStream>().unwrap();
+-
+-    // Include a dummy `include_bytes!` for any files we read so rustc knows that
+-    // we depend on the contents of those files.
+-    for file in input.files.iter() {
+-        contents.extend(
+-            format!(
+-                "const _: &[u8] = include_bytes!(r#\"{}\"#);\n",
+-                file.display()
+-            )
+-            .parse::<TokenStream>()
+-            .unwrap(),
+-        );
+-    }
++    let contents = src.parse::<TokenStream>().unwrap();
++
++    // Bazel declares WIT inputs explicitly. Avoid absolute sandbox paths in
++    // dummy include_bytes! expansions: they make metadata and full-build crate
++    // hashes disagree when the two actions run in different sandboxes.
+ 
+     Ok(contents)
+ }

@@ -1,0 +1,34 @@
+# Opt-in cold-build profile. Runtime optimization and GPUI/workspace debug info
+# match dev; host build scripts and procedural macros use opt-level 0.
+# Inheriting release avoids dev's wildcard opt-level override, which otherwise
+# takes precedence over build-override. Explicitly reset release-only settings.
+[profile.fast-dev]
+inherits = "release"
+opt-level = 2
+debug = 1
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+incremental = true
+codegen-units = 16
+strip = "debuginfo"
+
+[profile.fast-dev.package]
+"*" = { debug = 0 }
+# Keep this list in sync with workspace members and local path dependencies.
+diffz-core = { opt-level = 0, codegen-units = 256, strip = "none" }
+diffz-adapters = { opt-level = 0, codegen-units = 256, strip = "none" }
+diffz-ui = { opt-level = 0, codegen-units = 256, strip = "none" }
+diffz = { opt-level = 0, codegen-units = 256, strip = "none" }
+gpui-pre = { debug = 1, strip = "none" }
+gpui-pre-linux = { debug = 1, codegen-units = 256, strip = "none" }
+gpui-pre-platform = { debug = 1, strip = "none" }
+gpui-pre-wgpu = { debug = 1, strip = "none" }
+gpui-base = { debug = 1, strip = "none" }
+gpui-component = { debug = 1, strip = "none" }
+gpui-kit = { debug = 1, strip = "none" }
+
+[profile.fast-dev.build-override]
+opt-level = 0
+codegen-units = 16

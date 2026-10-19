@@ -1,0 +1,11 @@
+--- a/cargo/private/cargo_build_script.bzl
++++ b/cargo/private/cargo_build_script.bzl
+@@ -718,6 +718,8 @@
+         ],
+         inputs = depset(build_script_inputs, transitive = [runfiles_inputs]),
+         mnemonic = "CargoBuildScriptRun",
++        # Match the build script's native parallelism to Bazel's CPU budget.
++        execution_requirements = {"cpu:" + env["NUM_JOBS"]: ""},
+         progress_message = "Running Cargo build script {}".format(pkg_name),
+         env = env,
+         toolchain = None,
