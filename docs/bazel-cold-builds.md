@@ -213,3 +213,129 @@ benchmark output roots retained are:
 The optional Cargo profile, Bazel presets, benchmark runner and reports remain
 in the primary and trial checkouts. `completion.json` in the evidence directory
 records cleanup and original-source hash checks.
+
+## Controlled desktop and fresh-worktree trials
+
+The runner also supports explicit Cargo workloads, real edit probes, and a paired
+nightly fingerprint experiment. These are benchmark controls added in
+[#124](https://github.com/zzwong/diffz/issues/124), not new performance results.
+Current Linux/macOS measurements and any decision to promote a profile or cache
+remain tracked in [#115](https://github.com/zzwong/diffz/issues/115).
+
+Run the preflight first. It checks executable availability, installed Rust
+toolchains, the Git revision, and configuration consistency without downloading
+dependencies, installing toolchains, or bootstrapping Bazel:
+
+```sh
+python3 scripts/benchmark-cold-builds.py --tool cargo --preflight
+```
+
+The default workload remains `--workspace --all-features --all-targets`, including
+the desktop and test graph. `--cargo-workload desktop` instead builds the native
+application with `-p diffz --bin diffz` and its default features. A bare
+`cargo build` selects only the core/adapters default members, so it is not a
+desktop benchmark. Desktop and reuse modes require `--tool cargo`; the existing
+matched Cargo/Bazel cold comparison remains available with the default workload.
+
+For a desktop profile comparison, run the same command once with `dev` and once
+with `fast-dev`, using distinct evidence directories:
+
+```sh
+python3 scripts/benchmark-cold-builds.py --tool cargo --jobs 32 --iterations 3 \
+  --cargo-workload desktop --cargo-profile dev \
+  --cargo-scenario noop --cargo-scenario edit \
+  --output "$HOME/.local/state/diffz/evidence/desktop-dev-new"
+
+python3 scripts/benchmark-cold-builds.py --tool cargo --jobs 32 --iterations 3 \
+  --cargo-workload desktop --cargo-profile fast-dev \
+  --cargo-scenario noop --cargo-scenario edit \
+  --output "$HOME/.local/state/diffz/evidence/desktop-fast-dev-new"
+```
+
+Keep revision, toolchain, jobs, native compilers, flags, features and host the
+same. Repeat with profile order reversed before attributing a small difference to
+the profile. The script does not modify profile defaults. Native compilers default
+to `/usr/bin/gcc` and `/usr/bin/g++` on Linux, and Apple's `/usr/bin/clang` and
+`/usr/bin/clang++` on macOS; `--cc` and `--cxx` select explicit alternatives.
+
+### Matched nightly fingerprint comparison
+
+[Cargo's content fingerprint experiment](https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#checksum-freshness)
+requires both `-Zchecksum-freshness` and `build.fingerprint="content"`. Using only
+the flag does not select the current content mode. Install one dated nightly
+separately, then use that exact toolchain for both sides of the comparison:
+
+```sh
+rustup toolchain install nightly-2026-10-19 --profile minimal
+
+python3 scripts/benchmark-cold-builds.py --tool cargo --preflight \
+  --cargo-toolchain nightly-2026-10-19 --cargo-fingerprint both \
+  --cargo-workload desktop --cargo-profile fast-dev \
+  --cargo-scenario noop --cargo-scenario edit --cargo-scenario fresh-worktree
+
+python3 scripts/benchmark-cold-builds.py --tool cargo --jobs 32 --iterations 3 \
+  --cargo-toolchain nightly-2026-10-19 --cargo-fingerprint both \
+  --cargo-workload desktop --cargo-profile fast-dev \
+  --cargo-scenario noop --cargo-scenario edit --cargo-scenario fresh-worktree \
+  --output "$HOME/.local/state/diffz/evidence/desktop-fingerprints-new"
+```
+
+The runner requires a dated nightly from 2026-09-02 onward, checks that both
+Cargo and rustc report nightly, and uses the resolved rustc from that toolchain.
+It explicitly sets `mtime` and `content` in separate owned output directories,
+reversing their order on alternating iterations. Comparing stable `mtime` against
+nightly `content` would mix compiler changes with fingerprint changes. Arbitrary
+`--cargo-arg` overrides and `RUSTC`/`RUSTC_BOOTSTRAP` overrides are rejected for
+fingerprint trials. Profile experiments should use tracked configuration and
+`--cargo-profile`.
+
+### Scenarios, evidence and interpretation
+
+Every iteration starts with an artifact-cold build. Additional phases are:
+
+| Phase | What it measures |
+| --- | --- |
+| `noop` | Repeating the identical build with warm artifacts. |
+| `edit-core`, `edit-ui`, `edit-app` | Real value changes to the existing core limit, UI scale, and application version probes. Each iteration uses a new value. |
+| `undo-*` | Rebuilding after restoring the original source bytes; recorded separately from the edit. |
+| `fresh-*-restore` | Copying that mode's seeded Cargo artifacts to a new owned output directory, preserving artifact timestamps. |
+| `fresh-*` | Building an actual new Git worktree of the same commit using the copied artifacts. Git's new source timestamps are left untouched. |
+| `verification` | Full workspace, all-feature tests after the build scenarios, using the selected profile/toolchain. |
+
+Fingerprint and reuse scenarios require a clean, committed checkout. They create
+disposable source worktrees, keep the caller's source bytes and timestamps intact,
+and check that the worktrees inherit the same Cargo configuration. Semantic edits
+use the existing probe/restore approach, including the UI assertion's scale ratio.
+Only an edit's own bytes are restored; concurrent changes cause failure and leave
+the affected worktree for inspection. Failed or partially created worktrees are
+removed with non-forced Git commands. A cleanup failure produces a failing exit
+and `completed: false`, while an earlier compilation failure remains the primary
+error.
+
+`setup.json`, `measurements.jsonl`, and `completion.json` carry `schema_version`.
+Setup records the revision, workload, profile, toolchain versions, relevant build
+flags, source/configuration hashes and owned paths. Each phase records its exact
+command or copy operation, working directory, output paths, exit code and duration;
+raw logs and each build's Cargo HTML timing report are retained. Aggregate medians
+by matching phase and mode. The total runner duration also includes setup, artifact
+copying, undo builds and final verification. In particular, final verification
+expands the desktop graph to all-feature workspace tests and is not part of the
+desktop build measurement.
+
+Content fingerprints are still experimental. Build-script `rerun-if-changed`
+inputs still use timestamps, and native/generated inputs or absolute paths can
+still cause cross-worktree rebuilds. The local copy scenario excludes archive
+compression and network transfer; use `benchmark-shared-cache.py` for those costs.
+Retain the logs and investigate unexpectedly missing recompilation before
+trusting a large gain. Validate the chosen configuration on the actual Linux and
+macOS hardware, including test results and an interactive desktop smoke check,
+before changing normal developer or CI defaults.
+
+The harness regression suite uses real temporary Git worktrees with explicitly
+fake compiler executables. It checks isolation, controls, restoration and failure
+handling; its timing records are not Rust performance measurements:
+
+```sh
+python3 -m unittest discover -s scripts/tests -p test_benchmark_cold_builds.py -v
+```
+
