@@ -99,3 +99,22 @@ jobs:
             exit 1
           fi
           test -d "$root/state"
+
+  # The patched macOS backend must compile when upgrading the shared GPUI stack.
+  # Release packaging is tag/manual-only, so it cannot guard dependency PRs.
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - name: Cache Cargo registry and dependency artifacts
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Check every macOS target with all features
+        run: cargo check --locked --workspace --all-features --all-targets
