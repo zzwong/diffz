@@ -1,0 +1,41 @@
+startup --max_idle_secs=600
+build --symlink_prefix=target/bazel-
+build --repo_env=CC=/usr/bin/gcc
+build --repo_env=CXX=/usr/bin/g++
+build --action_env=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin
+build --jobs=16
+test --test_output=errors
+build --test_env=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin
+# Keep action caches disabled by default. The trial wrapper adds opt-in cache
+# flags before user arguments so explicit cold-build overrides still win.
+build --disk_cache=
+build --remote_cache=
+
+# Match Cargo's Linux linker using LLD from the declared, pinned Rust sysroot.
+# This trial targets x86_64 Linux in fastbuild mode.
+build:lld --linkopt=-fuse-ld=lld
+build:lld --linkopt=-Bbazel-out/k8-fastbuild/bin/external/rules_rust++rust+rust_linux_x86_64__x86_64-unknown-linux-gnu__stable_tools/rust_toolchain/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld
+
+# Use the measured faster linker for the trial by default.
+build --config=lld
+build --test_env=DIFFZ_TEST_TMP_ROOT
+
+# Native parallelism is opt-in and charged against the same CPU budget.
+build --local_resources=cpu=16
+build --define=DIFFZ_NATIVE_JOBS=1
+build:native8 --define=DIFFZ_NATIVE_JOBS=8
+build:native2 --define=DIFFZ_NATIVE_JOBS=2
+build:buildtools0 --@rules_rust//rust/settings:extra_exec_rustc_flag=-Copt-level=0
+build:pipeline --@rules_rust//rust/settings:pipelined_compilation=true
+build:cgu256 --//bazel:workspace_cgu256
+
+# Standard opt-in development settings for the Bazel trial. Keep this named
+# config separate from the default build behavior.
+build:fast-dev --config=pipeline
+build:fast-dev --config=native2
+build:fast-dev --config=buildtools0
+build:fast-dev --jobs=32
+build:fast-dev --local_resources=cpu=32
+
+# Hydrate intermediate artifacts before editing when using a shared cache.
+build:cache-eager --remote_download_outputs=all
