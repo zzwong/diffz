@@ -1,5 +1,10 @@
 # Opt-in Bazel action cache
 
+For the next cross-machine acceptance step, use the
+[two-host cache qualification driver](bazel-cache-qualification.md). It records
+native environment identity and verifies a fresh read-only consumer against an
+existing service; the local measurements below do not establish that result.
+
 The Bazel trial keeps action caching disabled by default. For everyday builds,
 set `DIFFZ_BAZEL_CACHE=1` to enable a local disk cache at
 `target/bazel-disk-cache`:

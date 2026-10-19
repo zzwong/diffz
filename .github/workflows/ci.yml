@@ -30,6 +30,10 @@ jobs:
         run: python3 scripts/tests/test_smoke_linux_rpm.py -v
       - name: Check development installer fixtures
         run: python3 scripts/tests/test_install_dev.py -v
+      - name: Check build benchmark and cache qualification fixtures
+        run: |
+          python3 scripts/tests/test_benchmark_cold_builds.py -v
+          python3 scripts/tests/test_qualify_bazel_cache.py -v
       - name: Install pinned Rust toolchain
         run: rustup show
       - name: Test Linux profiler DRM parsing
@@ -74,15 +78,21 @@ jobs:
         run: cargo test --locked --workspace --all-features
       - name: Lint every crate with all features
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
-      # KACHE=0 builds with plain Cargo, like the test step, whose artifacts it reuses,
-      # instead of bootstrapping Kache. Installs only under RUNNER_TEMP.
+      # Cargo's integration-test build produces the ordinary app binary. Reuse its
+      # all-features/test-support graph; package jobs qualify default-feature builds.
+      # Installs only under RUNNER_TEMP.
       - name: Smoke-test install-dev and uninstall-dev
         run: |
           sudo apt-get install -y --no-install-recommends desktop-file-utils
           root="$RUNNER_TEMP/install-dev"
           export XDG_STATE_HOME="$root/xdg-state"
           dirs=(PREFIX="$root/prefix" DATADIR="$root/share" DEV_STATE_DIR="$root/state")
-          make install-dev KACHE=0 "${dirs[@]}"
+          bin="$GITHUB_WORKSPACE/target/debug/diffz"
+          if [ ! -x "$bin" ]; then
+            printf 'App binary from cargo test is missing or not executable: %s\n' "$bin" >&2
+            exit 1
+          fi
+          make install-dev BIN="$bin" "${dirs[@]}"
           find "$root" -type f | sort
           "$root/prefix/bin/diffz-dev" --version
           "$root/prefix/bin/diffz-dev" --inspect --fixture F01 > /dev/null
