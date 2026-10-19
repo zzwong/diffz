@@ -34,17 +34,23 @@ jobs:
         run: |
           python3 scripts/tests/test_benchmark_cold_builds.py -v
           python3 scripts/tests/test_qualify_bazel_cache.py -v
+          python3 scripts/tests/test_prepare_ci_rust.py -v
       - name: Install pinned Rust toolchain
-        run: rustup show
+        run: python3 scripts/prepare-ci-rust.py
       - name: Test Linux profiler DRM parsing
         run: python3 scripts/tests/test_profile_linux.py -v
-      # Must follow toolchain installation: the cache key includes the rustc version.
+      # The setup exports a stable job-owned RUSTUP_HOME. rust-cache hashes every
+      # installed compiler, so unrelated runner-image toolchains must stay outside it.
       - name: Cache Cargo registry and dependency artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run core checks
         run: bash scripts/check.sh core
       - name: Audit dependencies
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        env:
+          # The Alpine action owns this image path. Keep its musl toolchain out
+          # of the host job's Rust home and cache identity.
+          RUSTUP_HOME: /usr/local/rustup
 
   # Compiles GPUI and the `desktop` feature, and runs the `diffz-ui` tests, which
   # `check` skips. The `cargo build` lines of `scripts/check.sh native` are left
@@ -70,8 +76,8 @@ jobs:
             libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
             libssl-dev libzstd-dev libvulkan-dev
       - name: Install pinned Rust toolchain
-        run: rustup show
-      # Must follow toolchain installation: the cache key includes the rustc version.
+        run: python3 scripts/prepare-ci-rust.py
+      # Keep compiler/config hashing while excluding unrelated image toolchains.
       - name: Cache Cargo registry and dependency artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Test every crate with all features
@@ -123,7 +129,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain
-        run: rustup show
+        run: python3 scripts/prepare-ci-rust.py
       - name: Cache Cargo registry and dependency artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Check every macOS target with all features
