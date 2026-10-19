@@ -21,6 +21,7 @@ done
 
 app_id=io.github.zzwong.Diffz.Dev
 bin="$PREFIX/bin/diffz-dev"
+payload="$PREFIX/libexec/diffz-dev"
 app="$APPLICATIONS_DIR/Diffz Dev.app"
 desktop="$DATADIR/applications/$app_id.desktop"
 hicolor="$DATADIR/icons/hicolor"
@@ -45,7 +46,7 @@ if [[ "$action" == uninstall ]]; then
       echo "removed $app"
     fi
   else
-    files=("$bin" "$desktop" "$icon")
+    files=("$bin" "$payload" "$desktop" "$icon")
   fi
   for file in "${files[@]}"; do
     if [[ -e "$file" || -L "$file" ]]; then
@@ -109,7 +110,7 @@ fi
 exec_arg() {
   if [[ "$1" =~ ^[A-Za-z0-9_./+,:@=-]+$ ]]; then printf '%s' "$1"; else printf '"%s"' "$1"; fi
 }
-exec_line="$(exec_arg "$bin") --state-dir $(exec_arg "$DEV_STATE_DIR") %f"
+exec_line="$(exec_arg "$bin") %f"
 
 # Derive the entry from the release one so shared fields cannot drift. MimeType is dropped so
 # the release package remains the handler for patch files.
@@ -139,11 +140,24 @@ else
   echo 'desktop-file-validate not found; skipped desktop entry validation' >&2
 fi
 
-install -Dm755 "$src" "$bin"
+# Keep the configured default on the CLI path too, not just the desktop entry.
+# Paths are double-quoted below; validation above rejects shell expansion characters.
+# Prepending keeps the parser's last --state-dir wins behavior. Doctor is a standalone
+# diagnostic and rejects any additional arguments, so it must bypass the default.
+wrapper="$work/diffz-dev"
+cat > "$wrapper" <<EOF
+#!/bin/sh
+if [ "\$#" -eq 1 ] && [ "\$1" = --doctor ]; then
+  exec "$payload" "\$@"
+fi
+exec "$payload" --state-dir "$DEV_STATE_DIR" "\$@"
+EOF
+install -Dm755 "$src" "$payload"
+install -Dm755 "$wrapper" "$bin"
 install -Dm644 "$generated" "$desktop"
 install -Dm644 packaging/linux/icons/io.github.zzwong.Diffz.svg "$icon"
 refresh_caches
 
-printf 'installed %s\n' "$bin" "$desktop" "$icon"
+printf 'installed %s\n' "$bin" "$payload" "$desktop" "$icon"
 echo "diffz-dev and its launcher use state in $DEV_STATE_DIR"
 case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) echo "note: $PREFIX/bin is not on PATH" ;; esac
