@@ -38,9 +38,11 @@ crate.annotation(crate = "ahash", build_script_env = {"DEBUG": "false"})
 crate.annotation(crate = "anyhow", build_script_env = {"DEBUG": "false"})
 crate.annotation(crate = "ash", build_script_env = {"DEBUG": "false"})
 crate.annotation(crate = "async-io", build_script_env = {"DEBUG": "false"})
-crate.annotation(crate = "cranelift-assembler-x64", build_script_env = {"DEBUG": "false"})
+# Stable generator metadata only; see docs/cranelift-generator-reproducibility.md.
+crate.annotation(crate = "cranelift-assembler-x64", version = "=0.135.7", build_script_env = {"DEBUG": "false"}, patches = ["//bazel:cranelift-assembler-x64-deterministic.patch"], patch_args = ["-p1"])
 crate.annotation(crate = "cranelift-codegen", build_script_env = {"DEBUG": "false"})
-crate.annotation(crate = "cranelift-isle", build_script_env = {"DEBUG": "false"})
+# Stable generator metadata only; see docs/cranelift-generator-reproducibility.md.
+crate.annotation(crate = "cranelift-isle", version = "=0.135.7", build_script_env = {"DEBUG": "false"}, patches = ["//bazel:cranelift-isle-deterministic.patch"], patch_args = ["-p1"])
 crate.annotation(crate = "crc32fast", build_script_env = {"DEBUG": "false"})
 crate.annotation(crate = "crossbeam-deque", build_script_env = {"DEBUG": "false"})
 crate.annotation(crate = "crossbeam-epoch", build_script_env = {"DEBUG": "false"})
