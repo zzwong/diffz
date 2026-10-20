@@ -11,7 +11,9 @@ on:
       - 'packaging/debian/**'
       - 'packaging/linux/**'
       - 'scripts/package-linux-deb.sh'
+      - 'scripts/debian-build-environment.py'
       - 'scripts/stage-linux.sh'
+      - 'scripts/tests/test_debian_build_environment.py'
       - 'scripts/tests/test_package_linux_deb.py'
       - 'scripts/tests/test_stage_linux.py'
       - 'docs/linux.md'
@@ -30,7 +32,9 @@ on:
       - 'packaging/debian/**'
       - 'packaging/linux/**'
       - 'scripts/package-linux-deb.sh'
+      - 'scripts/debian-build-environment.py'
       - 'scripts/stage-linux.sh'
+      - 'scripts/tests/test_debian_build_environment.py'
       - 'scripts/tests/test_package_linux_deb.py'
       - 'scripts/tests/test_stage_linux.py'
       - 'docs/linux.md'
@@ -81,34 +85,40 @@ jobs:
       - name: Set reproducible package timestamp
         run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
 
+      - name: Check native build identity fixtures
+        run: python3 scripts/tests/test_debian_build_environment.py -v
+
       # rust-cache runs `cargo metadata` and hashes `rustc -vV` on the host, which
-      # uses the same pinned toolchain as the container.
+      # uses the same pinned toolchain as the container. Native tool identities
+      # come from the prepared container below, not from this host installation.
       - name: Install pinned Rust toolchain on the host
         if: ${{ env.USE_CACHE == 'true' }}
         run: rustup show
 
-      # The key separates distributions: build scripts probe each one's libraries.
-      - name: Cache Cargo registry and dependency artifacts
-        if: ${{ env.USE_CACHE == 'true' }}
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: ${{ matrix.target }}
-          cache-bin: false
-
       # Build against each distribution's own glibc and library package names.
       # A .deb made from the Fedora binary is not a Debian compatibility test.
-      # Only the host's registry and git sources are shared; rustup installs its
-      # own binaries into the container's /cargo/bin and /root/.rustup.
-      - name: Build and validate native Debian package
+      # Resolve apt and rustup before restoring compiled dependencies. Keep this
+      # exact container for the build so no second apt run can change its inputs.
+      - name: Prepare and identify native Debian builder
+        id: builder
         shell: bash
         run: |
+          set -euo pipefail
+          state="$(mktemp -d "$RUNNER_TEMP/diffz-deb.XXXXXX")"
+          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
           cargo_home="${CARGO_HOME:-$HOME/.cargo}"
           mkdir -p "$cargo_home/registry" "$cargo_home/git"
-          docker run --rm -i \
+          docker pull "$IMAGE"
+          image_id="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+          docker run --detach --cidfile "$state/container.cid" \
             -e SOURCE_DATE_EPOCH -e DIFFZ_DEB_REVISION="1~$TARGET" \
             -e GITHUB_REF_TYPE -e GITHUB_REF_NAME -e CARGO_HOME=/cargo \
             -v "$cargo_home/registry:/cargo/registry" -v "$cargo_home/git:/cargo/git" \
-            -v "$GITHUB_WORKSPACE:/src" -w /src "$IMAGE" bash -s <<'BUILD'
+            -v "$GITHUB_WORKSPACE:/src" -w /src "$image_id" tail -f /dev/null
+          builder_id="$(cat "$state/container.cid")"
+          printf 'image=%s\n' "$image_id" >> "$GITHUB_OUTPUT"
+          printf 'container=%s\n' "$builder_id" >> "$GITHUB_OUTPUT"
+          docker exec -i "$builder_id" bash -s <<'PREPARE'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
@@ -119,6 +129,37 @@ jobs:
             libssl-dev libzstd-dev libvulkan-dev \
             dpkg-dev binutils desktop-file-utils appstream
 
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain none
+          . /cargo/env
+          rustup show
+          PREPARE
+          digest="$(docker exec "$builder_id" bash -c \
+            '. /cargo/env; exec python3 scripts/debian-build-environment.py "$@"' -- \
+            --image-id "$image_id" --output /tmp/diffz-native-environment.json)"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid native build identity' >&2; exit 1; }
+          docker cp "$builder_id:/tmp/diffz-native-environment.json" "$state/native-environment.json"
+          printf 'native-key=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+      # prefix-key participates in BOTH exact and fallback restore keys. A new
+      # base image, installed native package, or actual compiler therefore cannot
+      # restore compiled dependencies from the previous native environment.
+      - name: Cache Cargo registry and dependency artifacts
+        if: ${{ env.USE_CACHE == 'true' }}
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: debian-native-v1-${{ steps.builder.outputs.native-key }}
+          key: ${{ matrix.target }}
+          cache-bin: false
+
+      - name: Build and validate native Debian package
+        shell: bash
+        env:
+          BUILDER_ID: ${{ steps.builder.outputs.container }}
+        run: |
+          docker exec -i "$BUILDER_ID" bash -s <<'BUILD'
+          set -euo pipefail
+          . /cargo/env
           python3 scripts/tests/test_stage_linux.py -v
           python3 scripts/tests/test_package_linux_deb.py
           version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
@@ -126,10 +167,6 @@ jobs:
             echo 'Release tag must match the Cargo workspace version.' >&2
             exit 1
           fi
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
-          sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain none
-          . /cargo/env
-          rustup show
           cargo build --locked --release -p diffz
           bash scripts/stage-linux.sh
           desktop-file-validate \
@@ -142,21 +179,36 @@ jobs:
             | tar -tf - -- ./usr/share/doc/diffz/THIRD_PARTY_NOTICES.md >/dev/null
           BUILD
 
+      - name: Remove the owned builder container
+        if: ${{ always() }}
+        env:
+          BUILDER_STATE: ${{ steps.builder.outputs.state }}
+        run: |
+          if [[ -n "$BUILDER_STATE" && -s "$BUILDER_STATE/container.cid" ]]; then
+            docker rm --force "$(cat "$BUILDER_STATE/container.cid")"
+          fi
+
       # The container runs as root. Return ownership so rust-cache's post step
       # can prune and save the target directory and registry.
       - name: Restore ownership of cached directories
         if: ${{ always() && env.USE_CACHE == 'true' }}
         run: |
           cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-          sudo chown -R "$(id -u):$(id -g)" target "$cargo_home/registry" "$cargo_home/git"
+          for path in target "$cargo_home/registry" "$cargo_home/git"; do
+            if [[ -d "$path" ]]; then
+              sudo chown -R "$(id -u):$(id -g)" "$path"
+            fi
+          done
 
       # Start again from the base image: build dependencies must not mask
       # incomplete runtime Depends. No compiler, Rust, gh, or glab is installed.
       - name: Install and smoke-test in a clean runtime container
         shell: bash
+        env:
+          RUNTIME_IMAGE: ${{ steps.builder.outputs.image }}
         run: |
           docker run --rm -i \
-            -v "$GITHUB_WORKSPACE/dist:/packages:ro" "$IMAGE" bash -s <<'INSTALL'
+            -v "$GITHUB_WORKSPACE/dist:/packages:ro" "$RUNTIME_IMAGE" bash -s <<'INSTALL'
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
           cd /packages
@@ -178,6 +230,14 @@ jobs:
           test -r /usr/share/icons/hicolor/scalable/apps/io.github.zzwong.Diffz.svg
           test -r /usr/share/doc/diffz/copyright
           INSTALL
+
+      - name: Upload native build environment evidence
+        if: ${{ always() && steps.builder.outputs.native-key != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diffz-${{ matrix.target }}-native-build-environment
+          path: ${{ steps.builder.outputs.state }}/native-environment.json
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
