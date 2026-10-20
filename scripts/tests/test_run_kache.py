@@ -33,7 +33,8 @@ class RuntimeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="diffz-kr-test-")
         self.addCleanup(self.temporary.cleanup)
-        self.base = Path(self.temporary.name)
+        # Child cwd resolves aliases such as macOS /var -> /private/var.
+        self.base = Path(self.temporary.name).resolve()
         self.checkout = self.base / "checkout with spaces"
         self.checkout.mkdir()
         self.config = self.checkout / "policy.toml"
