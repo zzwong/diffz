@@ -79,6 +79,54 @@ Wayland/X11 session. Check the workflow result before relying on an artifact.
 Pull requests build only Debian 12 and Ubuntu 26.04; pushes to `main`, release
 tags, and manual runs build all four.
 
+#### Native build cache identity
+
+The package workflow restores Cargo dependency artifacts only after preparing
+the distribution's builder. It pulls the selected base image, records its
+resolved image ID, installs native packages and the pinned Rust toolchain, and
+runs `scripts/debian-build-environment.py` inside that container. The helper
+hashes the image ID, installed package names/versions/architectures, the actual
+Rust/C/C++ compiler and linker executables and their version output, and the C
+compiler's target. It resolves Rust binaries through `rustup which`, so a
+rustup proxy is not mistaken for the selected compiler.
+
+This digest is part of both the exact and fallback Cargo cache prefixes. A
+changed native package, base image or compiler creates a different namespace;
+an unchanged native environment can still reuse dependencies across commits.
+The existing Cargo action separately keys Rust/Cargo configuration and source
+dependency inputs. The build runs in the same prepared container, with no
+second package installation between fingerprinting and compilation. Missing
+tools, failed probes or an unsaved identity receipt fail preparation before
+any compiled-artifact restore.
+
+Pull requests and pushes to `main` keep their existing cache restore/save
+policy. Release tags and manual runs remain cold and still collect the native
+identity. Each distribution uploads a separate `native-build-environment`
+artifact containing the digest and its allowlisted inputs, including after a
+later build failure. It contains no environment-variable dump. The workflow
+removes only its own temporary builder container and keeps the independent
+installation smoke test in a fresh container from the resolved base image.
+
+These are observed build inputs, not a fully immutable builder image: apt
+repositories can select newer packages on the next run. Package versions and
+compiler hashes do not attest to arbitrary manual changes inside a container.
+Keep native setup before the identity step; a future immutable builder image
+must include the native packages and Rust toolchain, rather than installing
+unversioned packages after its digest has been selected. Cache transfer cost,
+cross-host reuse and desktop rendering still need their own measurements.
+
+The identity and container lifecycle regression fixtures run without Rust,
+Docker or package installation:
+
+```sh
+python3 scripts/tests/test_debian_build_environment.py -v
+```
+
+The cache prefix behavior follows the pinned
+[Swatinem action's key construction](https://github.com/Swatinem/rust-cache/blob/6323deb102c322ba6fcbdcafc7e3dddab59af2b6/src/config.ts).
+
+#### Build and package locally
+
 Install the native build dependencies, then use the pinned rustup toolchain:
 
 ```sh
