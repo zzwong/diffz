@@ -1,0 +1,21 @@
+--- a/build.rs
++++ b/build.rs
+@@ -16,7 +16,17 @@
+     let mut vec_of_built_files = File::create(out_dir.join("generated-files.rs")).unwrap();
+     writeln!(vec_of_built_files, "vec![").unwrap();
+     for file in &built_files {
+-        writeln!(vec_of_built_files, "  {:?}.into(),", file.display()).unwrap();
++        // Keep producer sandbox paths out of generated compiler inputs. The
++        // listing helper resolves the file against its own compile-time OUT_DIR.
++        let relative = file
++            .strip_prefix(out_dir)
++            .expect("generated file must be inside OUT_DIR");
++        writeln!(
++            vec_of_built_files,
++            "  std::path::Path::new(env!(\"OUT_DIR\")).join({:?}),",
++            relative,
++        )
++        .unwrap();
+     }
+     writeln!(vec_of_built_files, "]").unwrap();
+ }

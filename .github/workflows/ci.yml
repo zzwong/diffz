@@ -37,6 +37,7 @@ jobs:
           python3 scripts/tests/test_prepare_ci_rust.py -v
           python3 scripts/tests/test_bootstrap_kache.py -v
           python3 scripts/tests/test_run_kache.py -v
+          python3 scripts/tests/test_cranelift_generators.py -v
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       - name: Test Linux profiler DRM parsing
@@ -47,6 +48,8 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run core checks
         run: bash scripts/check.sh core
+      - name: Check real Cranelift generator reproducibility
+        run: python3 scripts/verify-cranelift-generators.py --output "$RUNNER_TEMP/cranelift-generators"
       # cargo-deny-action builds a Docker image and rustup-installs the pinned
       # toolchain a second time inside Alpine. Use the same audited cargo-deny
       # release as that image, directly in our already prepared Rust environment.

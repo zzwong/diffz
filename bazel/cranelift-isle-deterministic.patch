@@ -1,0 +1,18 @@
+--- a/build.rs
++++ b/build.rs
+@@ -24,8 +24,13 @@
+ }
+ 
+ fn emit_tests(out: &mut String, dir_name: &str, runner_func: &str) {
+-    for test_file in std::fs::read_dir(dir_name).unwrap() {
+-        let test_file = test_file.unwrap().file_name().into_string().unwrap();
++    // Directory iteration order is not stable across filesystems or checkouts.
++    let mut test_files = std::fs::read_dir(dir_name)
++        .unwrap()
++        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
++        .collect::<Vec<_>>();
++    test_files.sort();
++    for test_file in test_files {
+         if !test_file.ends_with(".isle") {
+             continue;
+         }
