@@ -47,12 +47,17 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run core checks
         run: bash scripts/check.sh core
+      # cargo-deny-action builds a Docker image and rustup-installs the pinned
+      # toolchain a second time inside Alpine. Use the same audited cargo-deny
+      # release as that image, directly in our already prepared Rust environment.
+      # A pinned installer with checksum validation avoids source compilation.
+      - name: Install cargo-deny
+        uses: step-security/taiki-e-install-action@902be7994b3b54e9eac6fb41c67c1bb0ef9e444b # v2.87.18
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
       - name: Audit dependencies
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        env:
-          # The Alpine action owns this image path. Keep its musl toolchain out
-          # of the host job's Rust home and cache identity.
-          RUSTUP_HOME: /usr/local/rustup
+        run: cargo-deny --log-level warn --manifest-path ./Cargo.toml --all-features check
 
   # Compiles GPUI and the `desktop` feature, and runs the `diffz-ui` tests, which
   # `check` skips. The `cargo build` lines of `scripts/check.sh native` are left
