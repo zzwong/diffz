@@ -13,7 +13,10 @@ _FLAGS = ["-Copt-level=0", "-Cdebuginfo=1"] + select({
 def workspace_rustc_flags():
     return _FLAGS
 
-def diffz_crate(name, package, crate_name, features, deps):
+def diffz_crate(name, package, crate_name, features, deps, compile_data = [], unit_compile_data = []):
+    # Keep compiler inputs separate from fixtures read by the test launcher.
+    # A runtime-only fixture or packaging edit must not invalidate every crate.
+    crate_compile_data = _MANIFESTS + compile_data
     common = dict(
         edition = "2024",
         crate_features = features,
@@ -22,14 +25,15 @@ def diffz_crate(name, package, crate_name, features, deps):
         aliases = aliases(package_name = package),
         proc_macro_deps = all_crate_deps(package_name = package, proc_macro = True, proc_macro_dev = True),
         deps = deps + all_crate_deps(package_name = package, normal = True, normal_dev = True),
-        compile_data = _MANIFESTS + ["//:fixtures"] + native.glob([package + "/wit/**", package + "/src/**/*.sql", package + "/icons/**", "packaging/linux/**"], allow_empty = True),
     )
     source = package + "/src/" + ("main.rs" if name == "app" else "lib.rs")
     srcs = native.glob([package + "/src/**/*.rs"])
     rule = rust_binary if name == "app" else rust_library
-    rule(name = "diffz" if name == "app" else name, crate_name = crate_name, crate_root = source, srcs = srcs, **common)
+    rule(name = "diffz" if name == "app" else name, crate_name = crate_name, crate_root = source,
+         srcs = srcs, compile_data = crate_compile_data, **common)
     rust_test(name = name + "_unit_bin", crate_name = crate_name, crate_root = source,
-              srcs = srcs + native.glob([package + "/tests/support/**/*.rs"], allow_empty = True), tags = ["manual"], **common)
+              srcs = srcs + native.glob([package + "/tests/support/**/*.rs"], allow_empty = True),
+              compile_data = crate_compile_data + unit_compile_data, tags = ["manual"], **common)
     cargo_test(name = name + "_unit", binary = ":" + name + "_unit_bin", data = ["//:fixtures"])
     tests = [":" + name + "_unit"]
     for source in native.glob([package + "/tests/*.rs"], allow_empty = True):
