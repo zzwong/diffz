@@ -27,7 +27,10 @@ and cold-build cost. Its executable lives under
 `~/.cache/diffz/tools/...` when XDG_CACHE_HOME is unset or relative), so new
 worktrees and `cargo clean` reuse the installed tool. A full target clean still
 removes compiled app outputs; it does not empty Kache's artifact store.
-Each checkout keeps its own target directory and Make-selected daemon socket.
+By default, each checkout keeps its own target directory, Kache runtime state
+and daemon socket. Make resolves the policy's relative runtime path before Cargo
+enters individual crate directories, so their wrapper events use the same
+checkout runtime.
 See [Kache bootstrap](docs/kache-bootstrap.md) for installation locking,
 explicit tool overrides, first-install behavior, and bounded removal.
 

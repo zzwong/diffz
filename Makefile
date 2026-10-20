@@ -9,9 +9,10 @@ KACHE_ROOT = $(KACHE_TOOL_HOME)/kache/$(KACHE_VERSION)/$(KACHE_HOST)
 KACHE_BIN = $(KACHE_ROOT)/bin/kache
 # Make's abspath treats spaces as separators; let Python preserve a single path.
 KACHE_ABS_BIN = $(shell python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$(KACHE_BIN)")
-KACHE_CONFIG := $(abspath scripts/kache.toml)
-KACHE_SOCKET := $(abspath target/kache/runtime/daemon.sock)
-KACHE_ENV = KACHE_CONFIG="$(KACHE_CONFIG)" KACHE_HOST_CONFIG= KACHE_SOCKET_PATH="$(KACHE_SOCKET)" RUSTC_WRAPPER="$(KACHE_ABS_BIN)"
+# Resolve these quoted paths in Python; Make's abspath splits checkout spaces.
+KACHE_CONFIG := scripts/kache.toml
+KACHE_SOCKET := target/kache/runtime/daemon.sock
+KACHE_ENV = python3 scripts/run-kache.py --bin "$(KACHE_ABS_BIN)" --config "$(KACHE_CONFIG)" --socket "$(KACHE_SOCKET)" --
 
 # Development builds for `run` and `install-dev`. RELEASE=1 selects the release profile,
 # KACHE=0 builds with regular Cargo, and BIN=FILE makes install-dev skip the build.

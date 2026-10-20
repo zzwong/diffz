@@ -222,7 +222,8 @@ raise SystemExit(int(os.environ.get("FAKE_EXIT", "0")))
         checkout = self.base / name
         (checkout / "scripts").mkdir(parents=True)
         shutil.copy2(REPO / "Makefile", checkout / "Makefile")
-        shutil.copy2(SCRIPT, checkout / "scripts" / SCRIPT.name)
+        for name in (SCRIPT.name, "run-kache.py", "kache.toml"):
+            shutil.copy2(REPO / "scripts" / name, checkout / "scripts" / name)
         return checkout
 
     def run_make(self, checkout, *args, environment=None):
