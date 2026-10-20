@@ -37,6 +37,10 @@ def parse_args(argv=None):
     parser.add_argument("--bazel-arg", action="append", default=[])
     parser.add_argument("--cargo-arg", action="append", default=[])
     parser.add_argument("--cargo-profile", default="dev")
+    parser.add_argument("--cargo-compare-profile",
+                        help="Alternate this profile with --cargo-profile using isolated outputs")
+    parser.add_argument("--cargo-incremental", choices=("on", "off"), default="on",
+                        help="Explicit Cargo incremental setting for every variant (default: on)")
     parser.add_argument("--cargo-workload", choices=("workspace", "desktop"), default="workspace",
                         help="workspace: all features/targets; desktop: -p diffz --bin diffz")
     parser.add_argument("--cargo-toolchain", help="An already installed rustup toolchain")
@@ -56,6 +60,13 @@ def parse_args(argv=None):
         parser.error("--output is required unless --preflight is selected")
     if (args.cargo_workload == "desktop" or args.cargo_scenario or args.cargo_fingerprint != "default") and args.tool != "cargo":
         parser.error("desktop, reuse scenarios and fingerprint trials require --tool cargo")
+    if args.cargo_compare_profile is not None:
+        if args.tool != "cargo" or args.cargo_fingerprint != "default":
+            parser.error("profile comparisons require --tool cargo and --cargo-fingerprint default; measure fingerprint changes separately")
+        if not args.cargo_profile.strip() or not args.cargo_compare_profile.strip():
+            parser.error("profile comparisons require two nonempty profile names")
+        if args.cargo_profile == args.cargo_compare_profile:
+            parser.error("profile comparisons require two different profiles")
     if args.cargo_fingerprint != "default":
         match = re.fullmatch(r"nightly-(\d{4}-\d{2}-\d{2})", args.cargo_toolchain or "")
         try:
@@ -66,8 +77,8 @@ def parse_args(argv=None):
             parser.error("fingerprint trials require --cargo-toolchain nightly-YYYY-MM-DD >= 2026-09-02; use the same nightly for both modes")
     # Arbitrary global config can replace rustc, the fingerprint algorithm, or
     # owned output paths. Keep it for legacy screens, not controlled reuse trials.
-    if (args.cargo_fingerprint != "default" or args.cargo_scenario) and args.cargo_arg:
-        parser.error("--cargo-arg is not supported in fingerprint/reuse trials; select a tracked --cargo-profile")
+    if (args.cargo_fingerprint != "default" or args.cargo_scenario or args.cargo_compare_profile is not None) and args.cargo_arg:
+        parser.error("--cargo-arg is not supported in fingerprint/reuse/profile trials; select a tracked --cargo-profile")
     args.cargo_scenario = list(dict.fromkeys(args.cargo_scenario))
     return args
 
@@ -102,9 +113,9 @@ def preflight(args):
         raise RuntimeError("Missing scripts/bazel-trial.sh; run from a complete diffz checkout")
     revision = command_output(["git", "rev-parse", "HEAD"])
     state = command_output(["git", "status", "--porcelain", "--untracked-files=normal"])
-    snapshot = bool(args.cargo_scenario) or args.cargo_fingerprint != "default"
+    snapshot = bool(args.cargo_scenario) or args.cargo_fingerprint != "default" or args.cargo_compare_profile is not None
     if snapshot and state:
-        raise RuntimeError("Fingerprint/reuse trials require a clean, committed checkout so every Git worktree has identical inputs")
+        raise RuntimeError("Fingerprint/reuse/profile trials require a clean, committed checkout so every Git worktree has identical inputs")
     inherited = inherited_cargo_config_hashes(ROOT)
     scratch_parent = Path(os.environ.get("TMPDIR", "/var/tmp")).resolve()
     if snapshot and inherited_cargo_config_hashes(scratch_parent / "diffz-preflight" / "seed") != inherited:
@@ -198,6 +209,14 @@ def main(argv=None):
     artifacts = Path(tempfile.mkdtemp(prefix="cold-build-", dir=ROOT / "target"))
     tools = [args.tool] if args.tool != "both" else ["cargo", "bazel"]
     modes = ["mtime", "content"] if args.cargo_fingerprint == "both" else [args.cargo_fingerprint]
+    profiles = [args.cargo_profile]
+    if args.cargo_compare_profile is not None:
+        profiles.append(args.cargo_compare_profile)
+    # Numeric labels keep user-supplied profile names out of filesystem paths.
+    # Profile and fingerprint comparisons are separate experiments.
+    variants = [(profile, mode, f"cargo-profile-{index + 1}" if len(profiles) > 1
+                 else "cargo" if mode == "default" else "cargo-" + mode)
+                for index, profile in enumerate(profiles) for mode in modes]
     bazel = ["bash", "scripts/bazel-trial.sh"]
     repository_flags = (["--repository_cache=" + str(args.repository_cache.resolve())]
                         if args.repository_cache else [])
@@ -205,7 +224,6 @@ def main(argv=None):
              + [f"--jobs={args.jobs}", f"--local_resources=cpu={args.jobs}"]
              + args.bazel_arg + repository_flags + ["--disk_cache=", "--remote_cache="])
     cargo_base = tool_command(args, "cargo") + args.cargo_arg
-    cargo_profile = [] if args.cargo_profile == "dev" else ["--profile=" + args.cargo_profile]
     workload = (["-p", "diffz", "--bin", "diffz"] if args.cargo_workload == "desktop"
                 else ["--workspace", "--all-features", "--all-targets"])
     # Source worktrees live outside the checkout so ancestor Cargo config cannot
@@ -213,7 +231,7 @@ def main(argv=None):
     scratch = Path(tempfile.mkdtemp(prefix="diffz-cold-", dir=os.environ.get("TMPDIR", "/var/tmp"))).resolve()
     (scratch / "tmp").mkdir()
     base_env = {**os.environ, "TMPDIR": str(scratch / "tmp"), "RUSTC_WRAPPER": "",
-                "RUSTC_WORKSPACE_WRAPPER": "", "CARGO_INCREMENTAL": "1",
+                "RUSTC_WORKSPACE_WRAPPER": "", "CARGO_INCREMENTAL": "1" if args.cargo_incremental == "on" else "0",
                 "CARGO_TARGET_DIR": str(artifacts / "cargo"),
                 "CARGO_BUILD_BUILD_DIR": str(artifacts / "cargo"),
                 "DIFFZ_BAZEL_OUTPUT_ROOT": str(artifacts / "bazel"),
@@ -223,6 +241,9 @@ def main(argv=None):
     if controls["rustc_path"]:
         base_env["RUSTC"] = controls["rustc_path"]
     metadata = dict(schema_version=SCHEMA_VERSION, jobs=args.jobs, iterations=args.iterations, tools=tools, cargo_profile=args.cargo_profile,
+                    cargo_profiles=profiles, cargo_incremental=base_env["CARGO_INCREMENTAL"],
+                    cargo_variants=[dict(profile=profile, fingerprint=mode, label=label)
+                                    for profile, mode, label in variants],
                     cargo_workload=args.cargo_workload, cargo_toolchain=args.cargo_toolchain,
                     cargo_fingerprints=modes, cargo_scenarios=args.cargo_scenario,
                     artifacts=str(artifacts), source_scratch=str(scratch), source_hashes=source_hashes(ROOT),
@@ -245,7 +266,8 @@ def main(argv=None):
             log.write(json.dumps(row) + "\n")
         print(json.dumps(row), flush=True)
 
-    def run(name, command, *, cwd=ROOT, env=base_env, phase="setup", check=True):
+    def run(name, command, *, cwd=ROOT, env=base_env, phase="setup", check=True,
+            cargo_profile=None, scenario=None, iteration=None):
         start = time.monotonic()
         with (evidence / (name + ".log")).open("w") as log:
             log.write(f"cwd={cwd}\n{command!r}\n")
@@ -259,6 +281,9 @@ def main(argv=None):
         row = dict(name=name, phase=phase, command=command, cwd=str(cwd),
                    target_dir=env.get("CARGO_TARGET_DIR"), build_dir=env.get("CARGO_BUILD_BUILD_DIR"),
                    fingerprint=env.get("CARGO_BUILD_FINGERPRINT", "default"),
+                   cargo_profile=cargo_profile,
+                   cargo_incremental=env["CARGO_INCREMENTAL"] if cargo_profile is not None else None,
+                   scenario=scenario, iteration=iteration,
                    seconds=round(time.monotonic() - start, 4), exit_code=code)
         record(row)
         if check and code:
@@ -278,14 +303,19 @@ def main(argv=None):
         return cargo_base + owned + (["-Zchecksum-freshness", "--config", f'build.fingerprint="{mode}"']
                              if mode != "default" else [])
 
-    def build(name, command, cwd, env):
+    def profile_flags(profile):
+        # Preserve legacy dev/test selection for single-profile invocations.
+        # A comparison explicitly tests each named profile, including dev.
+        return [] if profile == "dev" and len(profiles) == 1 else ["--profile=" + profile]
+
+    def build(name, command, cwd, env, profile, *, scenario, iteration):
         run(name, command + ["build", "--locked", "--timings", f"-j{args.jobs}",
-                            "--target-dir", env["CARGO_TARGET_DIR"]] + workload + cargo_profile,
-            cwd=cwd, env=env, phase="build")
+                            "--target-dir", env["CARGO_TARGET_DIR"]] + workload + profile_flags(profile),
+            cwd=cwd, env=env, phase="build", cargo_profile=profile, scenario=scenario, iteration=iteration)
         timing = Path(env["CARGO_TARGET_DIR"]) / "cargo-timings/cargo-timing.html"
         shutil.copyfile(timing, evidence / (name + "-timing.html"))
 
-    def restore(name, target, restored):
+    def restore(name, target, restored, profile, iteration):
         start = time.monotonic()
         error = None
         try:
@@ -297,6 +327,8 @@ def main(argv=None):
             raise
         finally:
             row = dict(name=name, phase="restore", operation="copytree", source=str(target), destination=str(restored),
+                       cargo_profile=profile, cargo_incremental=base_env["CARGO_INCREMENTAL"],
+                       scenario="fresh-worktree-restore", iteration=iteration,
                        seconds=round(time.monotonic() - start, 4), exit_code=1 if error else 0, error=error)
             (evidence / (name + ".log")).write_text(json.dumps(row, indent=2) + "\n")
             record(row)
@@ -334,34 +366,38 @@ def main(argv=None):
                     run(f"bazel-cold-{i}", bazel + ["build", "//:all_build",
                         "--profile=" + str(evidence / f"bazel-profile-{i}.json.gz")] + flags, phase="build")
                     continue
-                for mode in modes if i % 2 else list(reversed(modes)):
-                    label = "cargo" if mode == "default" else "cargo-" + mode
+                for profile, mode, label in variants if i % 2 else list(reversed(variants)):
                     target = artifacts / label
                     env = cargo_env(mode, target)
                     command = cargo_command(mode, target)
-                    run(f"{label}-clean-{i}", command + ["clean", "--target-dir", str(target)], cwd=source, env=env)
-                    build(f"{label}-cold-{i}", command, source, env)
-                    if mode == "default":
+                    run(f"{label}-clean-{i}", command + ["clean", "--target-dir", str(target)], cwd=source, env=env,
+                        cargo_profile=profile, scenario="clean", iteration=i)
+                    build(f"{label}-cold-{i}", command, source, env, profile, scenario="cold", iteration=i)
+                    if mode == "default" and len(profiles) == 1:
                         shutil.copyfile(evidence / f"{label}-cold-{i}-timing.html", evidence / f"cargo-timing-{i}.html")
                     if "noop" in args.cargo_scenario:
-                        build(f"{label}-noop-{i}", command, source, env)
+                        build(f"{label}-noop-{i}", command, source, env, profile, scenario="noop", iteration=i)
                     if "fresh-worktree" in args.cargo_scenario:
                         fresh_label = f"{label}-fresh-{i}"
                         reader = add_worktree(fresh_label)
                         restored = artifacts / fresh_label
-                        restore(fresh_label + "-restore", target, restored)
-                        build(fresh_label, cargo_command(mode, restored), reader, cargo_env(mode, restored))
+                        restore(fresh_label + "-restore", target, restored, profile, i)
+                        build(fresh_label, cargo_command(mode, restored), reader, cargo_env(mode, restored), profile,
+                              scenario="fresh-worktree", iteration=i)
                     if "edit" in args.cargo_scenario:
                         for probe in PROBES:
                             with semantic_edit(source, probe, i):
-                                build(f"{label}-edit-{probe[0]}-{i}", command, source, env)
-                            build(f"{label}-undo-{probe[0]}-{i}", command, source, env)
+                                build(f"{label}-edit-{probe[0]}-{i}", command, source, env, profile,
+                                      scenario="edit-" + probe[0], iteration=i)
+                            build(f"{label}-undo-{probe[0]}-{i}", command, source, env, profile,
+                                  scenario="undo-" + probe[0], iteration=i)
         if "cargo" in tools:
-            for mode in modes:
-                label = "cargo" if mode == "default" else "cargo-" + mode
+            for profile, mode, label in variants:
+                verification_profile = "test" if profile == "dev" and len(profiles) == 1 else profile
                 run(label + "-tests", cargo_command(mode, artifacts / label) + ["test", "--locked", "--workspace", "--all-features",
-                    "--lib", "--bins", "--tests", f"-j{args.jobs}", "--target-dir", str(artifacts / label)] + cargo_profile,
-                    cwd=source, env=cargo_env(mode, artifacts / label), phase="verification")
+                    "--lib", "--bins", "--tests", f"-j{args.jobs}", "--target-dir", str(artifacts / label)] + profile_flags(profile),
+                    cwd=source, env=cargo_env(mode, artifacts / label), phase="verification",
+                    cargo_profile=verification_profile, scenario="verification")
         if "bazel" in tools:
             run("bazel-tests", bazel + ["test", "//:tests", "--cache_test_results=no"] + flags, phase="verification")
         completed = True

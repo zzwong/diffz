@@ -10,11 +10,13 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -23,6 +25,17 @@ from urllib.parse import unquote, urlsplit
 
 
 SCHEMA = 1
+GIB = 1024 ** 3
+POLL_SECONDS = 0.1
+INTERRUPT_GRACE_SECONDS = 5
+TERMINATE_GRACE_SECONDS = 2
+KILL_WAIT_SECONDS = 2
+BAZEL_STRATEGY_FLAGS = (
+    "--spawn_strategy=linux-sandbox",
+    "--strategy_regexp=.*=linux-sandbox",
+    "--strategy=TestRunner=linux-sandbox",
+    "--noincompatible_legacy_local_fallback",
+)
 ROOT = Path(__file__).resolve().parent.parent
 TEST_ROOT = "/var/tmp/diffz-bazel-qualification-tests"
 NATIVE_PACKAGES = (
@@ -40,6 +53,149 @@ FORBIDDEN_ENV = (
 
 class QualificationError(Exception):
     pass
+
+
+class Cancelled(QualificationError):
+    def __init__(self, signum):
+        self.signum = signum
+        super().__init__(f"Qualification interrupted by signal {signum}.")
+
+
+class PhaseError(QualificationError):
+    def __init__(self, message, result):
+        self.result = result
+        super().__init__(message)
+
+
+@contextmanager
+def cancellation_signals(defer=False):
+    pending = {}
+
+    def cancel(signum, _frame):
+        if defer:
+            pending.setdefault("signal", signum)
+        else:
+            raise Cancelled(signum)
+
+    previous = {}
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous[signum] = signal.signal(signum, cancel)
+    try:
+        yield pending
+        if pending.get("signal") and not pending.get("handled"):
+            raise Cancelled(pending["signal"])
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def resource_policy(args):
+    phase_timeout = getattr(args, "phase_timeout_seconds", 1800)
+    runtime_timeout = getattr(args, "runtime_timeout_seconds", 60)
+    reserve_gib = getattr(args, "disk_reserve_gib", 2)
+    if any(not math.isfinite(value) or value <= 0 for value in (phase_timeout, runtime_timeout)):
+        raise QualificationError("Phase and runtime timeouts must be finite and positive.")
+    if not math.isfinite(reserve_gib * GIB) or reserve_gib < 2:
+        raise QualificationError("--disk-reserve-gib must be finite and at least 2 GiB.")
+    reserve = math.ceil(reserve_gib * GIB)
+    return {"phase_timeout_seconds": phase_timeout, "runtime_timeout_seconds": runtime_timeout,
+            "startup_free_bytes": reserve + GIB // 2, "interrupt_free_bytes": reserve,
+            "kill_free_bytes": reserve - GIB // 4, "poll_seconds": POLL_SECONDS,
+            "filesystem_scope": "The evidence directory filesystem, including this run's Bazel output root.",
+            "execution_mode": "batch", "bazel_strategy_flags": list(BAZEL_STRATEGY_FLAGS),
+            "test_strategy": "standalone"}
+
+
+def free_bytes(path):
+    return shutil.disk_usage(path).free
+
+
+def require_process_visibility():
+    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise QualificationError("Qualification requires default SIGCHLD handling so the owned phase leader is not reaped asynchronously.")
+    # A host /proc bind mount inside another PID namespace exposes IDs that
+    # cannot safely be compared with Popen.pid or used with killpg.
+    stat = Path("/proc/self/stat").read_text()
+    fields = stat.rsplit(")", 1)[1].split()
+    if int(stat.split(" ", 1)[0]) != os.getpid() or int(fields[2]) != os.getpgrp():
+        raise QualificationError("Qualification requires /proc in the same PID namespace as this process.")
+
+
+def group_members(pgid):
+    """Observe only live members of our phase's Linux process group, not argv."""
+    members = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            if int(fields[2]) == pgid and fields[0] not in ("Z", "X"):
+                members.append(int(entry.name))
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+    return sorted(members)
+
+
+def process_finished(process):
+    # Keep the leader unreaped while inspecting/signalling its group. Its PID
+    # cannot be recycled underneath a cleanup operation after a quick exit.
+    return os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+
+
+def finish_group(process, result, sample, policy):
+    members = group_members(process.pid)
+    cleanup = {"signals": [], "forced_kill": False, "live_members_after": members}
+    if not members:
+        return cleanup
+    if result["stop_reason"] is None:
+        result["stop_reason"] = "live_descendants_after_phase_exit"
+    started = time.monotonic()
+    last_signal = None
+    kill_started = None
+    while members:
+        now = time.monotonic()
+        try:
+            available = sample()
+        except OSError:
+            available = None
+        elapsed = now - started
+        below_floor = available is not None and available < policy["kill_free_bytes"]
+        grace_expired = elapsed >= INTERRUPT_GRACE_SECONDS + TERMINATE_GRACE_SECONDS
+        if kill_started is not None or below_floor or grace_expired:
+            requested = signal.SIGKILL
+        elif elapsed >= INTERRUPT_GRACE_SECONDS:
+            requested = signal.SIGTERM
+        else:
+            requested = signal.SIGINT
+        if requested != last_signal:
+            try:
+                os.killpg(process.pid, requested)
+                cleanup["signals"].append(int(requested))
+            except ProcessLookupError:
+                pass
+            last_signal = requested
+            if requested == signal.SIGKILL:
+                cleanup["forced_kill"] = True
+                kill_started = now
+        if kill_started is not None and now - kill_started >= KILL_WAIT_SECONDS:
+            break
+        time.sleep(POLL_SECONDS)
+        members = group_members(process.pid)
+    cleanup["live_members_after"] = group_members(process.pid)
+    return cleanup
+
+
+def force_owned_group_stop(process, row):
+    # Call only while the Popen leader remains unreaped; its group ID cannot
+    # have been recycled even when /proc observation failed or was incomplete.
+    cleanup = row.setdefault("cleanup", {})
+    cleanup.update(fallback_signal=int(signal.SIGKILL), forced_kill=True)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as error:
+        row["cleanup_error"] += f"; SIGKILL failed: {error}"
 
 
 def digest(value):
@@ -105,6 +261,7 @@ def bazel_binary(root):
 def collect_identity(args, root=ROOT):
     if (platform.system(), platform.machine()) != ("Linux", "x86_64"):
         raise QualificationError("The current graph is qualified only for Linux x86_64.")
+    require_process_visibility()
     forbidden = [key for key in FORBIDDEN_ENV if os.environ.get(key) or
                  (key == "BAZEL_RUST_STDLIB_LINKFLAGS" and key in os.environ)]
     if forbidden:
@@ -247,6 +404,13 @@ def build_evidence(events):
                                 if key not in ("internal", "total", "remote cache hit") and value}}
 
 
+def require_sandbox_runners(execution):
+    unexpected = {name: count for name, count in execution["runners"].items()
+                  if count and name not in ("internal", "total", "remote cache hit", "linux-sandbox")}
+    if unexpected:
+        raise QualificationError("Execution did not use the required linux-sandbox strategy: " + json.dumps(unexpected, sort_keys=True))
+
+
 def test_evidence(events):
     require_successful_finish(events)
     results = [event["testResult"] for event in events if "testResult" in event]
@@ -296,12 +460,19 @@ def materialized_linker(identity, output_root, env):
 
 
 @contextmanager
-def local_test_lock():
+def local_test_lock(timeout_seconds=1800):
     """Serialize only forced test execution; keep the action-visible path stable."""
     lock = Path(TEST_ROOT + ".lock")
     with lock.open("a") as stream:
         started = time.monotonic()
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        while True:
+            try:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() - started >= timeout_seconds:
+                    raise QualificationError("Timed out waiting for the host-local qualification test lock.")
+                time.sleep(POLL_SECONDS)
         try:
             yield time.monotonic() - started
         finally:
@@ -311,7 +482,7 @@ def local_test_lock():
 def make_flags(args, identity, phase, output):
     native_hash = identity["native_sha256"]
     producer_build = args.command == "producer" and phase == "build"
-    flags = ["--config=fast-dev", "--disk_cache=", "--remote_executor=",
+    flags = ["--config=fast-dev", *BAZEL_STRATEGY_FLAGS, "--disk_cache=", "--remote_executor=",
              "--remote_cache=" + args.cache_endpoint,
              "--remote_instance_name=diffz-qualification/" + native_hash,
              "--remote_cache_compression", "--remote_download_outputs=all",
@@ -329,24 +500,102 @@ def make_flags(args, identity, phase, output):
     if args.credential_helper:
         flags.append("--credential_helper=" + urlsplit(args.cache_endpoint).hostname + "=" + str(args.credential_helper))
     if phase == "test":
-        flags.extend(("--cache_test_results=no", "--test_strategy=local"))
+        flags.extend(("--cache_test_results=no", "--test_strategy=standalone"))
     return flags
 
 
-def run_logged(name, argv, output, env, root):
+def run_logged(name, argv, output, env, root, policy):
+    # Queue cancellation around Popen so an asynchronous exception cannot land
+    # between launching the child and saving the process handle for cleanup.
+    with cancellation_signals(defer=True) as pending:
+        return guarded_phase(name, argv, output, env, root, policy, pending)
+
+
+def guarded_phase(name, argv, output, env, root, policy, pending):
     started = time.monotonic()
-    with (output / (name + ".log")).open("w") as stream:
-        if name in ("version", "inspect"):
-            with (output / (name + ".stdout")).open("w") as stdout:
-                process = subprocess.run(argv, cwd=root, env=env, stdout=stdout, stderr=stream, check=False)
-        else:
-            process = subprocess.run(argv, cwd=root, env=env, stdout=stream, stderr=subprocess.STDOUT, check=False)
-    row = {"phase": name, "argv": argv, "exit_code": process.returncode,
-           "seconds": time.monotonic() - started}
+    runtime = name in ("version", "inspect")
+    timeout = policy["runtime_timeout_seconds" if runtime else "phase_timeout_seconds"]
+    process = None
+    row = {"phase": name, "argv": argv, "status": "not_started", "exit_code": None,
+           "stop_reason": None, "timeout_seconds": timeout, "minimum_free_bytes": None}
+    with (output / (name + ".log")).open("w") as stream, \
+         (output / (name + ".resources.jsonl")).open("w") as resources:
+        stdout = (output / (name + ".stdout")).open("w") if runtime else stream
+
+        def sample():
+            available = free_bytes(output)
+            row["minimum_free_bytes"] = min(available, row["minimum_free_bytes"] if row["minimum_free_bytes"] is not None else available)
+            resources.write(json.dumps({"seconds": time.monotonic() - started, "free_bytes": available}) + "\n")
+            resources.flush()
+            return available
+
+        try:
+            if pending.get("signal"):
+                row.update(stop_reason="cancelled", cancellation_signal=pending["signal"])
+                pending["handled"] = True
+            elif sample() < policy["startup_free_bytes"]:
+                row["stop_reason"] = "insufficient_disk_before_start"
+            else:
+                require_process_visibility()
+                process = subprocess.Popen(argv, cwd=root, env=env, stdout=stdout,
+                                           stderr=stream if runtime else subprocess.STDOUT,
+                                           start_new_session=True)
+                row.update(status="running", process_group=process.pid)
+                while True:
+                    if pending.get("signal"):
+                        row.update(stop_reason="cancelled", cancellation_signal=pending["signal"])
+                        pending["handled"] = True
+                        break
+                    if sample() < policy["interrupt_free_bytes"]:
+                        row["stop_reason"] = "disk_reserve_guard"
+                        break
+                    if time.monotonic() - started >= timeout:
+                        row["stop_reason"] = "phase_timeout"
+                        break
+                    if process_finished(process):
+                        break
+                    time.sleep(POLL_SECONDS)
+        except Cancelled as error:
+            row.update(stop_reason="cancelled", cancellation_signal=error.signum)
+        except Exception as error:
+            row.update(stop_reason="monitor_or_launch_error", error=f"{type(error).__name__}: {error}")
+        finally:
+            if pending.get("signal") and not pending.get("handled"):
+                row.update(stop_reason="cancelled", cancellation_signal=pending["signal"])
+                pending["handled"] = True
+            # The deferred handler remains active: cleanup cannot be aborted
+            # by another signal, and a first cancellation here is not lost.
+            if process is not None:
+                try:
+                    row["cleanup"] = finish_group(process, row, sample, policy)
+                    if row["cleanup"]["live_members_after"]:
+                        row["cleanup_error"] = "Owned process group still has observed live members after bounded cleanup."
+                except Exception as error:
+                    row["cleanup_error"] = f"{type(error).__name__}: {error}"
+                    force_owned_group_stop(process, row)
+                try:
+                    row["exit_code"] = process.wait(timeout=KILL_WAIT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    row["cleanup_error"] = row.get("cleanup_error", "") + " Phase leader remained alive after bounded cleanup; process observation may be incomplete."
+                    force_owned_group_stop(process, row)
+                    try:
+                        row["exit_code"] = process.wait(timeout=KILL_WAIT_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        row["cleanup_error"] += " Phase leader still has not exited after fallback SIGKILL."
+            if pending.get("signal") and not pending.get("handled"):
+                row.update(stop_reason="cancelled", cancellation_signal=pending["signal"])
+                pending["handled"] = True
+            if process is not None:
+                complete = row["exit_code"] == 0 and row["stop_reason"] is None and not row.get("cleanup_error")
+                row["status"] = "complete" if complete else "failed"
+            if runtime:
+                stdout.close()
+    row["seconds"] = time.monotonic() - started
     with (output / "commands.jsonl").open("a") as stream:
         stream.write(json.dumps(row) + "\n")
-    if process.returncode:
-        raise QualificationError(f"{name} failed; inspect {output / (name + '.log')}")
+    if row["status"] != "complete":
+        reason = row["stop_reason"] or row.get("cleanup_error") or f"exit {row['exit_code']}"
+        raise PhaseError(f"{name} failed ({reason}); inspect {output / (name + '.log')}", row)
     return row
 
 
@@ -388,12 +637,20 @@ def prepare_output(path, root):
 
 
 def execute(args, root=ROOT):
+    with cancellation_signals():
+        return execute_guarded(args, root)
+
+
+def execute_guarded(args, root=ROOT):
     output = prepare_output(args.output, root)
     report = {"schema": SCHEMA, "mode": args.command, "status": "failed"}
     env = None
-    server_started = False
     comparison = None
     try:
+        policy = resource_policy(args)
+        available = free_bytes(output)
+        report.update(resource_policy=policy,
+                      resource_preflight={"free_bytes": available, "startup_ready": available >= policy["startup_free_bytes"]})
         identity, binary = collect_identity(args, root)
         report["identity"] = identity
         write_json(output / "preflight.json", identity)
@@ -427,6 +684,7 @@ def execute(args, root=ROOT):
                "CC": identity["native"]["configured_environment"]["cc"],
                "CXX": identity["native"]["configured_environment"]["cxx"],
                "RUSTC_WRAPPER": "", "RUSTC_WORKSPACE_WRAPPER": "",
+               "DIFFZ_BAZEL_BATCH": "1",
                "DIFFZ_BAZEL_CACHE": "0", "DIFFZ_BAZEL_REMOTE_CACHE_READ_ONLY": "0",
                "DIFFZ_BAZEL_OUTPUT_ROOT": str(output_root),
                "DIFFZ_BAZEL_TEST_TMP_ROOT": TEST_ROOT}
@@ -434,17 +692,20 @@ def execute(args, root=ROOT):
         env.pop("DIFFZ_BAZEL_REPO_CONTENTS_CACHE", None)
         driver = ["bash", str(root / "scripts/bazel-trial.sh")]
         for phase, target in (("build", "//:all_build"), ("test", "//:tests")):
-            server_started = True
             argv = driver + [phase, target] + make_flags(args, identity, phase, output)
             if phase == "test":
-                with local_test_lock() as wait_seconds:
+                with local_test_lock(policy["phase_timeout_seconds"]) as wait_seconds:
                     report.setdefault("timings", {})["test_lock_wait"] = wait_seconds
-                    row = run_logged(phase, argv, output, env, root)
+                    row = run_logged(phase, argv, output, env, root, policy)
             else:
-                row = run_logged(phase, argv, output, env, root)
+                row = run_logged(phase, argv, output, env, root, policy)
             events = read_events(output / (phase + ".bep.jsonl"))
-            report["build" if phase == "build" else "tests"] = build_evidence(events) if phase == "build" else test_evidence(events)
+            execution = build_evidence(events)
+            report["build" if phase == "build" else "test_execution"] = execution
             report.setdefault("timings", {})[phase] = row["seconds"]
+            require_sandbox_runners(execution)
+            if phase == "test":
+                report["tests"] = test_evidence(events)
             if phase == "build" and args.command == "consumer":
                 if report["build"]["remote_cache_hits"] <= 0 or report["build"]["other_execution"]:
                     raise QualificationError("Consumer ran uncached build actions; inspect BEP runner counts. This is not full cache portability.")
@@ -460,7 +721,7 @@ def execute(args, root=ROOT):
         state = output / "runtime/state"
         for name, flags in (("version", ["--version"]),
                             ("inspect", ["--inspect", "--fixture", "F01", "--state-dir", str(state)])):
-            run_logged(name, [str(app)] + flags, output, runtime_env, root)
+            run_logged(name, [str(app)] + flags, output, runtime_env, root, policy)
             text = (output / (name + ".stdout")).read_text().strip()
             runtime[name] = json.loads(text) if name == "inspect" else text
         report["runtime"] = runtime
@@ -472,15 +733,14 @@ def execute(args, root=ROOT):
         return report
     except (QualificationError, OSError, ValueError, KeyError) as error:
         report["error"] = str(error)
+        if isinstance(error, PhaseError):
+            report["failed_phase"] = error.result
+        if isinstance(error, Cancelled):
+            report["cancellation_signal"] = error.signum
+        if isinstance(error, QualificationError):
+            raise
         raise QualificationError(str(error)) from error
     finally:
-        if server_started:
-            shutdown = capture(["bash", str(root / "scripts/bazel-trial.sh"), "shutdown"], cwd=root, env=env)
-            report["shutdown"] = shutdown
-            if shutdown["exit_code"]:
-                report["status"] = "failed"
-                report["cleanup_error"] = "Bazel shutdown failed; inspect result.json and stop only this run's output root."
-                report.setdefault("error", report["cleanup_error"])
         if report["status"] == "complete" and comparison is not None:
             write_json(output / "comparison.json", comparison)
         write_json(output / "result.json", report)
@@ -495,6 +755,12 @@ def main(argv=None):
         command.add_argument("--native-environment-id", required=True, help="Immutable image/native-environment identifier, identical on both hosts")
         command.add_argument("--host-label", default=socket.gethostname())
         command.add_argument("--native-file", type=Path, action="append", default=[], help="Additional native file whose path and bytes must match")
+        command.add_argument("--phase-timeout-seconds", type=float, default=1800,
+                             help="Positive timeout for each build/test phase and for acquiring the test lock (default: 1800)")
+        command.add_argument("--runtime-timeout-seconds", type=float, default=60,
+                             help="Positive timeout for each application runtime probe (default: 60)")
+        command.add_argument("--disk-reserve-gib", type=float, default=2,
+                             help="At least 2 GiB; startup requires an extra 0.5 GiB, with forced stop 0.25 GiB below reserve")
         if mode != "preflight":
             command.add_argument("--cache-endpoint", required=True)
             command.add_argument("--confirm-instance-isolation", action="store_true", help="Acknowledge verified service configuration; this does not probe it")
@@ -519,11 +785,16 @@ def main(argv=None):
             result = {"mode": result["mode"], "status": result["status"],
                       "evidence": str(args.output.resolve()),
                       "native_sha256": result["identity"]["native_sha256"],
+                      "resource_preflight": result.get("resource_preflight", {}),
                       "timings": result.get("timings", {})}
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except (QualificationError, OSError, ValueError, KeyError) as error:
         print("Qualification failed: " + str(error), file=sys.stderr)
+        if isinstance(error, Cancelled):
+            return 128 + error.signum
+        if isinstance(error, PhaseError) and error.result.get("cancellation_signal"):
+            return 128 + error.result["cancellation_signal"]
         return 2
 
 
