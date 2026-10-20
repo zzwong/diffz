@@ -50,6 +50,8 @@ if any(arg in ("-V", "-Vv", "--version") for arg in args):
     sys.exit(0)
 
 operation = next(arg for arg in args if arg in ("fetch", "clean", "build", "test", "shutdown"))
+profile = next((arg.split("=", 1)[1] for arg in args if arg.startswith("--profile=")),
+               "test" if operation == "test" else "dev")
 cwd = Path.cwd()
 target = Path(os.environ["CARGO_TARGET_DIR"])
 sources = {str(path): (cwd / path).read_text() for path in (
@@ -57,6 +59,7 @@ sources = {str(path): (cwd / path).read_text() for path in (
 row = dict(tool=tool, operation=operation, args=args, selected_toolchain=selected,
            cwd=str(cwd), target=str(target), build_dir=os.environ["CARGO_BUILD_BUILD_DIR"],
            rustc=os.environ.get("RUSTC"), wrapper=os.environ.get("RUSTC_WRAPPER"),
+           profile=profile, incremental=os.environ.get("CARGO_INCREMENTAL"),
            fingerprint=os.environ.get("CARGO_BUILD_FINGERPRINT"), sources=sources,
            source_mtimes={path: (cwd / path).stat().st_mtime_ns for path in sources})
 marker = target / "fixture-seed"
@@ -76,6 +79,8 @@ if operation == "clean":
     shutil.rmtree(target, ignore_errors=True)
 elif operation == "build":
     assert args[args.index("--target-dir") + 1] == str(target), args
+    if profile == os.environ.get("FIXTURE_FAIL_PROFILE"):
+        sys.exit(23)
     core = cwd / "crates/core/src/patch.rs"
     if "41_720" in core.read_text():
         if os.environ.get("FIXTURE_CONCURRENT_EDIT"):
@@ -183,7 +188,89 @@ class HarnessTests(unittest.TestCase):
                             and "--all-targets" in call["args"] for call in builds))
         self.assertTrue((self.evidence / "cargo-timing-1.html").is_file())
         self.assertTrue(json.loads((self.evidence / "completion.json").read_text())["completed"])
+        self.assertTrue(all(call["incremental"] == "1" for call in builds))
+        tests = [row for row in rows if row["phase"] == "verification" and row["name"] == "cargo-tests"]
+        self.assertEqual(tests[0]["cargo_profile"], "test")
         self.assert_original_checkout()
+
+    def test_profile_pairs_alternate_with_isolated_targets_and_matching_edits(self):
+        with mock.patch.dict(os.environ, {"CARGO_INCREMENTAL": "1"}):
+            self.invoke("--cargo-workload", "desktop", "--cargo-profile", "dev",
+                        "--cargo-compare-profile", "fast-dev", "--cargo-incremental", "off",
+                        "--iterations", "2", "--cargo-scenario", "noop", "--cargo-scenario", "edit",
+                        "--cargo-scenario", "fresh-worktree")
+        rows = self.read_rows()
+        cold = [row for row in rows if "-cold-" in row["name"]]
+        self.assertEqual([row["cargo_profile"] for row in cold], ["dev", "fast-dev", "fast-dev", "dev"])
+        self.assertEqual([row["iteration"] for row in cold], [1, 1, 2, 2])
+        self.assertTrue(all(row["scenario"] == "cold" for row in cold))
+        self.assertEqual([row["name"] for row in cold], ["cargo-profile-1-cold-1", "cargo-profile-2-cold-1",
+                                                        "cargo-profile-2-cold-2", "cargo-profile-1-cold-2"])
+        setup = json.loads((self.evidence / "setup.json").read_text())
+        self.assertEqual(setup["cargo_profiles"], ["dev", "fast-dev"])
+        self.assertEqual(setup["cargo_incremental"], "0")
+        self.assertTrue(setup["source_snapshot"])
+        builds = [call for call in self.compiler_calls() if call["operation"] == "build"]
+        for call in builds:
+            self.assertEqual(call["incremental"], "0")
+            self.assertEqual(call["wrapper"], "")
+            self.assertIn("--profile=" + call["profile"], call["args"])
+            self.assertEqual(call["args"][call["args"].index("-p") + 1], "diffz")
+            self.assertEqual(call["args"][call["args"].index("--bin") + 1], "diffz")
+            self.assertEqual(call["target"], call["build_dir"])
+            self.assertNotEqual(call["cwd"], str(self.root))
+        for profile in ("dev", "fast-dev"):
+            own = [call for call in builds if call["profile"] == profile]
+            other = [call for call in builds if call["profile"] != profile]
+            self.assertTrue({call["target"] for call in own}.isdisjoint(call["target"] for call in other))
+        # Each profile observes the same sequence of source contents despite
+        # reversed scheduling and fresh worktrees with independent file mtimes.
+        source_sequences = {profile: [call["sources"] for call in builds if call["profile"] == profile]
+                            for profile in ("dev", "fast-dev")}
+        self.assertEqual(source_sequences["dev"], source_sequences["fast-dev"])
+        fresh = [call for call in builds if "-fresh-" in call["cwd"]]
+        self.assertEqual(len(fresh), 4)
+        self.assertTrue(all("seed_mtime" in call for call in fresh))
+        verification = [call for call in self.compiler_calls() if call["operation"] == "test"]
+        self.assertEqual([call["profile"] for call in verification], ["dev", "fast-dev"])
+        self.assertTrue(all("--all-features" in call["args"] and "--workspace" in call["args"] for call in verification))
+        self.assertTrue(all(call["incremental"] == "0" for call in verification))
+        profiled = [row for row in rows if row.get("cargo_profile") is not None]
+        self.assertTrue(all(row["cargo_incremental"] == "0" for row in profiled))
+        scenarios = {row["scenario"] for row in rows if row["phase"] == "build"}
+        self.assertEqual(scenarios, {"cold", "noop", "fresh-worktree", "edit-core", "undo-core",
+                                    "edit-ui", "undo-ui", "edit-app", "undo-app"})
+        self.assertEqual(len([row for row in rows if row["phase"] == "restore"]), 4)
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def test_failed_second_profile_is_not_a_completed_comparison(self):
+        with mock.patch.dict(os.environ, {"FIXTURE_FAIL_PROFILE": "fast-dev"}):
+            with self.assertRaisesRegex(RuntimeError, "cargo-profile-2-cold-1 failed"):
+                self.invoke("--cargo-compare-profile", "fast-dev")
+        failure = next(row for row in self.read_rows() if row["name"] == "cargo-profile-2-cold-1")
+        self.assertEqual((failure["cargo_profile"], failure["exit_code"]), ("fast-dev", 23))
+        completion = json.loads((self.evidence / "completion.json").read_text())
+        self.assertFalse(completion["completed"])
+        self.assertEqual(completion["retained_worktrees"], [])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def test_profile_comparison_rejects_dirty_source_even_without_reuse_scenarios(self):
+        self.write("crates/core/src/patch.rs", "uncommitted change\n")
+        with self.assertRaisesRegex(SystemExit, "clean, committed checkout"):
+            self.invoke("--cargo-compare-profile", "fast-dev")
+        self.assertFalse(self.evidence.exists())
+        self.assertEqual(self.compiler_calls(), [])
+
+    def test_profile_comparison_controls_reject_ambiguous_variants(self):
+        extras = (["--cargo-profile", "fast-dev"], ["--tool", "both"],
+                  ["--cargo-fingerprint", "both", "--cargo-toolchain", "nightly-2026-10-19"],
+                  ["--cargo-arg=--release"], ["--cargo-incremental", "inherit"],
+                  ["--cargo-compare-profile", ""])
+        for extra in extras:
+            with self.subTest(extra=extra), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                BENCH.parse_args(["--preflight", "--tool", "cargo", "--cargo-compare-profile", "fast-dev", *extra])
 
     def test_paired_nightly_desktop_and_reuse_have_identical_inputs(self):
         self.invoke("--cargo-workload", "desktop", "--cargo-profile", "fast-dev",
@@ -277,7 +364,7 @@ class HarnessTests(unittest.TestCase):
         self.assertFalse(json.loads((self.evidence / "completion.json").read_text())["completed"])
 
     def test_preflight_creates_no_evidence_worktrees_or_builds(self):
-        self.invoke("--preflight")
+        self.invoke("--preflight", "--cargo-compare-profile", "fast-dev", "--cargo-incremental", "off")
         self.assertFalse(self.evidence.exists())
         self.assertEqual(self.compiler_calls(), [])
         self.assertEqual(list(self.scratch.iterdir()), [])

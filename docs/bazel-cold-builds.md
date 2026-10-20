@@ -216,9 +216,10 @@ records cleanup and original-source hash checks.
 
 ## Controlled desktop and fresh-worktree trials
 
-The runner also supports explicit Cargo workloads, real edit probes, and a paired
-nightly fingerprint experiment. These are benchmark controls added in
-[#124](https://github.com/zzwong/diffz/issues/124), not new performance results.
+The runner also supports explicit Cargo workloads, real edit probes, paired
+profile comparisons, and a separate paired nightly fingerprint experiment. These
+extend the benchmark controls from [#124](https://github.com/zzwong/diffz/issues/124)
+and do not constitute new performance results.
 Current Linux/macOS measurements and any decision to promote a profile or cache
 remain tracked in [#115](https://github.com/zzwong/diffz/issues/115).
 
@@ -237,26 +238,57 @@ application with `-p diffz --bin diffz` and its default features. A bare
 desktop benchmark. Desktop and reuse modes require `--tool cargo`; the existing
 matched Cargo/Bazel cold comparison remains available with the default workload.
 
-For a desktop profile comparison, run the same command once with `dev` and once
-with `fast-dev`, using distinct evidence directories:
+### Paired Cargo profile comparison
+
+Compare the existing `dev` and `fast-dev` profiles in one invocation. Each
+iteration builds both profiles from empty compiled-output directories, reversing
+their order on alternating iterations: `dev`, `fast-dev`, then `fast-dev`, `dev`.
+Both variants use the same committed source worktree and have independent target
+and build directories. Requested no-op, edit/undo, and fresh-worktree scenarios
+run for each profile. Three iterations therefore include six cold builds, the
+requested follow-up builds, and final all-feature workspace tests for both
+profiles. These commands are opt-in local trials, not additional CI jobs.
 
 ```sh
-python3 scripts/benchmark-cold-builds.py --tool cargo --jobs 32 --iterations 3 \
-  --cargo-workload desktop --cargo-profile dev \
-  --cargo-scenario noop --cargo-scenario edit \
-  --output "$HOME/.local/state/diffz/evidence/desktop-dev-new"
+python3 scripts/benchmark-cold-builds.py --tool cargo --preflight --jobs 4 \
+  --cargo-workload desktop --cargo-profile dev --cargo-compare-profile fast-dev \
+  --cargo-incremental on --cargo-scenario noop --cargo-scenario edit
 
-python3 scripts/benchmark-cold-builds.py --tool cargo --jobs 32 --iterations 3 \
-  --cargo-workload desktop --cargo-profile fast-dev \
-  --cargo-scenario noop --cargo-scenario edit \
-  --output "$HOME/.local/state/diffz/evidence/desktop-fast-dev-new"
+python3 scripts/benchmark-cold-builds.py --tool cargo --jobs 4 --iterations 3 \
+  --cargo-workload desktop --cargo-profile dev --cargo-compare-profile fast-dev \
+  --cargo-incremental on --cargo-scenario noop --cargo-scenario edit \
+  --output "$HOME/.local/state/diffz/evidence/desktop-profile-pair-new"
 ```
 
 Keep revision, toolchain, jobs, native compilers, flags, features and host the
-same. Repeat with profile order reversed before attributing a small difference to
-the profile. The script does not modify profile defaults. Native compilers default
-to `/usr/bin/gcc` and `/usr/bin/g++` on Linux, and Apple's `/usr/bin/clang` and
-`/usr/bin/clang++` on macOS; `--cc` and `--cxx` select explicit alternatives.
+same, and choose a job count supported by the machine's memory allocation. Unset
+unexpected profile or Rust flag environment overrides before a trial; the
+allowlisted values are recorded in setup. The runner retains its owned build
+artifacts for inspection, including both profile targets and any fresh-worktree
+copies, so provision enough disk for that state. The script does not modify
+profile defaults. Native compilers default to `/usr/bin/gcc` and `/usr/bin/g++` on
+Linux, and Apple's `/usr/bin/clang` and `/usr/bin/clang++` on macOS; `--cc` and
+`--cxx` select explicit alternatives.
+
+`--cargo-incremental on` remains the runner's default. It explicitly sets
+`CARGO_INCREMENTAL=1`, including when the calling shell set a different value.
+Use `--cargo-incremental off` for a separately named non-incremental experiment;
+that sets `CARGO_INCREMENTAL=0` for every variant and its verification. This
+option also applies to single-profile trials. Cargo's [incremental override and
+codegen-unit defaults](https://doc.rust-lang.org/cargo/reference/profiles.html#incremental)
+mean an incremental-off `dev`/`fast-dev` comparison can also change codegen-unit
+counts: this measures the complete profiles, not only their host-tool
+optimization difference. Normal incremental edit latency requires its own
+incremental-on observations.
+
+Profile pairs require `--tool cargo`, two distinct profile names, the default
+fingerprint mode, and no arbitrary `--cargo-arg` overrides. Evaluate fingerprint
+changes separately on one fixed profile. Single-profile commands retain their
+existing labels and CLI defaults. Profile pairs use `cargo-profile-1` and
+`cargo-profile-2` labels; setup maps these labels to the exact profile names.
+Final verification explicitly selects each compared profile, including `dev`.
+Legacy single-profile `dev` verification keeps Cargo's default `test` profile,
+which inherits `dev`; the actual selected verification profile is recorded.
 
 ### Matched nightly fingerprint comparison
 
@@ -302,8 +334,8 @@ Every iteration starts with an artifact-cold build. Additional phases are:
 | `fresh-*` | Building an actual new Git worktree of the same commit using the copied artifacts. Git's new source timestamps are left untouched. |
 | `verification` | Full workspace, all-feature tests after the build scenarios, using the selected profile/toolchain. |
 
-Fingerprint and reuse scenarios require a clean, committed checkout. They create
-disposable source worktrees, keep the caller's source bytes and timestamps intact,
+Fingerprint, reuse and profile-comparison scenarios require a clean, committed
+checkout. They create disposable source worktrees, keep the caller's source bytes and timestamps intact,
 and check that the worktrees inherit the same Cargo configuration. Semantic edits
 use the existing probe/restore approach, including the UI assertion's scale ratio.
 Only an edit's own bytes are restored; concurrent changes cause failure and leave
@@ -313,12 +345,19 @@ and `completed: false`, while an earlier compilation failure remains the primary
 error.
 
 `setup.json`, `measurements.jsonl`, and `completion.json` carry `schema_version`.
-Setup records the revision, workload, profile, toolchain versions, relevant build
-flags, source/configuration hashes and owned paths. Each phase records its exact
-command or copy operation, working directory, output paths, exit code and duration;
-raw logs and each build's Cargo HTML timing report are retained. Aggregate medians
-by matching phase and mode. The total runner duration also includes setup, artifact
-copying, undo builds and final verification. In particular, final verification
+Setup records the revision, workload, profiles, explicit incremental setting,
+toolchain versions, relevant build flags, source/configuration hashes and owned
+paths. `cargo_variants` maps each output label to its profile and fingerprint
+mode. Each phase records its exact command or copy operation, working directory,
+output paths, exit code and duration; Cargo observations also record
+`cargo_profile`, `cargo_incremental` (`"1"` or `"0"`), `scenario`, and `iteration`.
+Final verification has no iteration number. These are additive schema-v1 fields;
+the original `cargo_profile` setup field still names the baseline profile.
+Raw logs and each build's Cargo HTML timing report are retained. Aggregate medians
+by matching scenario, profile, incremental setting and fingerprint mode, keeping
+the ordered individual samples. Do not combine cold, no-op, edits or undo builds
+merely because they all have `phase: "build"`. The total runner duration also
+includes setup, artifact copying, undo builds and final verification. In particular, final verification
 expands the desktop graph to all-feature workspace tests and is not part of the
 desktop build measurement.
 
