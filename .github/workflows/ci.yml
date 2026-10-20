@@ -35,6 +35,7 @@ jobs:
           python3 scripts/tests/test_benchmark_cold_builds.py -v
           python3 scripts/tests/test_qualify_bazel_cache.py -v
           python3 scripts/tests/test_prepare_ci_rust.py -v
+          python3 scripts/tests/test_bootstrap_kache.py -v
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       - name: Test Linux profiler DRM parsing
@@ -128,6 +129,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check pinned tool bootstrap fixtures
+        run: python3 scripts/tests/test_bootstrap_kache.py -v
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       - name: Cache Cargo registry and dependency artifacts
