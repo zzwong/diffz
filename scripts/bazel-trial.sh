@@ -46,6 +46,17 @@ output_root="${DIFFZ_BAZEL_OUTPUT_ROOT:-$PWD/target/bazel}"
 if [[ "${1:-}" == --version ]]; then
     exec "$bazel_bin" "$@"
 fi
+# Qualification can own a complete process group instead of leaving a detached
+# server after its client is interrupted. Everyday trials keep server reuse.
+startup_args=()
+case "${DIFFZ_BAZEL_BATCH:-0}" in
+    0|"") ;;
+    1) startup_args+=(--batch) ;;
+    *)
+        echo 'DIFFZ_BAZEL_BATCH must be 0 or 1.' >&2
+        exit 2
+        ;;
+esac
 # Everyday action caching is opt-in. Add cache flags before user arguments so
 # explicit CLI flags can override them, including the cold benchmark's blanks.
 cache_command="${1:-}"
@@ -138,8 +149,8 @@ if [[ "${1:-}" == test ]]; then
     test_root="$DIFFZ_TEST_TMP_ROOT"
     mkdir -p "$test_root"
     trap 'rmdir "$test_root" 2>/dev/null || true' EXIT
-    "$bazel_bin" --nosystem_rc --nohome_rc --output_user_root="$output_root" test \
+    "$bazel_bin" "${startup_args[@]}" --nosystem_rc --nohome_rc --output_user_root="$output_root" test \
         --sandbox_writable_path="$test_root" "${@:2}"
 else
-    exec "$bazel_bin" --nosystem_rc --nohome_rc --output_user_root="$output_root" "$@"
+    exec "$bazel_bin" "${startup_args[@]}" --nosystem_rc --nohome_rc --output_user_root="$output_root" "$@"
 fi

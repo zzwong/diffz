@@ -6,6 +6,8 @@ repeatable producer/consumer acceptance check. It uses the existing
 starts a service nor deploys remote execution.
 
 This implements the tooling in [#125](https://github.com/zzwong/diffz/issues/125).
+Bounded phases and owned process cleanup are tracked in
+[#134](https://github.com/zzwong/diffz/issues/134).
 The actual two-host measurements remain an acceptance step in
 [#119](https://github.com/zzwong/diffz/issues/119). Python fixtures validate the
 driver's controls and evidence handling; they are not Rust or homelab results.
@@ -14,7 +16,7 @@ driver's controls and evidence handling; they are not Rust or homelab results.
 
 The producer builds `//:all_build` with a new output root, disk caching disabled,
 remote reads disabled, and synchronous remote uploads enabled. It then executes
-`//:tests` locally with cached test results disabled and runs the binary's
+`//:tests` on that host with cached test results disabled and runs the binary's
 `--version` and offline `--inspect --fixture F01` checks.
 
 The consumer uses another new output root, disables disk caching and all remote
@@ -27,10 +29,24 @@ version, and complete parsed F01 JSON with the producer.
 
 The commands use `--config=fast-dev`, the committed lockfile in error mode, and
 the pinned Bazel executable. Neither normal build defaults nor Cargo change.
-Build and forced-test timings include their Bazel invocation/setup; they do not
-measure a CI queue. Downloads are eager for this qualification. To choose a
+Qualification uses Bazel's batch mode, with a separate JVM for each build/test
+phase. Build and forced-test timings include that startup and analysis work;
+they do not measure a CI queue or persistent-server incremental latency.
+Downloads are eager for this qualification. To choose a
 developer download policy, use the separate
 [lazy/eager benchmarks](bazel-shared-cache.md#real-source-edits-and-download-policy).
+
+New qualification runs require the exact `linux-sandbox` spawn strategy. The
+driver pins the default, the final catch-all strategy regexp, and the
+`TestRunner` mnemonic, and explicitly disables legacy local fallback. Test
+execution uses `--test_strategy=standalone`, the test action context registered
+by [Bazel 8.4.2](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/java/com/google/devtools/build/lib/standalone/StandaloneModule.java).
+That context dispatches test spawns through the same strategy resolver; it does
+not weaken the sandbox requirement. `TestRunner` needs its own mnemonic pin
+because the pinned [strategy registry](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/java/com/google/devtools/build/lib/exec/SpawnStrategyRegistry.java)
+excludes it from regexp overrides. A completed build/test with a runner other
+than `linux-sandbox`, a remote cache hit, or Bazel's internal/total accounting
+is rejected, with the observed counts retained.
 
 ## Prerequisites
 
@@ -38,9 +54,26 @@ Use two actual x86_64 Linux machines with the same clean Git commit and the same
 immutable native environment. Prefer an image identified by digest. A label such
 as `ubuntu-latest` or a mutable image tag does not establish that environment.
 Both machines need the existing graph's native development dependencies and
-Python 3.10 or newer. Bootstrap the pinned executable with
+Python 3.10 or newer. Linux `/proc` must expose the same PID namespace as the
+qualifier; a host `/proc` bind mount inside a different PID namespace is rejected
+before phase launch because its process group IDs are not directly comparable.
+Default SIGCHLD handling is also required, so an inherited ignore setting or
+custom Python reaper cannot release the phase leader's PID before cleanup.
+Bootstrap the pinned executable with
 `scripts/bazel-trial.sh --version`, or set `BAZEL` to that executable. Preflight
 does not bootstrap missing tools.
+
+The host must support Bazel's Linux sandbox namespaces. During phase setup,
+Bazel's [Linux runner capability check](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/java/com/google/devtools/build/lib/sandbox/LinuxSandboxedSpawnRunner.java)
+executes `/bin/true` inside its sandbox before
+[registering the exact strategy](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/java/com/google/devtools/build/lib/sandbox/SandboxModule.java).
+If it is unavailable, strategy selection fails before build action execution.
+This is an unsupported host for guarded qualification: `result.json` remains
+failed, with the raw Bazel exit, log, and available BEP retained. There is no
+retry with `sandboxed`, `processwrapper-sandbox`, or `local`. Actions that require
+non-sandboxed execution likewise cannot qualify. Native/resource `preflight`
+does **not** start Bazel or establish sandbox capability; that check belongs to
+the subsequent Bazel phase.
 
 The cache must isolate action-cache entries by instance name. For the existing
 **bazel-remote 2.6.3**, verify that the operator started it with
@@ -96,6 +129,12 @@ collects its own fresh preflight, so a stale preflight file is never treated as
 the current environment. It refuses a dirty source checkout and known ambient
 compiler/library overrides. Resolve mismatches by aligning the environment and
 rerunning into a new directory.
+
+Preflight also reports `resource_preflight.startup_ready` and the current free
+bytes. A completed **preflight** means identity collection succeeded; if
+`startup_ready` is false, the subsequent build will refuse to start. Every phase
+samples again immediately before launch, so a prior capacity observation never
+authorizes a later build by itself.
 
 To reuse a host-local unpacked repository cache, add
 `--repo-contents-cache /srv/diffz-repositories` to the producer and consumer.
@@ -165,24 +204,101 @@ release/LTO builds and remote execution require their own checks.
 
 Each run retains `preflight.json`, `result.json`, command/exit/timing JSONL, raw
 logs, Bazel JSON event streams, profiles, an owned Bazel output root, and runtime
-state. A successful consumer also writes `comparison.json`. Exit status 2 and
-`status: failed` indicate a rejected or incomplete run; inspect its error and
-raw evidence rather than treating partial cache hits as qualification.
+state. Each started or refused phase also records disk samples in
+`<phase>.resources.jsonl`. A successful consumer also writes `comparison.json`.
+Exit status 2 and `status: failed` indicate a rejected or incomplete run;
+SIGINT/SIGTERM cancellation instead returns 130/143. Inspect the error and raw
+evidence rather than treating partial cache hits as qualification.
+
+### Time and disk limits
+
+These optional arguments apply to `preflight`, `producer`, and `consumer`:
+
+| Argument | Default | Behavior |
+| --- | --- | --- |
+| `--phase-timeout-seconds` | `1800` | Separate timeout for each build/test invocation and for acquiring the test lock |
+| `--runtime-timeout-seconds` | `60` | Separate timeout for each application `--version` or F01 probe |
+| `--disk-reserve-gib` | `2` | Minimum permitted reserve; larger values increase all disk thresholds together |
+
+Timeouts must be finite and positive. A phase requires reserve plus **0.5 GiB**
+free before launch: **2.5 GiB** with the defaults. While it runs, free space is
+sampled every **0.1 seconds**. Falling below the reserve sends SIGINT to the
+owned phase process group. Cleanup sends SIGTERM after **5 seconds**, then
+SIGKILL after another **2 seconds** if processes remain. Falling below reserve
+minus **0.25 GiB** (**1.75 GiB** by default) skips those grace periods and sends
+SIGKILL immediately. Cleanup observes the group for up to another **2 seconds**
+after SIGKILL; an additional bounded leader wait is also limited to 2 seconds.
+If that leader wait times out, cleanup records an observation/cleanup failure,
+sends fallback SIGKILL to the still-unreaped owned group, and waits at most
+another 2 seconds. An empty process listing cannot suppress that fallback.
+Timeouts and operator cancellation use the same cleanup sequence.
+
+The disk probe covers the filesystem containing the evidence directory and its
+Bazel output root. A repository cache or temporary directory on another
+filesystem needs its own capacity monitoring. These sampled limits cannot
+guarantee a reserve under sudden concurrent writes or filesystem stalls, and
+the startup floor is a refusal threshold, not an estimate that the full desktop
+build will fit. Choose a larger reserve and provide sufficient build capacity
+for the actual host. The qualifier never reclaims disk space.
+
+`result.json` adds `resource_policy` and `resource_preflight`. Each command
+receipt retains the raw child `exit_code` and elapsed seconds, and adds status,
+stop reason, configured timeout, minimum observed free bytes, process group ID,
+and cleanup outcome. A refused launch has a null exit code. A guard-triggered
+stop remains a failure even if the child handles its signal and exits zero.
+Ordinary nonzero compiler exits keep their actual code. Failed cleanup also
+prevents completion and preserves the primary phase failure; it cannot produce
+`comparison.json`. Process entries that disappear during observation are
+tolerated; other unreadable or invalid `/proc` state fails cleanup and triggers
+the owned-group fallback instead of being reported as an absent process.
+The resource policy records the exact Bazel strategy flags and test context.
+`test_execution` retains the test phase's observed action runner counts alongside
+the existing fresh-test result evidence.
+
+These fields are additive within receipt schema 1. Historical completed reports
+remain readable by `compare`; its source/native/cache/runtime requirements are
+unchanged. Reports from different source commits still cannot form a qualified
+pair. New batch-mode phase timings include a JVM startup per invocation and
+must be identified separately when reviewing older persistent-server timings.
 
 Builds can run concurrently with separate output roots. Forced qualification
 tests use the stable `/var/tmp/diffz-bazel-qualification-tests` path and an
 exclusive host-local lock at the same path with `.lock` appended. This prevents
 the wrapper's temporary-root cleanup from racing another qualification test
-run. Lock wait is reported separately. The lock file is intentionally retained;
+run. Lock wait is reported separately when acquired and fails at the configured
+phase timeout when contended. The lock file is intentionally retained;
 do not unlink it while a qualifier is running. Individual Rust test launchers
 still create isolated children inside the temporary root.
 
-The driver stops only the Bazel server associated with its new output root.
-It never deletes existing outputs, edits/restores application source, cleans a
-shared cache or shuts down another workspace's server. Evidence and build
-outputs remain for inspection and explicit cleanup. A failed shutdown is
-reported as a failed run, with the output-root identity retained in the command
-records.
+The qualifier sets `DIFFZ_BAZEL_BATCH=1` on the existing wrapper and starts each
+phase in a new session. This keeps the phase's JVM in the process group it owns
+instead of leaving a detached persistent server when its client is interrupted.
+Ordinary `scripts/bazel-trial.sh` commands still reuse a server; batch mode is an
+explicit opt-in. Cleanup signals only the group's recorded ID, with its leader
+held unreaped until cleanup to prevent PID reuse. A zero-exit leader that leaves
+live descendants in that group also fails and triggers cleanup.
+
+Batch ownership alone is insufficient for Bazel action cleanup. In the pinned
+[process wrapper](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/tools/process-wrapper-legacy.cc),
+normal action startup creates a separate session. Killing the wrapper with
+SIGKILL can prevent its signal handlers from stopping that separate action
+group. The required [Linux sandbox](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/tools/linux-sandbox.cc)
+instead uses a PID namespace and parent-death killing for the standard action
+path. This is why guarded qualification refuses the weaker strategies even
+though ordinary build trials may use them. The resource fixtures exercise
+process-group controls; they do not prove actual Bazel sandbox descendant
+cleanup, full desktop compilation, or two-host cache reuse. Those real
+qualification steps remain open in #119.
+
+These controls do not turn arbitrary repository helper commands or runtime
+programs into an operating-system-contained process tree. Children outside the
+standard sandboxed action path that create another session are outside the
+group observation. Uncatchable termination of the qualifier itself cannot run
+its cleanup.
+
+The driver never deletes existing outputs, edits/restores application source,
+cleans a shared cache or shuts down another workspace's server. Evidence and
+build outputs remain for inspection and explicit cleanup.
 
 The BEP parser follows the pinned
 [Bazel 8.4.2 schema](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream.proto):
@@ -193,10 +309,13 @@ the driver will execute only the downloaded `diffz` binary inside its owned
 output root. See the pinned
 [BEP transport options](https://github.com/bazelbuild/bazel/blob/8.4.2/src/main/java/com/google/devtools/build/lib/buildeventstream/transports/BuildEventStreamOptions.java).
 
-Run the local policy/driver fixtures with:
+Run the local policy/driver fixtures with the following command. The Linux
+resource tests use small Python child processes, including signals, a blocked
+test lock, and a simulated disk drop. They launch no JVM or compiler and do not
+contact a cache service.
 
 ```sh
-python3 -m unittest discover -s scripts/tests -p test_qualify_bazel_cache.py -v
+python3 -B -m unittest discover -s scripts/tests -p test_qualify_bazel_cache.py -v
 ```
 
 After the two-host run, attach the reports, raw BEP/logs, actual service
