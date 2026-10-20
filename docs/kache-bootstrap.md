@@ -29,13 +29,53 @@ needs another source installation, and `cargo clean` does not remove the tool.
 This avoids repeated wrapper installation; it does not itself speed up rustc
 or establish a compiled-artifact cache hit.
 
-The artifact-store policy remains in `scripts/kache.toml`. The Make-selected
-socket stays under the checkout's `target/kache/runtime`. The existing TOML
-runtime directory is relative; qualifying its behavior for wrappers running
-from dependency directories remains part of #116. Executable reuse does not
-merge Cargo target directories or incremental outputs. Do not point concurrent
+The artifact-store policy remains in `scripts/kache.toml`. By default, Make keeps
+runtime and socket under the checkout's `target/kache/runtime`. Before
+starting Cargo, `scripts/run-kache.py` resolves the policy's runtime directory
+against the checkout root and selects an absolute effective config. This keeps
+compiler wrappers invoked from nested package directories on that same runtime.
+Executable reuse does not merge Cargo target directories or incremental outputs.
+Do not point concurrent
 worktrees at one mutable Cargo target directory.
 A target clean and an empty Kache artifact store are different cache conditions.
+
+## Runtime configuration
+
+The checked-in TOML remains the policy source. Kache's `ignore_env = true`
+intentionally ignores an ambient `KACHE_RUNTIME_DIR`; setting that environment
+variable alone cannot make the relative policy path independent of compiler cwd.
+The launcher changes only `cache.runtime_dir` in an effective TOML snapshot and
+preserves all other settings and comments. The source file is not rewritten.
+
+Snapshots live under `target/kache/config/<content-sha256>.toml`, with owner-only
+file permissions. Complete files are published atomically and reused unchanged.
+Different concurrent config selections cannot overwrite a file another compiler
+is about to read. A target clean removes these small generated files along with
+other checkout outputs, and the next Make command prepares them again.
+
+The launcher rejects invalid TOML, a non-string/empty/NUL-containing runtime setting,
+and unexpected generated-file contents or ownership before starting the requested
+command. Quoted or dotted keys, inline tables and multiline TOML strings are
+supported. A custom policy that omits `cache.runtime_dir` receives the same
+checkout-local `target/kache/runtime` default. Other policy settings retain
+Kache's own meaning and validation.
+The default artifact-store location and its 8 GiB policy are unchanged.
+
+For an explicit policy, config and socket paths are resolved against the checkout
+root; absolute paths and spaces are supported. For example:
+
+```sh
+make build KACHE_CONFIG='/absolute/policies/local kache.toml' \
+  KACHE_SOCKET='target/custom runtime/daemon.sock'
+```
+
+An absolute or `~/` runtime path in that policy is preserved or home-expanded;
+it can intentionally select a shared location. When a custom policy permits
+environment overrides, an existing `KACHE_RUNTIME_DIR` keeps its precedence,
+with relative paths resolved against the checkout before Cargo changes cwd.
+The launcher continues to disable the separate host config and select the
+Make-requested socket and compiler wrapper. It invokes the requested command
+directly, preserving its arguments, exit code and termination signals.
 
 ## Concurrent use and failures
 
@@ -107,3 +147,22 @@ These tests establish bootstrap behavior. They do not substitute for the
 version-migration correctness experiments or measured artifact reuse in
 [#116](https://github.com/zzwong/diffz/issues/116) and
 [#117](https://github.com/zzwong/diffz/issues/117).
+
+`python3 scripts/tests/test_run_kache.py -v` covers absolute runtime selection,
+custom policies, concurrent immutable snapshots, spaces, plain-Cargo bypass and
+command failure propagation. These fixtures run in the existing Linux/macOS CI
+jobs without compiling or installing Kache. An optional real pinned-wrapper
+probe runs `rustc -vV` from checkout and nested crate directories and requires
+both passthrough events to land in the same runtime:
+
+```sh
+DIFFZ_TEST_KACHE_BIN=/absolute/path/to/kache-0.21.0 \
+DIFFZ_TEST_RUSTC=/absolute/toolchain/bin/rustc \
+  python3 scripts/tests/test_run_kache.py \
+    RuntimeTests.test_real_pinned_wrapper_keeps_nested_crate_events_in_one_runtime -v
+```
+
+The real probe uses fresh isolated HOME/XDG/store/runtime paths, disables
+automatic cleanup, and compiles no Rust code. It verifies runtime-path behavior;
+the full application, migration, cache performance and daemon lifecycle gates
+remain tracked separately in #116/#117.
