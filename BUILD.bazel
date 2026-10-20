@@ -6,11 +6,31 @@ load("//bazel:vendor_linux.bzl", "vendor_linux")
 
 exports_files(["Cargo.toml", "Cargo.lock", "crates/core/Cargo.toml", "crates/adapters/Cargo.toml", "crates/ui/Cargo.toml", "crates/app/Cargo.toml", "vendor/gpui-pre-linux/Cargo.toml"])
 filegroup(name = "fixtures", srcs = glob(["fixtures/**", "crates/*/tests/fixtures/**"]))
+# Only the patch bytes are embedded by crates/adapters/src/fixtures.rs. The
+# catalog, before/after files, test extensions and README are runtime test data.
+filegroup(name = "fixture_patches", srcs = glob(["fixtures/*/change.patch"]))
 
-CORE_TESTS = diffz_crate(name = "core", package = "crates/core", crate_name = "diffz_core", features = ["default", "syntax", "gleam", "wasm"], deps = [])
-ADAPTER_TESTS = diffz_crate(name = "adapters", package = "crates/adapters", crate_name = "diffz_adapters", features = [], deps = [":core"])
-UI_TESTS = diffz_crate(name = "ui", package = "crates/ui", crate_name = "diffz_ui", features = ["default", "syntax"], deps = [":core"])
-APP_TESTS = diffz_crate(name = "app", package = "crates/app", crate_name = "diffz", features = ["default", "desktop", "syntax", "wasm"], deps = [":core", ":adapters", ":ui"])
+CORE_TESTS = diffz_crate(
+    name = "core", package = "crates/core", crate_name = "diffz_core",
+    features = ["default", "syntax", "gleam", "wasm"], deps = [],
+    compile_data = glob(["crates/core/wit/**"]),
+)
+ADAPTER_TESTS = diffz_crate(
+    name = "adapters", package = "crates/adapters", crate_name = "diffz_adapters",
+    features = [], deps = [":core"],
+    compile_data = [":fixture_patches"] + glob(["crates/adapters/src/**/*.sql"]),
+)
+UI_TESTS = diffz_crate(
+    name = "ui", package = "crates/ui", crate_name = "diffz_ui",
+    features = ["default", "syntax"], deps = [":core"],
+    compile_data = glob(["crates/ui/icons/**"]),
+    unit_compile_data = ["fixtures/split-asymmetric/change.patch"],
+)
+APP_TESTS = diffz_crate(
+    name = "app", package = "crates/app", crate_name = "diffz",
+    features = ["default", "desktop", "syntax", "wasm"], deps = [":core", ":adapters", ":ui"],
+    unit_compile_data = ["packaging/linux/io.github.zzwong.Diffz.desktop"],
+)
 
 vendor_linux()
 rust_binary(

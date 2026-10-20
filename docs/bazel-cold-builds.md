@@ -170,6 +170,73 @@ version and emit identical parsed fixture-inspection JSON; debug and unwind
 sections remain present. Rust source and original manifests/lockfiles are restored.
 Interactive GUI behavior, release/LTO, macOS and remote execution were not measured.
 
+## Bazel compiler inputs and incremental invalidation
+
+The workspace macro declares embedded files through `compile_data`, which
+[rules_rust includes in the compiler action's inputs](https://github.com/bazelbuild/rules_rust/blob/0.74.0/rust/private/rustc.bzl).
+Each crate declares its own inputs; unit tests can add files needed only under
+`cfg(test)`:
+
+| Crate | Production compiler data | Additional unit-test compiler data |
+| --- | --- | --- |
+| core | `crates/core/wit/**` for component bindings | None |
+| adapters | `fixtures/*/change.patch` and `crates/adapters/src/**/*.sql` | None |
+| ui | `crates/ui/icons/**` | `fixtures/split-asymmetric/change.patch` |
+| app | None | `packaging/linux/io.github.zzwong.Diffz.desktop` |
+
+The test launcher provides the complete `//:fixtures` group as runtime data,
+including themes, extension artifacts and before/after source files. All five
+workspace Cargo manifests remain compiler inputs. Integration-test compiler
+data retains its existing fixture and support-file inputs; narrowing that graph
+requires a separate audit.
+
+Validate the boundary in an isolated checkout with one fixed output base and
+identical build flags. First build `//:diffz`, then record a no-op build and
+each edit independently with `--execution_log_json_file` and
+`--build_event_json_file`. Inspect executed `Rustc` actions by target label;
+an `aquery` input/action comparison is useful alongside the execution record.
+
+| Edit | Expected production-build behavior |
+| --- | --- |
+| Append a comment to `fixtures/README.md` | No workspace Rust compiler action executes. |
+| Append a comment to `packaging/linux/rpm/diffz.spec` | No workspace Rust compiler action executes. |
+| Change the added-line `AFTER-END` marker in `fixtures/markdown-prose/change.patch` | Adapters recompiles, and the rebuilt app's `--inspect --fixture F01` JSON contains the new marker. |
+| Append an XML comment to `crates/ui/icons/wrap-text.svg` | UI recompiles because these bytes are embedded. |
+| Append a WIT comment to `crates/core/wit/extension.wit` | Core recompiles because the component binding macro reads this file. |
+
+Restore each probe's original bytes and rebuild before the next probe. Also run
+`//:core_unit`, `//:adapters_unit`, `//:ui_unit` and `//:app_unit` with test caching
+disabled to check compile-time and runtime fixture availability, including the
+UI patch and desktop-entry unit tests. Preserve per-phase commands, action counts,
+test results and end-to-end durations. A reduction in invalidated inputs or the
+sum of individual compiler action spans is not an end-to-end speed measurement.
+
+### Recorded input-boundary check
+
+A Linux x86-64 host check on 2026-10-20 reused one output base with Bazel 8.4.2,
+`--batch`, `--jobs=2`, `--nofetch`, and identical resource/cache settings.
+Appending the same comment to `fixtures/README.md` produced:
+
+| Compiler input declarations | Executed workspace `Rustc` actions | End-to-end seconds |
+| --- | ---: | ---: |
+| Original broad fixture/packaging inputs | 4 | 22.824 |
+| Inputs scoped to their consumers | 0 | 16.240 |
+
+This single ordered pair observed 28.8% lower end-to-end latency. The result
+establishes avoided compiler work for this edit; it does not measure cold-build,
+remote-cache or persistent-server performance. Expanded `aquery` inputs removed
+297 production and 295 unit-test file dependencies across the eight affected
+compiler actions, with identical compiler arguments, environments and output paths.
+
+All five content probes above passed. Fixture inspection changed and restored
+exactly; the SVG marker appeared and disappeared in the executable; WIT changes
+executed core's compiler action. Restoring all source bytes reproduced the original
+executable byte for byte. The four uncached unit wrappers passed 218 tests with
+3 ignored, including the UI patch and desktop-entry checks. After those tests,
+the final production no-op took 14.211 seconds with zero compiler actions and
+2,461 action-cache hits. These checks used the host's process-wrapper sandbox;
+they do not qualify remote execution or strict filesystem isolation.
+
 ## Research from other projects
 
 [Roman Kashitsyn's Internet Computer migration account](https://mmapped.blog/posts/17-scaling-rust-builds-with-bazel)
