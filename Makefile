@@ -1,11 +1,17 @@
 .DEFAULT_GOAL := help
 
 KACHE_VERSION := 0.21.0
-KACHE_ROOT := target/kache/$(KACHE_VERSION)
-KACHE_BIN := $(KACHE_ROOT)/bin/kache
+# Executables survive cargo clean and are reusable by worktrees on this host.
+# Lazy expansion keeps plain-Cargo targets independent of Kache setup.
+KACHE_HOST = $(shell rustc -vV 2>/dev/null | sed -n 's/^host: //p')
+KACHE_TOOL_HOME = $(if $(filter /%,$(firstword $(XDG_CACHE_HOME))),$(XDG_CACHE_HOME),$(HOME)/.cache)/diffz/tools
+KACHE_ROOT = $(KACHE_TOOL_HOME)/kache/$(KACHE_VERSION)/$(KACHE_HOST)
+KACHE_BIN = $(KACHE_ROOT)/bin/kache
+# Make's abspath treats spaces as separators; let Python preserve a single path.
+KACHE_ABS_BIN = $(shell python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$(KACHE_BIN)")
 KACHE_CONFIG := $(abspath scripts/kache.toml)
 KACHE_SOCKET := $(abspath target/kache/runtime/daemon.sock)
-KACHE_ENV := KACHE_CONFIG="$(KACHE_CONFIG)" KACHE_HOST_CONFIG= KACHE_SOCKET_PATH="$(KACHE_SOCKET)" RUSTC_WRAPPER="$(abspath $(KACHE_BIN))"
+KACHE_ENV = KACHE_CONFIG="$(KACHE_CONFIG)" KACHE_HOST_CONFIG= KACHE_SOCKET_PATH="$(KACHE_SOCKET)" RUSTC_WRAPPER="$(KACHE_ABS_BIN)"
 
 # Development builds for `run` and `install-dev`. RELEASE=1 selects the release profile,
 # KACHE=0 builds with regular Cargo, and BIN=FILE makes install-dev skip the build.
@@ -23,7 +29,7 @@ DEV_KACHE :=
 DEV_CARGO_ENV := RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER=
 else
 DEV_KACHE := kache
-DEV_CARGO_ENV := $(KACHE_ENV)
+DEV_CARGO_ENV = $(KACHE_ENV)
 endif
 # Relative XDG paths are ignored, as diffz itself does.
 DEV_STATE_DIR ?= $(or $(filter /%,$(XDG_STATE_HOME)),$(HOME)/.local/state)/diffz-dev
@@ -60,13 +66,8 @@ help:
 		'install-dev takes BIN=FILE to install a binary that is already built.'
 
 kache:
-	@if [ ! -x "$(KACHE_BIN)" ]; then \
-		mkdir -p "$(KACHE_ROOT)"; \
-		RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= cargo install --locked --force \
-			--version "$(KACHE_VERSION)" --root "$(KACHE_ROOT)" kache; \
-	fi
-	@test "$$($(KACHE_BIN) --version)" = "kache $(KACHE_VERSION)" || \
-		{ printf 'expected kache %s at %s\n' "$(KACHE_VERSION)" "$(KACHE_BIN)" >&2; exit 1; }
+	@python3 scripts/bootstrap-kache.py --version "$(KACHE_VERSION)" \
+		--host "$(KACHE_HOST)" --root "$(KACHE_ROOT)" --bin "$(KACHE_ABS_BIN)"
 
 build: kache
 	$(KACHE_ENV) cargo build --locked -p diffz

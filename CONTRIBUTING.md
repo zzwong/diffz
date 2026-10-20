@@ -22,9 +22,14 @@ make help
 
 `make build` and `make check` use the optional pinned Kache 0.21.0 workflow;
 `make build-plain` uses regular Cargo. The first Kache run includes bootstrap
-and cold-build cost. For a full cold seed, run `cargo clean` first; that also
-removes the bootstrapped Kache binary, so the next Make invocation installs it
-again. A package-scoped clean such as `cargo clean -p diffz` preserves Kache.
+and cold-build cost. Its executable lives under
+`$XDG_CACHE_HOME/diffz/tools/kache/<version>/<rust-host>` (or
+`~/.cache/diffz/tools/...` when XDG_CACHE_HOME is unset or relative), so new
+worktrees and `cargo clean` reuse the installed tool. A full target clean still
+removes compiled app outputs; it does not empty Kache's artifact store.
+Each checkout keeps its own target directory and Make-selected daemon socket.
+See [Kache bootstrap](docs/kache-bootstrap.md) for installation locking,
+explicit tool overrides, first-install behavior, and bounded removal.
 
 See [build performance](docs/build-performance.md) for measured local build/test
 costs, targeted iteration commands, and the Bazel evaluation. Core checks group
