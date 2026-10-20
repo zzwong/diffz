@@ -39,14 +39,6 @@ jobs:
           python3 scripts/tests/test_run_kache.py -v
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
-      # Temporary diagnostic only: generate verified diff for a security patch.
-      # Remove this step once Cargo.lock has been updated and committed.
-      - name: Generate security patch lockfile diff
-        run: |
-          cargo update -p wasmtime --precise 48.0.7
-          printf '\nWASMTIME_LOCK_DIFF_BEGIN\n'
-          git diff -- Cargo.lock
-          printf '\nWASMTIME_LOCK_DIFF_END\n'
       - name: Test Linux profiler DRM parsing
         run: python3 scripts/tests/test_profile_linux.py -v
       # The setup exports a stable job-owned RUSTUP_HOME. rust-cache hashes every
