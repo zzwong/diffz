@@ -13,7 +13,7 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 scripts/prepare-ci-rust.py
-      - name: Fetch the updated real Bazel graph without compiling
+      - name: Fetch and retain inputs even when graph validation fails
         shell: bash
         run: |
           set -euo pipefail
@@ -21,12 +21,21 @@ jobs:
           export DIFFZ_BAZEL_OUTPUT_ROOT="$RUNNER_TEMP/bazel-input-root"
           export DIFFZ_BAZEL_BATCH=1
           export CARGO_BAZEL_REPIN=1
+          set +e
           bash scripts/bazel-trial.sh fetch //:all_build \
             --repository_cache="$RUNNER_TEMP/bazel-download-cache" \
             --jobs=2 --local_resources=cpu=2 2>&1 | tee "$RUNNER_TEMP/bazel-export/fetch.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$rc" > "$RUNNER_TEMP/bazel-export/fetch-exit.txt"
           cp MODULE.bazel.lock "$RUNNER_TEMP/bazel-export/MODULE.bazel.lock.generated"
           git rev-parse HEAD > "$RUNNER_TEMP/bazel-export/source-revision.txt"
           printf '%s\n' "$DIFFZ_BAZEL_OUTPUT_ROOT" > "$RUNNER_TEMP/bazel-export/original-output-root.txt"
+          { git status --short --untracked-files=all; find vendor/gpui-pre-linux -maxdepth 2 -ls; } > "$RUNNER_TEMP/bazel-export/vendor-state.txt"
+          for file in vendor/gpui-pre-linux/BUILD vendor/gpui-pre-linux/BUILD.bazel; do
+            if [ -e "$file" ]; then cp -L "$file" "$RUNNER_TEMP/bazel-export/vendor-$(basename "$file").generated"; fi
+          done
+          find "$DIFFZ_BAZEL_OUTPUT_ROOT" -type f -name '*lock*json' > "$RUNNER_TEMP/bazel-export/lock-paths.txt"
           tar --zstd -cf "$RUNNER_TEMP/bazel-export/repository-inputs.tar.zst" \
             -C "$RUNNER_TEMP" bazel-input-root bazel-download-cache
           cd "$RUNNER_TEMP/bazel-export"
@@ -82,3 +91,6 @@ jobs:
           compression-level: 0
           retention-days: 2
           if-no-files-found: ignore
+      - name: Preserve the graph result
+        if: ${{ always() }}
+        run: test "$(cat "$RUNNER_TEMP/bazel-export/fetch-exit.txt")" = 0
