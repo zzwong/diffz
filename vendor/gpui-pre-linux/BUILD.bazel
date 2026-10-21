@@ -1,0 +1,6 @@
+# Explicit package boundary: root globs must not reach into this patched crate.
+load("//bazel:vendor_linux.bzl", "vendor_linux")
+
+exports_files(["Cargo.toml"])
+
+vendor_linux()
