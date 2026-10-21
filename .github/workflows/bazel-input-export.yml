@@ -47,8 +47,8 @@ jobs:
           fi
           if [ -f MODULE.bazel.lock ]; then cp MODULE.bazel.lock "$RUNNER_TEMP/exports/receipts/MODULE.bazel.lock"; fi
           if [ "$result" -eq 0 ]; then
-            git diff --exit-code -- Cargo.lock
-            test ! -e vendor/gpui-pre-linux/BUILD.bazel
+            if ! git diff --exit-code -- Cargo.lock; then result=1; fi
+            if [ -e vendor/gpui-pre-linux/BUILD.bazel ]; then result=1; fi
             tar --zstd -cf "$RUNNER_TEMP/exports/bazel-vendor.tar.zst" -C "$RUNNER_TEMP" bazel-vendor
           else
             # Preserve fetched repositories/tools for further LOCAL diagnosis,
