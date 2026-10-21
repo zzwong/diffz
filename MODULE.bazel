@@ -19,7 +19,7 @@ rust.toolchain(
 use_repo(rust, "rust_toolchains")
 register_toolchains("@rust_toolchains//:all")
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
-crate.from_cargo(name = "crates", cargo_lockfile = "//:Cargo.lock", manifests = ["//:Cargo.toml", "//:crates/core/Cargo.toml", "//:crates/adapters/Cargo.toml", "//:crates/ui/Cargo.toml", "//:crates/app/Cargo.toml", "//vendor/gpui-pre-linux:Cargo.toml"], supported_platform_triples = ["x86_64-unknown-linux-gnu"], skip_cargo_lockfile_overwrite = True, isolated = False)
+crate.from_cargo(name = "crates", cargo_lockfile = "//:Cargo.lock", manifests = ["//:Cargo.toml", "//:crates/core/Cargo.toml", "//:crates/adapters/Cargo.toml", "//:crates/ui/Cargo.toml", "//:crates/app/Cargo.toml", "//:vendor/gpui-pre-linux/Cargo.toml"], supported_platform_triples = ["x86_64-unknown-linux-gnu"], skip_cargo_lockfile_overwrite = True, isolated = False)
 crate.annotation(crate = "gpui-pre", build_script_env = {"DEBUG": "true"}, rustc_flags = ["-Cdebuginfo=1"])
 crate.annotation(crate = "gpui-pre-linux", rustc_flags = ["-Cdebuginfo=1"], override_target_lib = "//:gpui_linux")
 crate.annotation(crate = "gpui-pre-platform", rustc_flags = ["-Cdebuginfo=1"])
@@ -29,8 +29,8 @@ crate.annotation(crate = "gpui-component", gen_build_script = "off", rustc_flags
 crate.annotation(crate = "gpui-kit", rustc_flags = ["-Cdebuginfo=1"])
 use_repo(crate, "crates")
 
-new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
-new_local_repository(name = "gpui_linux_local", path = "vendor/gpui-pre-linux", build_file = "//bazel:gpui-linux.BUILD.bazel")
+linux_backend_repository = use_repo_rule("//bazel:linux_backend_repository.bzl", "linux_backend_repository")
+linux_backend_repository(name = "gpui_linux_local", build_file = "//bazel:gpui-linux.BUILD.bazel")
 override_repo(crate, **{"crates__gpui-pre-linux-0.3.9": "gpui_linux_local"})
 
 crate.annotation(crate = "gpui-kit-assets", rustc_flags = ["-Cdebug-assertions=no"], build_script_env = {"DEBUG": "false"}, additive_build_file_content = 'filegroup(name = "icons", srcs = glob(["assets/icons/**"]), visibility = ["//visibility:public"])')

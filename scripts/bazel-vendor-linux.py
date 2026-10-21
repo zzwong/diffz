@@ -46,9 +46,9 @@ def vendor_linux():
         visibility = ["//visibility:public"],
         crate_name = "gpui_linux",
         edition = "2024",
-        crate_root = "src/gpui_linux.rs",
-        srcs = native.glob(["src/**/*.rs"]),
-        compile_data = ["//:Cargo.toml", "//:crates/core/Cargo.toml", "//:crates/adapters/Cargo.toml", "//:crates/ui/Cargo.toml", "//:crates/app/Cargo.toml"] + native.glob(["**"]),
+        crate_root = "vendor/gpui-pre-linux/src/gpui_linux.rs",
+        srcs = native.glob(["vendor/gpui-pre-linux/src/**/*.rs"]),
+        compile_data = ["Cargo.toml", "crates/core/Cargo.toml", "crates/adapters/Cargo.toml", "crates/ui/Cargo.toml", "crates/app/Cargo.toml"] + native.glob(["vendor/gpui-pre-linux/**"]),
         rustc_flags = ["-Cdebuginfo=1"],
 '''
 output += '        rustc_env = ' + repr({"CARGO_MANIFEST_DIR": "vendor/gpui-pre-linux", "CARGO_PKG_VERSION": package["version"]}) + ',\n'

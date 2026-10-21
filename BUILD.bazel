@@ -2,8 +2,9 @@
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//bazel:crates.bzl", "diffz_crate", "workspace_rustc_flags")
+load("//bazel:vendor_linux.bzl", "vendor_linux")
 
-exports_files(["Cargo.toml", "Cargo.lock", "crates/core/Cargo.toml", "crates/adapters/Cargo.toml", "crates/ui/Cargo.toml", "crates/app/Cargo.toml"])
+exports_files(["Cargo.toml", "Cargo.lock", "crates/core/Cargo.toml", "crates/adapters/Cargo.toml", "crates/ui/Cargo.toml", "crates/app/Cargo.toml", "vendor/gpui-pre-linux/Cargo.toml"])
 filegroup(name = "fixtures", srcs = glob(["fixtures/**", "crates/*/tests/fixtures/**"]))
 # Only the patch bytes are embedded by crates/adapters/src/fixtures.rs. The
 # catalog, before/after files, test extensions and README are runtime test data.
@@ -31,7 +32,7 @@ APP_TESTS = diffz_crate(
     unit_compile_data = ["packaging/linux/io.github.zzwong.Diffz.desktop"],
 )
 
-alias(name = "gpui_linux", actual = "//vendor/gpui-pre-linux:gpui_linux", visibility = ["//visibility:public"])
+vendor_linux()
 rust_binary(
     name = "store_size",
     crate_root = "crates/adapters/examples/store_size.rs",
