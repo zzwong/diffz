@@ -29,21 +29,37 @@ jobs:
           cd "$RUNNER_TEMP/exports"
           tar --zstd -cf source-delta.tar.zst delta receipts
           sha256sum source-delta.tar.zst > SHA256SUMS
-      - name: Vendor the actual patched graph without compiling
+      - name: Vendor the patched graph without compiling and retain diagnostics
         shell: bash
         run: |
           set -euo pipefail
           export DIFFZ_BAZEL_OUTPUT_ROOT="$RUNNER_TEMP/bazel-output"
           export DIFFZ_BAZEL_BATCH=1
+          set +e
           bash scripts/bazel-trial.sh vendor --vendor_dir="$RUNNER_TEMP/bazel-vendor" \
             --config=fast-dev --jobs=2 --local_resources=cpu=2 //:all_build \
             2>&1 | tee "$RUNNER_TEMP/exports/receipts/bazel-vendor.log"
-          git diff --exit-code -- Cargo.lock
-          cp MODULE.bazel.lock "$RUNNER_TEMP/exports/receipts/MODULE.bazel.lock"
-          tar --zstd -cf "$RUNNER_TEMP/exports/bazel-vendor.tar.zst" -C "$RUNNER_TEMP" bazel-vendor
+          result=${PIPESTATUS[0]}
+          set -e
+          git status --porcelain --untracked-files=all > "$RUNNER_TEMP/exports/receipts/source-status.txt"
+          if [ -f vendor/gpui-pre-linux/BUILD.bazel ]; then
+            cp vendor/gpui-pre-linux/BUILD.bazel "$RUNNER_TEMP/exports/receipts/unexpected-source-BUILD.bazel"
+          fi
+          if [ -f MODULE.bazel.lock ]; then cp MODULE.bazel.lock "$RUNNER_TEMP/exports/receipts/MODULE.bazel.lock"; fi
+          if [ "$result" -eq 0 ]; then
+            git diff --exit-code -- Cargo.lock
+            test ! -e vendor/gpui-pre-linux/BUILD.bazel
+            tar --zstd -cf "$RUNNER_TEMP/exports/bazel-vendor.tar.zst" -C "$RUNNER_TEMP" bazel-vendor
+          else
+            # Preserve fetched repositories/tools for further LOCAL diagnosis,
+            # rather than repeatedly using hosted jobs for failing analysis.
+            tar --zstd --exclude='*/server/*' --exclude='*/execroot/*' \
+              -cf "$RUNNER_TEMP/exports/bazel-partial.tar.zst" -C "$RUNNER_TEMP" bazel-output
+          fi
           cd "$RUNNER_TEMP/exports"
-          sha256sum bazel-vendor.tar.zst >> SHA256SUMS
+          sha256sum bazel-*.tar.zst >> SHA256SUMS
           du -h *.tar.zst
+          exit "$result"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: ${{ always() }}
         with:
@@ -53,14 +69,18 @@ jobs:
             ${{ runner.temp }}/exports/SHA256SUMS
             ${{ runner.temp }}/exports/receipts/bazel-vendor.log
             ${{ runner.temp }}/exports/receipts/MODULE.bazel.lock
+            ${{ runner.temp }}/exports/receipts/source-status.txt
+            ${{ runner.temp }}/exports/receipts/unexpected-source-BUILD.bazel
           retention-days: 2
           compression-level: 0
           if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: ${{ success() }}
+        if: ${{ always() }}
         with:
-          name: diffz-bazel-vendor
-          path: ${{ runner.temp }}/exports/bazel-vendor.tar.zst
+          name: diffz-bazel-repositories
+          path: |
+            ${{ runner.temp }}/exports/bazel-vendor.tar.zst
+            ${{ runner.temp }}/exports/bazel-partial.tar.zst
           retention-days: 2
           compression-level: 0
           if-no-files-found: error
