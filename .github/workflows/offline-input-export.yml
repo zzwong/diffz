@@ -1,0 +1,95 @@
+name: One-shot offline build inputs
+
+on:
+  push:
+    branches: [experiment/offline-inputs-20261021]
+
+permissions:
+  contents: read
+
+jobs:
+  inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install the repository-pinned Rust compiler
+        run: python3 scripts/prepare-ci-rust.py
+      - name: Export exact source and vendored dependencies without building
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/offline-inputs"
+          mkdir -p "$root/source" "$root/bin" "$root/receipts" "$RUNNER_TEMP/input-artifacts"
+          git archive HEAD | tar -xf - -C "$root/source"
+          git rev-parse HEAD > "$root/receipts/source-revision.txt"
+          rustc -vV > "$root/receipts/rustc.txt"
+          cargo -Vv > "$root/receipts/cargo.txt"
+          cargo vendor --locked --versioned-dirs "$root/vendor" > "$root/vendor-config.toml"
+          test "$(git hash-object Cargo.lock)" = 4fd4bd0df21bf743af99c2d096f8d365ae1602ba
+          cp -a "$(dirname "$(dirname "$(rustup which rustc)")")" "$root/rust"
+          curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 \
+            https://github.com/bazelbuild/bazel/releases/download/8.4.2/bazel-8.4.2-linux-x86_64 -o "$root/bin/bazel"
+          printf '%s  %s\n' 4dc8e99dfa802e252dac176d08201fd15c542ae78c448c8a89974b6f387c282c "$root/bin/bazel" | sha256sum -c -
+          chmod +x "$root/bin/bazel"
+          "$root/bin/bazel" --version > "$root/receipts/bazel.txt"
+          cp Cargo.lock "$root/receipts/Cargo.lock"
+          tar --zstd -cf "$RUNNER_TEMP/input-artifacts/source.tar.zst" -C "$root" source receipts vendor-config.toml
+          tar --zstd -cf "$RUNNER_TEMP/input-artifacts/rust.tar.zst" -C "$root" rust bin
+          tar --zstd -cf "$RUNNER_TEMP/input-artifacts/vendor.tar.zst" -C "$root" vendor
+          cd "$RUNNER_TEMP/input-artifacts"
+          sha256sum *.tar.zst | tee SHA256SUMS
+          du -h *.tar.zst
+      - name: Fetch matching Debian native development packages without installing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/native-debs"
+          docker run --rm -v "$RUNNER_TEMP/native-debs:/exports" debian:13-slim sh -ec '
+            rm -f /etc/apt/apt.conf.d/docker-clean
+            apt-get update -qq
+            apt-get -y --no-install-recommends --download-only -o Dir::Cache::archives=/exports install \
+              libfontconfig-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+              libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
+              libssl-dev libzstd-dev libvulkan-dev
+          '
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/native-debs"
+          tar --zstd -cf "$RUNNER_TEMP/input-artifacts/native.tar.zst" -C "$RUNNER_TEMP/native-debs" .
+          cd "$RUNNER_TEMP/input-artifacts"
+          sha256sum native.tar.zst >> SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: diffz-offline-source
+          path: |
+            ${{ runner.temp }}/input-artifacts/source.tar.zst
+            ${{ runner.temp }}/input-artifacts/SHA256SUMS
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: diffz-offline-rust
+          path: ${{ runner.temp }}/input-artifacts/rust.tar.zst
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: diffz-offline-vendor
+          path: ${{ runner.temp }}/input-artifacts/vendor.tar.zst
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: diffz-offline-native
+          path: ${{ runner.temp }}/input-artifacts/native.tar.zst
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
