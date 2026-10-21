@@ -1,0 +1,84 @@
+name: One-shot Bazel repository inputs
+on:
+  push:
+    branches: [experiment/offline-bazel-20261021]
+permissions:
+  contents: read
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: python3 scripts/prepare-ci-rust.py
+      - name: Fetch the updated real Bazel graph without compiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bazel-export"
+          export DIFFZ_BAZEL_OUTPUT_ROOT="$RUNNER_TEMP/bazel-input-root"
+          export DIFFZ_BAZEL_BATCH=1
+          export CARGO_BAZEL_REPIN=1
+          bash scripts/bazel-trial.sh fetch //:all_build \
+            --repository_cache="$RUNNER_TEMP/bazel-download-cache" \
+            --jobs=2 --local_resources=cpu=2 2>&1 | tee "$RUNNER_TEMP/bazel-export/fetch.log"
+          cp MODULE.bazel.lock "$RUNNER_TEMP/bazel-export/MODULE.bazel.lock.generated"
+          git rev-parse HEAD > "$RUNNER_TEMP/bazel-export/source-revision.txt"
+          printf '%s\n' "$DIFFZ_BAZEL_OUTPUT_ROOT" > "$RUNNER_TEMP/bazel-export/original-output-root.txt"
+          tar --zstd -cf "$RUNNER_TEMP/bazel-export/repository-inputs.tar.zst" \
+            -C "$RUNNER_TEMP" bazel-input-root bazel-download-cache
+          cd "$RUNNER_TEMP/bazel-export"
+          sha256sum repository-inputs.tar.zst > SHA256SUMS
+          split -b 180M -d repository-inputs.tar.zst repository-inputs.part-
+          sha256sum repository-inputs.part-* >> SHA256SUMS
+          du -h repository-inputs.tar.zst
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: bazel-inputs-receipts
+          path: |
+            ${{ runner.temp }}/bazel-export/*.txt
+            ${{ runner.temp }}/bazel-export/*.log
+            ${{ runner.temp }}/bazel-export/*.generated
+            ${{ runner.temp }}/bazel-export/SHA256SUMS
+          retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bazel-inputs-00
+          path: ${{ runner.temp }}/bazel-export/repository-inputs.part-00
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bazel-inputs-01
+          path: ${{ runner.temp }}/bazel-export/repository-inputs.part-01
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bazel-inputs-02
+          path: ${{ runner.temp }}/bazel-export/repository-inputs.part-02
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bazel-inputs-03
+          path: ${{ runner.temp }}/bazel-export/repository-inputs.part-03
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bazel-inputs-remaining
+          path: |
+            ${{ runner.temp }}/bazel-export/repository-inputs.part-0[4-9]
+            ${{ runner.temp }}/bazel-export/repository-inputs.part-[1-9][0-9]
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: ignore
