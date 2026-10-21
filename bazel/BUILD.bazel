@@ -1,6 +1,6 @@
 load(":settings.bzl", "bool_flag")
 
-exports_files(["cargo_test.bzl", "crates.bzl", "vendor_linux.bzl", "gpui-linux.BUILD.bazel", "build-script-resources.patch", "wasmtime-bindgen-bazel-inputs.patch", "cranelift-assembler-x64-deterministic.patch", "cranelift-isle-deterministic.patch"])
+exports_files(["cargo_test.bzl", "crates.bzl", "vendor_linux.bzl", "gpui-linux-sources.BUILD.bazel", "gpui-linux.BUILD.bazel", "build-script-resources.patch", "wasmtime-bindgen-bazel-inputs.patch", "cranelift-assembler-x64-deterministic.patch", "cranelift-isle-deterministic.patch"])
 
 bool_flag(name = "workspace_cgu256", build_setting_default = False, visibility = ["//visibility:public"])
 config_setting(name = "cgu256", flag_values = {":workspace_cgu256": "true"}, visibility = ["//visibility:public"])
