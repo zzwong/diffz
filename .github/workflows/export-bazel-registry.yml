@@ -1,0 +1,57 @@
+name: One-shot Bazel registry recovery
+on:
+  push:
+    branches: [experiment/bazel-registry-recovery-20261021]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  registry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Recover previously recorded registry inputs without compiling
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/registry-export"
+          cd "$RUNNER_TEMP/registry-export"
+          gh api /repos/zzwong/diffz/actions/artifacts/12317291190/zip > receipts.zip
+          python3 - <<'PY'
+          import concurrent.futures, hashlib, json, pathlib, urllib.request, zipfile
+          root = pathlib.Path.cwd()
+          data = (root / 'receipts.zip').read_bytes()
+          assert hashlib.sha256(data).hexdigest() == '1314273eca22b80b050bccd260b3ebace8f9a11c32a1f5e8d321f21d19d16756'
+          with zipfile.ZipFile(root / 'receipts.zip') as archive:
+              lock = json.loads(archive.read('MODULE.bazel.lock.generated'))
+          def fetch(item):
+              url, expected = item
+              prefix = 'https://bcr.bazel.build/'
+              assert url.startswith(prefix)
+              relative = pathlib.PurePosixPath(url[len(prefix):])
+              assert not relative.is_absolute() and '..' not in relative.parts
+              with urllib.request.urlopen(url, timeout=30) as response:
+                  body = response.read()
+              assert hashlib.sha256(body).hexdigest() == expected, url
+              destination = root / 'registry' / relative
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(body)
+              return {'url': url, 'sha256': expected, 'bytes': len(body)}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+              receipts = list(pool.map(fetch, lock['registryFileHashes'].items()))
+          (root / 'registry-receipts.json').write_text(json.dumps(receipts, indent=2) + '\n')
+          print('Verified registry files:', len(receipts))
+          PY
+          tar --zstd -cf bazel-registry.tar.zst registry registry-receipts.json
+          sha256sum bazel-registry.tar.zst > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: verified-bazel-registry
+          path: |
+            ${{ runner.temp }}/registry-export/bazel-registry.tar.zst
+            ${{ runner.temp }}/registry-export/SHA256SUMS
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
