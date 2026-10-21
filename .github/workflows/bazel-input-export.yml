@@ -1,0 +1,66 @@
+name: One-shot Bazel offline inputs
+on:
+  push:
+    branches: [experiment/bazel-vendor-20261021]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Prepare pinned compiler
+        run: python3 scripts/prepare-ci-rust.py
+      - name: Fetch locked sources and export current delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/exports/delta" "$RUNNER_TEMP/exports/receipts"
+          cargo fetch --locked
+          git archive HEAD | tar -xf - -C "$RUNNER_TEMP/exports/delta"
+          git rev-parse HEAD > "$RUNNER_TEMP/exports/receipts/source-revision.txt"
+          rustc -vV > "$RUNNER_TEMP/exports/receipts/rustc.txt"
+          for crate in rustls-webpki-0.103.16 cranelift-srcgen-0.135.7 cranelift-assembler-x64-meta-0.135.7 cranelift-assembler-x64-0.135.7 cranelift-isle-0.135.7; do
+            cp "$HOME"/.cargo/registry/cache/*/"$crate.crate" "$RUNNER_TEMP/exports/receipts/"
+          done
+          cd "$RUNNER_TEMP/exports"
+          tar --zstd -cf source-delta.tar.zst delta receipts
+          sha256sum source-delta.tar.zst > SHA256SUMS
+      - name: Vendor the actual patched graph without compiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DIFFZ_BAZEL_OUTPUT_ROOT="$RUNNER_TEMP/bazel-output"
+          export DIFFZ_BAZEL_BATCH=1
+          bash scripts/bazel-trial.sh vendor --vendor_dir="$RUNNER_TEMP/bazel-vendor" \
+            --config=fast-dev --jobs=2 --local_resources=cpu=2 //:all_build \
+            2>&1 | tee "$RUNNER_TEMP/exports/receipts/bazel-vendor.log"
+          git diff --exit-code -- Cargo.lock
+          cp MODULE.bazel.lock "$RUNNER_TEMP/exports/receipts/MODULE.bazel.lock"
+          tar --zstd -cf "$RUNNER_TEMP/exports/bazel-vendor.tar.zst" -C "$RUNNER_TEMP" bazel-vendor
+          cd "$RUNNER_TEMP/exports"
+          sha256sum bazel-vendor.tar.zst >> SHA256SUMS
+          du -h *.tar.zst
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ always() }}
+        with:
+          name: diffz-bazel-source-delta
+          path: |
+            ${{ runner.temp }}/exports/source-delta.tar.zst
+            ${{ runner.temp }}/exports/SHA256SUMS
+            ${{ runner.temp }}/exports/receipts/bazel-vendor.log
+            ${{ runner.temp }}/exports/receipts/MODULE.bazel.lock
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: ${{ success() }}
+        with:
+          name: diffz-bazel-vendor
+          path: ${{ runner.temp }}/exports/bazel-vendor.tar.zst
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
