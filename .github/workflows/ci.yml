@@ -38,6 +38,7 @@ jobs:
           python3 scripts/tests/test_bootstrap_kache.py -v
           python3 scripts/tests/test_run_kache.py -v
           python3 scripts/tests/test_cranelift_generators.py -v
+          python3 scripts/tests/test_bazel_vendor_boundary.py -v
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       - name: Test Linux profiler DRM parsing

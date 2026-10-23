@@ -1,0 +1,13 @@
+# crate_universe regenerates this package for the Cargo path patch. Keep source
+# ownership here: root-package globs cannot cross a Bazel package boundary.
+exports_files(["Cargo.toml", "src/gpui_linux.rs"])
+
+filegroup(
+    name = "rust_sources",
+    srcs = glob(["src/**/*.rs"]),
+)
+
+filegroup(
+    name = "crate_data",
+    srcs = glob(["**"], exclude = ["BUILD", "BUILD.bazel"]),
+)
