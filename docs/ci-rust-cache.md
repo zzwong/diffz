@@ -82,6 +82,52 @@ requirements. Local development and release build profiles are unchanged.
 
 ## Verification and remaining cache work
 
+### Hosted Ubuntu native dependencies
+
+The ordinary Ubuntu `native` job identifies its prepared native environment
+before restoring compiled dependencies. All native package installation,
+including `desktop-file-utils` for the later installer smoke test, and the
+pinned Rust setup happen first. No package installation remains between the
+identity step and compilation. This extends the Debian package job's existing
+collector; its container receipt and digest format remain unchanged.
+
+`scripts/debian-build-environment.py --hosted-ubuntu --output <new-receipt>`
+records the hosted image's `ImageOS` and `ImageVersion`, installed Debian
+package versions/architectures, actual Rust and native compiler/linker binary
+hashes and versions, and the C target. The hosted labels are supplied by the
+[runner image setup](https://github.com/actions/runner-images/blob/main/images/ubuntu/scripts/build/configure-environment.sh);
+they are not an immutable Docker digest. Package and executable changes
+therefore invalidate the identity even when those labels stay the same.
+Missing/malformed metadata or a failed probe stops before cache restore, rather
+than silently selecting an unqualified compiled cache. The receipt is written
+exclusively outside the cached target and printed to the identity step's log
+before its SHA-256 is exposed to the cache step. Only allowlisted metadata is
+collected; no complete environment dump is included.
+
+The digest goes in `prefix-key`, which the pinned action includes in **both**
+exact and fallback keys. Rust/config/manifest hashing, job/OS/architecture
+partitioning, GitHub's existing PR/main trust scope, and cache publication
+behavior remain intact. No whole-commit key or cross-PR promotion is added.
+Expect a cold first run in the new namespace, and further safe misses when
+native packages or the hosted image change. This does not claim faster CI or
+eliminate all possible non-hermetic toolchain inputs.
+
+The compiler-free hosted fixtures can be run with:
+
+```sh
+python3 scripts/tests/test_hosted_build_environment.py -v
+```
+
+They validate data identity, failure/receipt behavior, unchanged container
+schema, and workflow ordering/key wiring without executing Rust, apt, Docker
+or native tools. The existing container subprocess fixtures remain separate.
+Real hosted collection and current-head CI are correctness gates. A subsequent
+same-identity cache hit is separate reuse evidence, not a prerequisite for
+merging the identity fix; it may depend on normal trusted-main publication.
+Do not claim reuse or a speedup without that evidence. This does not extend native
+identity to the core/check or macOS jobs, modify release/manual package cache
+policy, qualify shared-worktree reuse, or close #117's broader acceptance.
+
 Run the focused setup regressions with:
 
 ```sh
