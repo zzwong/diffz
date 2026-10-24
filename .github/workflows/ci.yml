@@ -149,3 +149,6 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Check every macOS target with all features
         run: cargo check --locked --workspace --all-features --all-targets
+      # Same check suite as make check-native, without the optional Kache wrapper.
+      - name: Run the complete macOS native check suite
+        run: RUSTC_WRAPPER= RUSTC_WORKSPACE_WRAPPER= bash scripts/check.sh native
