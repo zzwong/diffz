@@ -215,7 +215,12 @@ impl Runner {
 }
 /// Starts `executable` in a session of its own with null stdin and stdout and its stderr on
 /// `log`, and does not wait for it, so it outlives the terminal that started it.
-pub fn spawn_detached(executable: &Path, args: &[OsString], log: std::fs::File, activation_token: Option<String>) -> Result<()> {
+pub fn spawn_detached(
+    executable: &Path,
+    args: &[OsString],
+    log: std::fs::File,
+    activation_token: Option<String>,
+) -> Result<()> {
     let mut cmd = Command::new(executable);
     #[cfg(target_os = "linux")]
     {
@@ -434,22 +439,44 @@ mod activation_environment_tests {
         const FIXTURE: &str = "DIFFZ_DETACHED_TOKEN_FIXTURE";
         if let Some(root) = std::env::var_os(FIXTURE) {
             let root = PathBuf::from(root);
-            for (name, token) in [("owned", Some("synthetic-detached-token".into())), ("absent", None)] {
+            for (name, token) in [
+                ("owned", Some("synthetic-detached-token".into())),
+                ("absent", None),
+            ] {
                 let output = root.join(name);
-                spawn_detached(Path::new("/bin/sh"), &[
-                    "-c".into(), "printf '%s' \"${XDG_ACTIVATION_TOKEN-unset}\" > \"$1\"".into(),
-                    "fixture".into(), output.as_os_str().into(),
-                ], std::fs::File::create(root.join(format!("{name}.log"))).unwrap(), token).unwrap();
+                spawn_detached(
+                    Path::new("/bin/sh"),
+                    &[
+                        "-c".into(),
+                        "printf '%s' \"${XDG_ACTIVATION_TOKEN-unset}\" > \"$1\"".into(),
+                        "fixture".into(),
+                        output.as_os_str().into(),
+                    ],
+                    std::fs::File::create(root.join(format!("{name}.log"))).unwrap(),
+                    token,
+                )
+                .unwrap();
                 let deadline = Instant::now() + Duration::from_secs(3);
-                let expected = if name == "owned" { "synthetic-detached-token" } else { "unset" };
+                let expected = if name == "owned" {
+                    "synthetic-detached-token"
+                } else {
+                    "unset"
+                };
                 loop {
-                    if std::fs::read(&output).ok().as_deref() == Some(expected.as_bytes()) { break; }
-                    assert!(Instant::now() < deadline, "detached environment result missing");
+                    if std::fs::read(&output).ok().as_deref() == Some(expected.as_bytes()) {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "detached environment result missing"
+                    );
                     thread::sleep(Duration::from_millis(10));
                 }
             }
             // Command overrides did not mutate the parent helper's environment.
-            assert!(std::env::var("XDG_ACTIVATION_TOKEN").as_deref() == Ok("synthetic-inherited-token"));
+            assert!(
+                std::env::var("XDG_ACTIVATION_TOKEN").as_deref() == Ok("synthetic-inherited-token")
+            );
             return;
         }
         let dir = tempfile::tempdir().unwrap();
@@ -457,15 +484,22 @@ mod activation_environment_tests {
             .args(["--exact", "process::activation_environment_tests::detached_child_receives_only_the_explicitly_owned_token"])
             .env(FIXTURE, dir.path()).env("XDG_ACTIVATION_TOKEN", "synthetic-inherited-token")
             .output().unwrap();
-        assert!(output.status.success(), "isolated detached environment helper failed");
+        assert!(
+            output.status.success(),
+            "isolated detached environment helper failed"
+        );
     }
 
     #[test]
     fn spawn_failure_does_not_format_the_token_bearing_command() {
         let dir = tempfile::tempdir().unwrap();
-        let error = spawn_detached(&dir.path().join("missing"), &[],
+        let error = spawn_detached(
+            &dir.path().join("missing"),
+            &[],
             std::fs::File::create(dir.path().join("log")).unwrap(),
-            Some("synthetic-private-token".into())).unwrap_err();
+            Some("synthetic-private-token".into()),
+        )
+        .unwrap_err();
         assert!(!error.to_string().contains("synthetic-private-token"));
     }
 }

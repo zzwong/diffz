@@ -1862,9 +1862,15 @@ impl PlatformWindow for WaylandWindow {
 
     fn activate_with_token(&self, token: String) -> bool {
         let state = self.borrow();
-        submit_external_activation(token, &state.surface, state.globals.activation.as_ref().map(|activation| {
-            move |token, surface| activation.activate(token, surface)
-        }))
+        submit_external_activation(
+            token,
+            &state.surface,
+            state.globals.activation.as_ref().map(|activation| {
+                move |token: String, surface: &wl_surface::WlSurface| {
+                    activation.activate(token, surface)
+                }
+            }),
+        )
     }
 
     fn activate(&self) {

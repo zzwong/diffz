@@ -26,7 +26,9 @@ pub fn admit_activation_token(token: String) -> Option<String> {
         .then_some(token)
 }
 
-fn optional_activation_token<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+fn optional_activation_token<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -55,7 +57,11 @@ struct Message {
     request: Option<OpenRequest>,
     #[serde(default)]
     writes: Writes,
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "optional_activation_token")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "optional_activation_token"
+    )]
     activation_token: Option<String>,
 }
 #[derive(Deserialize)]
@@ -108,14 +114,21 @@ fn read_line(stream: &UnixStream) -> std::io::Result<String> {
     let mut line = String::new();
     BufReader::new(stream.take(LIMIT)).read_line(&mut line)?;
     if !line.ends_with('\n') {
-        return Err(std::io::Error::new(ErrorKind::InvalidData, "incomplete or oversized handoff frame"));
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "incomplete or oversized handoff frame",
+        ));
     }
     Ok(line)
 }
 
 /// Construct the only frame to be written. Dropping oversized metadata here is
 /// not an IPC retry; the request itself is never truncated.
-fn frame(request: Option<&OpenRequest>, writes: Writes, activation_token: Option<String>) -> Result<Vec<u8>> {
+fn frame(
+    request: Option<&OpenRequest>,
+    writes: Writes,
+    activation_token: Option<String>,
+) -> Result<Vec<u8>> {
     let mut message = Message {
         version: VERSION,
         request: request.cloned(),
@@ -123,7 +136,8 @@ fn frame(request: Option<&OpenRequest>, writes: Writes, activation_token: Option
         activation_token: activation_token.and_then(admit_activation_token),
     };
     loop {
-        let mut bytes = serde_json::to_vec(&message).map_err(|_| "could not encode handoff request")?;
+        let mut bytes =
+            serde_json::to_vec(&message).map_err(|_| "could not encode handoff request")?;
         bytes.push(b'\n');
         if bytes.len() <= LIMIT as usize {
             return Ok(bytes);
@@ -136,7 +150,11 @@ fn frame(request: Option<&OpenRequest>, writes: Writes, activation_token: Option
 
 fn unreadable(error: &serde_json::Error) -> String {
     // serde's normal error text can quote rejected values, including token bytes.
-    format!("the running diffz could not read the request at line {} column {}", error.line(), error.column())
+    format!(
+        "the running diffz could not read the request at line {} column {}",
+        error.line(),
+        error.column()
+    )
 }
 fn unanswered(e: &std::io::Error) -> bool {
     matches!(
@@ -148,7 +166,12 @@ fn unanswered(e: &std::io::Error) -> bool {
     )
 }
 /// Gives `request` to the instance running on `dir`, waiting for it to take or refuse it.
-pub fn send(dir: &Path, request: Option<&OpenRequest>, writes: Writes, activation_token: &mut Option<String>) -> Result<Outcome> {
+pub fn send(
+    dir: &Path,
+    request: Option<&OpenRequest>,
+    writes: Writes,
+    activation_token: &mut Option<String>,
+) -> Result<Outcome> {
     send_within(dir, request, writes, activation_token, STARTUP)
 }
 fn send_within(
@@ -193,7 +216,13 @@ fn send_within(
     };
     stream.set_read_timeout(Some(ACK))?;
     stream.set_write_timeout(Some(ACK))?;
-    exchange(&mut &stream, || read_line(&stream), request, writes, activation_token)
+    exchange(
+        &mut &stream,
+        || read_line(&stream),
+        request,
+        writes,
+        activation_token,
+    )
 }
 
 /// The single write/Ack exchange, separated only so partial writes and missing
@@ -215,7 +244,8 @@ fn exchange(
         Err(e) if unanswered(&e) => return Ok(Outcome::Unanswered),
         Err(e) => return Err(e.into()),
     };
-    let ack: Ack = serde_json::from_str(&line).map_err(|_| "could not read handoff acknowledgement")?;
+    let ack: Ack =
+        serde_json::from_str(&line).map_err(|_| "could not read handoff acknowledgement")?;
     Ok(match ack.error {
         None => Outcome::Accepted,
         Some(error) => Outcome::Refused(error),
@@ -232,7 +262,15 @@ pub fn deliver(
     activation_token: Option<String>,
     launch: impl FnOnce(Option<String>) -> Result<()>,
 ) -> Result<Delivery> {
-    deliver_within(dir, request, writes, activation_token, launch, STARTUP, LAUNCH)
+    deliver_within(
+        dir,
+        request,
+        writes,
+        activation_token,
+        launch,
+        STARTUP,
+        LAUNCH,
+    )
 }
 fn deliver_within(
     dir: &Path,
@@ -243,7 +281,15 @@ fn deliver_within(
     startup: Duration,
     listen: Duration,
 ) -> Result<Delivery> {
-    deliver_observed(dir, request, writes, activation_token, launch, (startup, listen), || {})
+    deliver_observed(
+        dir,
+        request,
+        writes,
+        activation_token,
+        launch,
+        (startup, listen),
+        || {},
+    )
 }
 
 // The observer is a no-op in production; tests synchronize the owner replacement
@@ -467,7 +513,12 @@ mod tests {
     #[test]
     fn wire_v1_accepts_old_bytes_and_old_decoders_ignore_metadata() {
         #[derive(Deserialize)]
-        struct OldMessage { version: u32, request: Option<OpenRequest>, #[serde(default)] writes: Writes }
+        struct OldMessage {
+            version: u32,
+            request: Option<OpenRequest>,
+            #[serde(default)]
+            writes: Writes,
+        }
         for request in [None, Some(OpenRequest::Patch("a path/review.patch".into()))] {
             let bytes = frame(request.as_ref(), Writes::default(), Some(TOKEN.into())).unwrap();
             let decoded: Message = serde_json::from_slice(&bytes).unwrap();
@@ -478,7 +529,10 @@ mod tests {
             assert_eq!(old.request, request);
             assert_eq!(old.writes, Writes::default());
         }
-        for old in [r#"{"version":1,"request":null}"#, r#"{"version":1,"request":null,"activation_token":null}"#] {
+        for old in [
+            r#"{"version":1,"request":null}"#,
+            r#"{"version":1,"request":null,"activation_token":null}"#,
+        ] {
             let decoded: Message = serde_json::from_str(old).unwrap();
             assert!(decoded.activation_token.is_none());
         }
@@ -486,18 +540,35 @@ mod tests {
 
     #[test]
     fn metadata_admission_is_byte_bounded_and_not_normalized() {
-        for value in [serde_json::json!(""), serde_json::json!("a\0b"), serde_json::json!("x".repeat(4097)),
-            serde_json::json!({"token": TOKEN}), serde_json::json!([TOKEN]), serde_json::json!(42), serde_json::Value::Null] {
-            let bytes = serde_json::to_vec(&serde_json::json!({"version":1,"request":null,"activation_token":value})).unwrap();
+        for value in [
+            serde_json::json!(""),
+            serde_json::json!("a\0b"),
+            serde_json::json!("x".repeat(4097)),
+            serde_json::json!({"token": TOKEN}),
+            serde_json::json!([TOKEN]),
+            serde_json::json!(42),
+            serde_json::Value::Null,
+        ] {
+            let bytes = serde_json::to_vec(
+                &serde_json::json!({"version":1,"request":null,"activation_token":value}),
+            )
+            .unwrap();
             let decoded: Message = serde_json::from_slice(&bytes).unwrap();
             assert!(decoded.activation_token.is_none());
         }
-        for token in [" ".to_owned(), TOKEN.to_owned(), "x".repeat(4096), "é".repeat(2048)] {
+        for token in [
+            " ".to_owned(),
+            TOKEN.to_owned(),
+            "x".repeat(4096),
+            "é".repeat(2048),
+        ] {
             let bytes = frame(None, Writes::default(), Some(token.clone())).unwrap();
             let decoded: Message = serde_json::from_slice(&bytes).unwrap();
             assert!(decoded.activation_token.as_ref() == Some(&token));
         }
-        let decoded: Message = serde_json::from_str(r#"{"version":1,"request":null,"activation_token":"\u2603"}"#).unwrap();
+        let decoded: Message =
+            serde_json::from_str(r#"{"version":1,"request":null,"activation_token":"\u2603"}"#)
+                .unwrap();
         assert!(decoded.activation_token.as_deref() == Some("☃"));
     }
 
@@ -513,7 +584,8 @@ mod tests {
                 assert_eq!(bytes.len(), size);
                 assert_eq!(bytes.last(), Some(&b'\n'));
                 // Metadata-only overflow chooses one tokenless frame before any write.
-                let with_token = frame(Some(&request), Writes::default(), Some("\"".repeat(4096))).unwrap();
+                let with_token =
+                    frame(Some(&request), Writes::default(), Some("\"".repeat(4096))).unwrap();
                 assert!(with_token == bytes);
             } else {
                 assert!(result.is_err());
@@ -526,11 +598,18 @@ mod tests {
 
     #[test]
     fn complete_limit_frame_is_valid_but_capped_prefix_is_not() {
-        for (size, newline, valid) in [(65_535, true, true), (65_536, true, true), (65_537, true, false), (20, false, false)] {
+        for (size, newline, valid) in [
+            (65_535, true, true),
+            (65_536, true, true),
+            (65_537, true, false),
+            (20, false, false),
+        ] {
             let (mut writer, reader) = UnixStream::pair().unwrap();
             let task = std::thread::spawn(move || {
                 let mut bytes = vec![b' '; size];
-                if newline { *bytes.last_mut().unwrap() = b'\n'; }
+                if newline {
+                    *bytes.last_mut().unwrap() = b'\n';
+                }
                 let _ = writer.write_all(&bytes);
             });
             assert_eq!(read_line(&reader).is_ok(), valid);
@@ -544,10 +623,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let listener = Listener::bind(dir.path(), Writes::default()).unwrap();
         let server = serve(listener, vec![Ok(())]);
-        let malformed = format!("{{\"version\":1,\"request\":{},\"activation_token\":{}}}\n",
-            serde_json::to_string(TOKEN).unwrap(), serde_json::to_string(TOKEN).unwrap());
-        let nested = format!("{{\"version\":1,\"request\":null,\"activation_token\":{}{}{} }}\n",
-            "[".repeat(200), serde_json::to_string(TOKEN).unwrap(), "]".repeat(200));
+        let malformed = format!(
+            "{{\"version\":1,\"request\":{},\"activation_token\":{}}}\n",
+            serde_json::to_string(TOKEN).unwrap(),
+            serde_json::to_string(TOKEN).unwrap()
+        );
+        let nested = format!(
+            "{{\"version\":1,\"request\":null,\"activation_token\":{}{}{} }}\n",
+            "[".repeat(200),
+            serde_json::to_string(TOKEN).unwrap(),
+            "]".repeat(200)
+        );
         for bytes in [malformed, nested, "{\"version\":1,\"request\":null}".into()] {
             let mut stream = UnixStream::connect(socket_path(dir.path())).unwrap();
             stream.write_all(bytes.as_bytes()).unwrap();
@@ -558,7 +644,10 @@ mod tests {
             let ack: Ack = serde_json::from_str(&response).unwrap();
             assert!(ack.error.is_some());
         }
-        assert_eq!(send(dir.path(), None, Writes::default(), &mut None).unwrap(), Outcome::Accepted);
+        assert_eq!(
+            send(dir.path(), None, Writes::default(), &mut None).unwrap(),
+            Outcome::Accepted
+        );
         server.join().unwrap();
     }
 
@@ -566,7 +655,10 @@ mod tests {
     fn no_instance_keeps_ownership_and_a_successful_send_consumes_it() {
         let dir = tempfile::tempdir().unwrap();
         let mut token = Some(TOKEN.into());
-        assert_eq!(send(dir.path(), None, Writes::default(), &mut token).unwrap(), Outcome::NotRunning);
+        assert_eq!(
+            send(dir.path(), None, Writes::default(), &mut token).unwrap(),
+            Outcome::NotRunning
+        );
         assert!(token.as_deref() == Some(TOKEN));
         let listener = Listener::bind(dir.path(), Writes::default()).unwrap();
         let server = std::thread::spawn(move || {
@@ -574,7 +666,10 @@ mod tests {
             assert!(incoming.activation_token.as_deref() == Some(TOKEN));
             incoming.reply(Ok(()));
         });
-        assert_eq!(send(dir.path(), None, Writes::default(), &mut token).unwrap(), Outcome::Accepted);
+        assert_eq!(
+            send(dir.path(), None, Writes::default(), &mut token).unwrap(),
+            Outcome::Accepted
+        );
         assert!(token.is_none());
         server.join().unwrap();
     }
@@ -585,7 +680,9 @@ mod tests {
         let listener = Listener::bind(dir.path(), Writes::default()).unwrap();
         let (accepted_tx, accepted_rx) = std::sync::mpsc::channel();
         let server = std::thread::spawn(move || {
-            let incoming = listener.accept_observed(|at| accepted_tx.send(at).unwrap()).unwrap();
+            let incoming = listener
+                .accept_observed(|at| accepted_tx.send(at).unwrap())
+                .unwrap();
             let accepted_at = incoming.accepted_at;
             incoming.reply(Ok(()));
             accepted_at
@@ -603,7 +700,10 @@ mod tests {
 
     #[test]
     fn partial_writes_and_lost_ack_never_restore_or_retry_a_token() {
-        struct FailingWriter { written: usize, partial: bool }
+        struct FailingWriter {
+            written: usize,
+            partial: bool,
+        }
         impl Write for FailingWriter {
             fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
                 if self.partial && self.written == 0 {
@@ -612,20 +712,43 @@ mod tests {
                 }
                 Err(std::io::Error::from(ErrorKind::BrokenPipe))
             }
-            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
         }
         for partial in [false, true] {
             let mut token = Some(TOKEN.into());
-            let mut writer = FailingWriter { written: 0, partial };
-            assert_eq!(exchange(&mut writer, || panic!("must not read after failed write"),
-                None, Writes::default(), &mut token).unwrap(), Outcome::Unanswered);
+            let mut writer = FailingWriter {
+                written: 0,
+                partial,
+            };
+            assert_eq!(
+                exchange(
+                    &mut writer,
+                    || panic!("must not read after failed write"),
+                    None,
+                    Writes::default(),
+                    &mut token
+                )
+                .unwrap(),
+                Outcome::Unanswered
+            );
             assert!(token.is_none());
             assert_eq!(writer.written, if partial { 7 } else { 0 });
         }
         let mut token = Some(TOKEN.into());
         let mut written = Vec::new();
-        assert_eq!(exchange(&mut written, || Err(std::io::Error::from(ErrorKind::TimedOut)),
-            None, Writes::default(), &mut token).unwrap(), Outcome::Unanswered);
+        assert_eq!(
+            exchange(
+                &mut written,
+                || Err(std::io::Error::from(ErrorKind::TimedOut)),
+                None,
+                Writes::default(),
+                &mut token
+            )
+            .unwrap(),
+            Outcome::Unanswered
+        );
         assert!(token.is_none());
         let decoded: Message = serde_json::from_slice(&written).unwrap();
         assert!(decoded.activation_token.as_deref() == Some(TOKEN));
@@ -636,13 +759,30 @@ mod tests {
     fn oversized_base_fails_before_any_write_and_refusal_consumes_token() {
         let mut bytes = Vec::new();
         let mut token = Some(TOKEN.into());
-        assert!(exchange(&mut bytes, || panic!("oversize has no Ack"),
-            Some(&OpenRequest::Fixture("x".repeat(65_536))), Writes::default(), &mut token).is_err());
+        assert!(
+            exchange(
+                &mut bytes,
+                || panic!("oversize has no Ack"),
+                Some(&OpenRequest::Fixture("x".repeat(65_536))),
+                Writes::default(),
+                &mut token
+            )
+            .is_err()
+        );
         assert!(bytes.is_empty());
         assert!(token.is_none());
         let mut token = Some(TOKEN.into());
-        assert_eq!(exchange(&mut bytes, || Ok("{\"version\":1,\"error\":\"refused\"}\n".into()),
-            None, Writes::default(), &mut token).unwrap(), Outcome::Refused("refused".into()));
+        assert_eq!(
+            exchange(
+                &mut bytes,
+                || Ok("{\"version\":1,\"error\":\"refused\"}\n".into()),
+                None,
+                Writes::default(),
+                &mut token
+            )
+            .unwrap(),
+            Outcome::Refused("refused".into())
+        );
         assert!(token.is_none());
     }
 
@@ -658,11 +798,18 @@ mod tests {
             drop(listener);
             drop(store);
         });
-        let result = deliver(dir.path(), None, Writes::default(), Some(TOKEN.into()), |token| {
-            assert!(token.is_none());
-            launch_window(dir.path(), Arc::default());
-            Ok(())
-        }).unwrap();
+        let result = deliver(
+            dir.path(),
+            None,
+            Writes::default(),
+            Some(TOKEN.into()),
+            |token| {
+                assert!(token.is_none());
+                launch_window(dir.path(), Arc::default());
+                Ok(())
+            },
+        )
+        .unwrap();
         assert_eq!(result, Delivery::Launched);
         server.join().unwrap();
     }
@@ -685,9 +832,16 @@ mod tests {
         let (settled, after_settle) = std::sync::mpsc::channel();
         let sender_dir = dir.path().to_path_buf();
         let sender = std::thread::spawn(move || {
-            deliver_observed(&sender_dir, Some(&request()), Writes::default(), Some(TOKEN.into()),
-                |_| panic!("replacement instance must receive the request"), (STARTUP, LAUNCH),
-                || settled.send(()).unwrap()).unwrap()
+            deliver_observed(
+                &sender_dir,
+                Some(&request()),
+                Writes::default(),
+                Some(TOKEN.into()),
+                |_| panic!("replacement instance must receive the request"),
+                (STARTUP, LAUNCH),
+                || settled.send(()).unwrap(),
+            )
+            .unwrap()
         });
         // The actual first probe has returned Unanswered and settle has observed
         // the old writer lock released. Hold the launch lock until replacement is
@@ -848,7 +1002,9 @@ mod tests {
             github: false,
             gitlab: true,
         };
-        let Outcome::Refused(error) = send(dir.path(), Some(&request()), gitlab, &mut None).unwrap() else {
+        let Outcome::Refused(error) =
+            send(dir.path(), Some(&request()), gitlab, &mut None).unwrap()
+        else {
             panic!("a request needing GitLab writes was taken");
         };
         assert!(error.contains("without --allow-gitlab-writes"), "{error}");
@@ -869,11 +1025,17 @@ mod tests {
             drop(store);
         });
         let mut launches = 0;
-        let delivery = deliver(dir.path(), Some(&request()), Writes::default(), None, |_| {
-            launches += 1;
-            launch_window(dir.path(), Arc::default());
-            Ok(())
-        })
+        let delivery = deliver(
+            dir.path(),
+            Some(&request()),
+            Writes::default(),
+            None,
+            |_| {
+                launches += 1;
+                launch_window(dir.path(), Arc::default());
+                Ok(())
+            },
+        )
         .unwrap();
         closing.join().unwrap();
         assert_eq!((delivery, launches), (Delivery::Launched, 1));
@@ -899,14 +1061,19 @@ mod tests {
     fn launch_window(dir: &Path, received: Received) {
         launch_window_with_tokens(dir, received, None);
     }
-    fn launch_window_with_tokens(dir: &Path, received: Received, tokens: Option<Arc<std::sync::Mutex<Vec<String>>>>) {
+    fn launch_window_with_tokens(
+        dir: &Path,
+        received: Received,
+        tokens: Option<Arc<std::sync::Mutex<Vec<String>>>>,
+    ) {
         let dir = dir.to_path_buf();
         let (ready, started) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _store =
-                open_or_hand_off(&dir, None, Writes::default(), &mut None, || store::Store::open(&dir))
-                    .unwrap()
-                    .unwrap();
+            let _store = open_or_hand_off(&dir, None, Writes::default(), &mut None, || {
+                store::Store::open(&dir)
+            })
+            .unwrap()
+            .unwrap();
             let listener = Listener::bind(&dir, Writes::default()).unwrap();
             ready.send(()).unwrap();
             let listener = Arc::new(listener);
@@ -914,7 +1081,8 @@ mod tests {
             std::thread::spawn(move || {
                 while let Ok(mut incoming) = accepting.accept() {
                     received.lock().unwrap().push(incoming.request.take());
-                    if let (Some(tokens), Some(token)) = (&tokens, incoming.activation_token.take()) {
+                    if let (Some(tokens), Some(token)) = (&tokens, incoming.activation_token.take())
+                    {
                         tokens.lock().unwrap().push(token);
                     }
                     incoming.reply(Ok(()));
@@ -967,19 +1135,30 @@ mod tests {
         let tokens = Arc::new(std::sync::Mutex::new(Vec::new()));
         let launches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let barrier = Arc::new(std::sync::Barrier::new(2));
-        let senders: Vec<_> = ["synthetic-first", "synthetic-second"].into_iter().map(|token| {
-            let (dir, tokens, launches, barrier) = (dir.path().to_path_buf(), tokens.clone(), launches.clone(), barrier.clone());
-            std::thread::spawn(move || {
-                barrier.wait();
-                deliver(&dir, None, Writes::default(), Some(token.into()), |owned| {
-                    launches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    tokens.lock().unwrap().push(owned.unwrap());
-                    launch_window_with_tokens(&dir, Arc::default(), Some(tokens.clone()));
-                    Ok(())
-                }).unwrap()
+        let senders: Vec<_> = ["synthetic-first", "synthetic-second"]
+            .into_iter()
+            .map(|token| {
+                let (dir, tokens, launches, barrier) = (
+                    dir.path().to_path_buf(),
+                    tokens.clone(),
+                    launches.clone(),
+                    barrier.clone(),
+                );
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    deliver(&dir, None, Writes::default(), Some(token.into()), |owned| {
+                        launches.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        tokens.lock().unwrap().push(owned.unwrap());
+                        launch_window_with_tokens(&dir, Arc::default(), Some(tokens.clone()));
+                        Ok(())
+                    })
+                    .unwrap()
+                })
             })
-        }).collect();
-        for sender in senders { sender.join().unwrap(); }
+            .collect();
+        for sender in senders {
+            sender.join().unwrap();
+        }
         assert_eq!(launches.load(std::sync::atomic::Ordering::SeqCst), 1);
         let mut actual = tokens.lock().unwrap();
         actual.sort();
@@ -997,14 +1176,24 @@ mod tests {
             incoming.reply(Ok(()));
         });
         let mut token = Some(TOKEN.into());
-        assert!(open_or_hand_off(dir.path(), None, Writes::default(), &mut token,
-            || store::Store::open(dir.path())).unwrap().is_none());
+        assert!(
+            open_or_hand_off(dir.path(), None, Writes::default(), &mut token, || {
+                store::Store::open(dir.path())
+            })
+            .unwrap()
+            .is_none()
+        );
         assert!(token.is_none());
         server.join().unwrap();
         drop(store);
         let mut token = Some(TOKEN.into());
-        assert!(open_or_hand_off(dir.path(), None, Writes::default(), &mut token,
-            || store::Store::open(dir.path())).unwrap().is_some());
+        assert!(
+            open_or_hand_off(dir.path(), None, Writes::default(), &mut token, || {
+                store::Store::open(dir.path())
+            })
+            .unwrap()
+            .is_some()
+        );
         assert!(token.as_deref() == Some(TOKEN));
     }
 
@@ -1014,9 +1203,13 @@ mod tests {
         let _store = store::Store::open(dir.path()).unwrap();
         let listener = Listener::bind(dir.path(), Writes::default()).unwrap();
         let server = serve(listener, vec![Ok(())]);
-        let opened = open_or_hand_off(dir.path(), Some(&request()), Writes::default(), &mut None, || {
-            store::Store::open(dir.path())
-        })
+        let opened = open_or_hand_off(
+            dir.path(),
+            Some(&request()),
+            Writes::default(),
+            &mut None,
+            || store::Store::open(dir.path()),
+        )
         .unwrap();
         assert!(opened.is_none());
         assert_eq!(server.join().unwrap(), vec![Some(request())]);

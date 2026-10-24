@@ -354,7 +354,11 @@ fn app_bundle(exe: &Path) -> Option<&Path> {
 /// shows the app, and otherwise as this executable in a session of its own. Either way its
 /// stderr goes to the log in `state`.
 #[cfg(all(unix, feature = "desktop"))]
-fn launch(args: Vec<std::ffi::OsString>, state: &Path, activation_token: Option<String>) -> Result<()> {
+fn launch(
+    args: Vec<std::ffi::OsString>,
+    state: &Path,
+    activation_token: Option<String>,
+) -> Result<()> {
     use diffz_adapters::handoff::log_file;
     let exe = std::env::current_exe()?.canonicalize()?;
     let log = log_file(state)?;
@@ -404,11 +408,17 @@ fn writes(options: &Options) -> diffz_adapters::handoff::Writes {
 fn hand_off(options: &Options, state: &Path, activation_token: Option<String>) -> Result<()> {
     use diffz_adapters::handoff::{Delivery, deliver};
     let request = handed_request(options)?;
-    let result = deliver(state, request.as_ref(), writes(options), activation_token, |token| {
-        launch_args(options, state, request.as_ref())
-            .and_then(|args| launch(args, state, token))
-            .map_err(|e| format!("{e:#}").into())
-    })
+    let result = deliver(
+        state,
+        request.as_ref(),
+        writes(options),
+        activation_token,
+        |token| {
+            launch_args(options, state, request.as_ref())
+                .and_then(|args| launch(args, state, token))
+                .map_err(|e| format!("{e:#}").into())
+        },
+    )
     .map(|delivery| match delivery {
         Delivery::HandedOff => "handed_off",
         Delivery::Launched => "launched",
@@ -531,7 +541,10 @@ unsafe fn capture_activation_token() -> Option<String> {
 }
 #[cfg(target_os = "linux")]
 fn captured_activation_token(value: Option<std::ffi::OsString>) -> Option<String> {
-    value?.into_string().ok().and_then(diffz_adapters::handoff::admit_activation_token)
+    value?
+        .into_string()
+        .ok()
+        .and_then(diffz_adapters::handoff::admit_activation_token)
 }
 fn run(activation_token: Option<String>) -> Result<()> {
     #[cfg(feature = "desktop")]
@@ -603,7 +616,12 @@ fn run(activation_token: Option<String>) -> Result<()> {
             .context("probe source is not UTF-8")?;
         #[cfg(feature = "desktop")]
         {
-            diffz_ui::probe::launch_probe(source, desktop_font(options.font)?, output, activation_token);
+            diffz_ui::probe::launch_probe(
+                source,
+                desktop_font(options.font)?,
+                output,
+                activation_token,
+            );
             return Ok(());
         }
         #[cfg(not(feature = "desktop"))]
@@ -704,8 +722,12 @@ mod tests {
     #[test]
     fn startup_capture_admission_preserves_only_bounded_utf8() {
         use std::os::unix::ffi::OsStringExt;
-        for value in [None, Some("".into()), Some("x".repeat(4097).into()),
-            Some(std::ffi::OsString::from_vec(vec![0xff]))] {
+        for value in [
+            None,
+            Some("".into()),
+            Some("x".repeat(4097).into()),
+            Some(std::ffi::OsString::from_vec(vec![0xff])),
+        ] {
             assert!(captured_activation_token(value).is_none());
         }
         for value in [" ", "synthetic \n opaque ☃"] {
@@ -716,8 +738,12 @@ mod tests {
     #[cfg(all(unix, feature = "desktop"))]
     #[test]
     fn bounded_bridge_moves_tokens_and_starts_age_only_at_accept() {
-        use std::{io::Write as _, os::unix::net::UnixStream, time::{Duration, Instant}};
         use diffz_adapters::handoff::{Listener, Writes, socket_path};
+        use std::{
+            io::Write as _,
+            os::unix::net::UnixStream,
+            time::{Duration, Instant},
+        };
         let dir = tempfile::tempdir().unwrap();
         let rx = serve(Listener::bind(dir.path(), Writes::default()).unwrap());
         let connect = |token: &str| {
@@ -734,7 +760,10 @@ mod tests {
         let _fourth = connect("fourth-synthetic");
         let deadline = Instant::now() + Duration::from_secs(2);
         while rx.len() != 1 {
-            assert!(Instant::now() < deadline, "bridge did not queue its one message");
+            assert!(
+                Instant::now() < deadline,
+                "bridge did not queue its one message"
+            );
             std::thread::yield_now();
         }
         assert_eq!(rx.capacity(), Some(1));
@@ -762,14 +791,22 @@ mod tests {
     #[cfg(all(unix, feature = "desktop"))]
     #[test]
     fn receiver_drop_releases_a_listener_blocked_on_enqueue() {
-        use std::{io::{Read as _, Write as _}, os::unix::net::UnixStream, time::{Duration, Instant}};
         use diffz_adapters::handoff::{Listener, Writes, socket_path};
+        use std::{
+            io::{Read as _, Write as _},
+            os::unix::net::UnixStream,
+            time::{Duration, Instant},
+        };
         let dir = tempfile::tempdir().unwrap();
         let rx = serve(Listener::bind(dir.path(), Writes::default()).unwrap());
         let connect = || {
             let mut stream = UnixStream::connect(socket_path(dir.path())).unwrap();
-            stream.write_all(b"{\"version\":1,\"request\":null,\"activation_token\":\"synthetic\"}\n").unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            stream
+                .write_all(b"{\"version\":1,\"request\":null,\"activation_token\":\"synthetic\"}\n")
+                .unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
             stream
         };
         let _queued = connect();

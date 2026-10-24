@@ -111,10 +111,10 @@ index 84f4d0f..b2a2922 100644
 +    }
 +}
 diff --git a/vendor/gpui-pre-linux/src/linux/wayland/window.rs b/vendor/gpui-pre-linux/src/linux/wayland/window.rs
-index 8d92234..18c544a 100644
+index 8d92234..abb77e1 100644
 --- a/vendor/gpui-pre-linux/src/linux/wayland/window.rs
 +++ b/vendor/gpui-pre-linux/src/linux/wayland/window.rs
-@@ -1856,6 +1856,17 @@ impl PlatformWindow for WaylandWindow {
+@@ -1856,6 +1856,23 @@ impl PlatformWindow for WaylandWindow {
          None
      }
 
@@ -124,15 +124,21 @@ index 8d92234..18c544a 100644
 +
 +    fn activate_with_token(&self, token: String) -> bool {
 +        let state = self.borrow();
-+        submit_external_activation(token, &state.surface, state.globals.activation.as_ref().map(|activation| {
-+            move |token, surface| activation.activate(token, surface)
-+        }))
++        submit_external_activation(
++            token,
++            &state.surface,
++            state.globals.activation.as_ref().map(|activation| {
++                move |token: String, surface: &wl_surface::WlSurface| {
++                    activation.activate(token, surface)
++                }
++            }),
++        )
 +    }
 +
      fn activate(&self) {
          // Try to request an activation token. Even though the activation is likely going to be rejected,
          // KWin and Mutter can use the app_id to visually indicate we're requesting attention.
-@@ -2414,3 +2425,42 @@ fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) ->
+@@ -2414,3 +2431,42 @@ fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) ->
 
      bounds
  }

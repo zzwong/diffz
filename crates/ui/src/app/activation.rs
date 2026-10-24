@@ -18,7 +18,9 @@ impl ActivationPolicy {
     /// Invoke at the original activation point after the save wait. Keeping this
     /// decision after token disposal prevents a later generic activation replay.
     pub(super) fn activate_later(self, activate: impl FnOnce()) {
-        if !self.suppress_generic { activate(); }
+        if !self.suppress_generic {
+            activate();
+        }
     }
 }
 
@@ -34,7 +36,9 @@ pub(super) fn activate_external(
 ) -> ActivationPolicy {
     let context = match token {
         None => Context::Absent,
-        Some(token) if now.saturating_duration_since(accepted_at) <= USE_BUDGET => Context::Fresh(token),
+        Some(token) if now.saturating_duration_since(accepted_at) <= USE_BUDGET => {
+            Context::Fresh(token)
+        }
         Some(_) => Context::Expired,
     };
     let suppress_generic = match context {
@@ -61,14 +65,33 @@ mod tests {
         for (token, age, supported, submitted, suppressed) in [
             (false, Duration::ZERO, true, false, false),
             (true, USE_BUDGET, true, true, true),
-            (true, USE_BUDGET + Duration::from_nanos(1), true, false, true),
+            (
+                true,
+                USE_BUDGET + Duration::from_nanos(1),
+                true,
+                false,
+                true,
+            ),
             (true, Duration::ZERO, false, false, false),
-            (true, USE_BUDGET + Duration::from_secs(1), false, false, false),
+            (
+                true,
+                USE_BUDGET + Duration::from_secs(1),
+                false,
+                false,
+                false,
+            ),
         ] {
             let mut calls = 0;
             let suppress = activate_external(
-                token.then(|| "synthetic opaque \n token".to_owned()), accepted, accepted + age, supported,
-                |value| { assert!(value == "synthetic opaque \n token"); calls += 1; true },
+                token.then(|| "synthetic opaque \n token".to_owned()),
+                accepted,
+                accepted + age,
+                supported,
+                |value| {
+                    assert!(value == "synthetic opaque \n token");
+                    calls += 1;
+                    true
+                },
             );
             assert_eq!(calls, usize::from(submitted));
             assert_eq!(suppress.suppress_generic, suppressed);
@@ -78,7 +101,10 @@ mod tests {
     #[test]
     fn submission_false_does_not_enable_a_later_generic_attempt() {
         let accepted = Instant::now();
-        let suppress = activate_external(Some("synthetic".into()), accepted, accepted, true, |_| false);
+        let suppress =
+            activate_external(Some("synthetic".into()), accepted, accepted, true, |_| {
+                false
+            });
         assert!(suppress.suppress_generic);
     }
 
@@ -87,11 +113,24 @@ mod tests {
         let connected = Instant::now();
         let accepted = connected + Duration::from_secs(30);
         // This only proves the specified receiver-local budget, not mint freshness.
-        assert!(activate_external(Some("synthetic".into()), accepted, accepted, true, |_| true).suppress_generic);
+        assert!(
+            activate_external(Some("synthetic".into()), accepted, accepted, true, |_| true)
+                .suppress_generic
+        );
         let mut submissions = 0;
-        assert!(activate_external(Some("synthetic".into()), accepted,
-            accepted + USE_BUDGET + Duration::from_nanos(1), true,
-            |_| { submissions += 1; true }).suppress_generic);
+        assert!(
+            activate_external(
+                Some("synthetic".into()),
+                accepted,
+                accepted + USE_BUDGET + Duration::from_nanos(1),
+                true,
+                |_| {
+                    submissions += 1;
+                    true
+                }
+            )
+            .suppress_generic
+        );
         assert_eq!(submissions, 0);
     }
     #[test]
@@ -102,24 +141,49 @@ mod tests {
         for (token, age, supported, submission_result, external, generic) in [
             (true, Duration::ZERO, true, true, true, false),
             (true, Duration::ZERO, true, false, true, false),
-            (true, USE_BUDGET + Duration::from_nanos(1), true, true, false, false),
+            (
+                true,
+                USE_BUDGET + Duration::from_nanos(1),
+                true,
+                true,
+                false,
+                false,
+            ),
             (true, Duration::ZERO, false, true, false, true),
-            (true, USE_BUDGET + Duration::from_nanos(1), false, true, false, true),
+            (
+                true,
+                USE_BUDGET + Duration::from_nanos(1),
+                false,
+                true,
+                false,
+                true,
+            ),
             (false, Duration::ZERO, true, true, false, true),
         ] {
             let mut events = Vec::new();
-            let policy = activate_external(token.then(|| "synthetic".into()), accepted, accepted + age,
-                supported, |_| { events.push("external"); submission_result });
+            let policy = activate_external(
+                token.then(|| "synthetic".into()),
+                accepted,
+                accepted + age,
+                supported,
+                |_| {
+                    events.push("external");
+                    submission_result
+                },
+            );
             events.push("save-wait");
             policy.activate_later(|| events.push("generic"));
             events.extend(["take-handoff-or-refuse", "reply"]);
             let mut expected = Vec::new();
-            if external { expected.push("external"); }
+            if external {
+                expected.push("external");
+            }
             expected.push("save-wait");
-            if generic { expected.push("generic"); }
+            if generic {
+                expected.push("generic");
+            }
             expected.extend(["take-handoff-or-refuse", "reply"]);
             assert_eq!(events, expected);
         }
     }
-
 }

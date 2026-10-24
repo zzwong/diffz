@@ -186,7 +186,12 @@ impl Render for Probe {
             .child(self.report.clone())
     }
 }
-pub fn launch_probe(source: String, font: Option<String>, output: PathBuf, activation_token: Option<String>) {
+pub fn launch_probe(
+    source: String,
+    font: Option<String>,
+    output: PathBuf,
+    activation_token: Option<String>,
+) {
     let failed = Arc::new(AtomicBool::new(true));
     let result = failed.clone();
     crate::app::application_with_activation_token(activation_token).run(move |cx| {
