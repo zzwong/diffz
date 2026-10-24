@@ -45,6 +45,18 @@ def safe_members(names, prefixes):
             raise RuntimeError(f"Unexpected cache archive entry: {name}")
 
 
+def native_inputs(native):
+    # ImageVersion is a descriptive label; packages/toolchains are measured below.
+    return {key: value for key, value in native.items() if key != "image"}
+
+
+def source_comparison(seed_revision, revision):
+    # Only the experimental harness may differ when replaying an existing seed.
+    return ["git", "diff", "--exit-code", seed_revision, revision, "--", ".",
+            ":!.github/workflows/bazel-ci-comparison.yml",
+            ":!scripts/benchmark-ci-builds.py", ":!scripts/tests/test_benchmark_ci_builds.py"]
+
+
 def read_command(args):
     return subprocess.check_output(args, cwd=ROOT, text=True, timeout=60).strip()
 
@@ -137,9 +149,14 @@ class Trial:
     def restore(self):
         incoming = ROOT / "target/ci-incoming"
         seed = json.loads((incoming / "seed.json").read_text())
-        for key in ("tool", "revision", "native_sha256", "source_lock_sha256"):
+        for key in ("tool", "source_lock_sha256"):
             if seed[key] != self.result[key]:
                 raise RuntimeError(f"Seed/consumer {key} mismatch; refusing incomparable cache reuse")
+        if native_inputs(seed["native"]) != native_inputs(self.result["native"]):
+            raise RuntimeError("Seed/consumer native input mismatch; refusing incomparable cache reuse")
+        if seed["revision"] != self.result["revision"]:
+            self.run("validate-source-revision", source_comparison(seed["revision"], self.result["revision"]), timeout=60)
+        self.result["seed_image"] = seed["native"].get("image")
         if not seed["complete"]:
             raise RuntimeError("Seed was incomplete")
         self.result["seed"] = {k: seed[k] for k in ("revision", "native_sha256", "archives")}

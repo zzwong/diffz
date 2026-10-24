@@ -1,12 +1,18 @@
 name: One-shot Cargo and Bazel CI comparison
 
 on:
-  push:
-    branches: [experiment/bazel-ci-comparison-20261024]
   workflow_dispatch:
+    inputs:
+      tools:
+        description: 'Tool array as JSON'
+        default: '["cargo","cargo-kache","bazel"]'
+      reuse_run_id:
+        description: 'Optional completed seed run ID; skip seed jobs'
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: bazel-ci-comparison-${{ github.ref }}
@@ -21,17 +27,19 @@ env:
 
 jobs:
   seed:
+    if: ${{ !inputs.reuse_run_id }}
     name: Cold and local-warm / ${{ matrix.tool }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        tool: [cargo, cargo-kache, bazel]
+        tool: ${{ fromJSON(inputs.tools || '["cargo","cargo-kache","bazel"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Prepare common native environment
         run: |
           mkdir -p "$TMPDIR"
@@ -78,11 +86,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [cargo, cargo-kache, bazel]
+        tool: ${{ fromJSON(inputs.tools || '["cargo","cargo-kache","bazel"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Prepare common native environment
         run: |
           mkdir -p "$TMPDIR"
@@ -100,6 +109,8 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: cache-${{ matrix.tool }}
+          run-id: ${{ inputs.reuse_run_id || github.run_id }}
+          github-token: ${{ github.token }}
           path: target/ci-incoming
       - name: Measure extraction, fresh-checkout reuse and unseen core edit
         run: python3 scripts/benchmark-ci-builds.py --tool '${{ matrix.tool }}' --phase consumer --jobs 4

@@ -23,6 +23,19 @@ class Controls(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(RuntimeError):
                 module.rust_tests(text)
 
+    def test_image_label_is_metadata_but_native_inputs_must_match(self):
+        seed = {"image": "new-image", "packages": "gcc=13", "rustc": "1.99"}
+        other = seed | {"image": "old-image"}
+        self.assertEqual(module.native_inputs(seed), module.native_inputs(other))
+        other["packages"] = "gcc=14"
+        self.assertNotEqual(module.native_inputs(seed), module.native_inputs(other))
+
+    def test_replay_only_excludes_the_experiment_harness(self):
+        command = module.source_comparison("old", "new")
+        self.assertEqual(command[:7], ["git", "diff", "--exit-code", "old", "new", "--", "."])
+        self.assertEqual(set(command[7:]), {":!.github/workflows/bazel-ci-comparison.yml",
+                         ":!scripts/benchmark-ci-builds.py", ":!scripts/tests/test_benchmark_ci_builds.py"})
+
     def test_snapshot_paths_are_constrained(self):
         module.safe_members(["target/debug/", "target/debug/deps/lib.so"], ["target/debug"])
         for name in ("/etc/passwd", "target/debug/../../etc/passwd", "target/other", "repositories/x"):
