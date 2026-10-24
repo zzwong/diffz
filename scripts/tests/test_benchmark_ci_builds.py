@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import sys
+import subprocess
 
 SCRIPT = Path(__file__).resolve().parents[1] / "benchmark-ci-builds.py"
 spec = importlib.util.spec_from_file_location("benchmark_ci", SCRIPT)
@@ -30,11 +31,31 @@ class Controls(unittest.TestCase):
         other["packages"] = "gcc=14"
         self.assertNotEqual(module.native_inputs(seed), module.native_inputs(other))
 
-    def test_replay_only_excludes_the_experiment_harness(self):
-        command = module.source_comparison("old", "new")
-        self.assertEqual(command[:7], ["git", "diff", "--exit-code", "old", "new", "--", "."])
-        self.assertEqual(set(command[7:]), {":!.github/workflows/bazel-ci-comparison.yml",
-                         ":!scripts/benchmark-ci-builds.py", ":!scripts/tests/test_benchmark_ci_builds.py"})
+    def test_replay_allows_harness_edit_but_rejects_build_input_edit(self):
+        with tempfile.TemporaryDirectory(prefix="diffz-ci-source-") as tmp:
+            root = Path(tmp)
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=root, text=True, capture_output=True)
+            self.assertEqual(git("init").returncode, 0)
+            (root / "scripts").mkdir()
+            harness = root / "scripts/benchmark-ci-builds.py"
+            source = root / "app.rs"
+            harness.write_text("original harness")
+            source.write_text("original source")
+            def commit():
+                self.assertEqual(git("add", ".").returncode, 0)
+                self.assertEqual(git("-c", "user.name=Trial", "-c", "user.email=trial@example.test",
+                                     "commit", "-m", "fixture").returncode, 0)
+                return git("rev-parse", "HEAD").stdout.strip()
+            seed = commit()
+            harness.write_text("revised harness")
+            replay = commit()
+            command = module.source_comparison(seed, replay)
+            self.assertEqual(subprocess.run(command, cwd=root, capture_output=True).returncode, 0)
+            source.write_text("different build input")
+            changed = commit()
+            command = module.source_comparison(seed, changed)
+            self.assertNotEqual(subprocess.run(command, cwd=root, capture_output=True).returncode, 0)
 
     def test_snapshot_paths_are_constrained(self):
         module.safe_members(["target/debug/", "target/debug/deps/lib.so"], ["target/debug"])
