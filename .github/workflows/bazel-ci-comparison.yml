@@ -1,0 +1,113 @@
+name: One-shot Cargo and Bazel CI comparison
+
+on:
+  push:
+    branches: [experiment/bazel-ci-comparison-20261024]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bazel-ci-comparison-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TMPDIR: /var/tmp/diffz-ci-benchmark
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '4'
+  CC: /usr/bin/gcc
+  CXX: /usr/bin/g++
+
+jobs:
+  seed:
+    name: Cold and local-warm / ${{ matrix.tool }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [cargo, cargo-kache, bazel]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare common native environment
+        run: |
+          mkdir -p "$TMPDIR"
+          # Disposable hosted runner; make room for outputs plus cache snapshots.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake pkg-config zstd \
+            libfontconfig-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
+            libssl-dev libzstd-dev libvulkan-dev
+          df -h .
+      - name: Prepare pinned Rust
+        run: python3 scripts/prepare-ci-rust.py
+      - name: Validate benchmark controls
+        run: python3 scripts/tests/test_benchmark_ci_builds.py -v
+      - name: Measure artifact-cold build, forced tests, local warm repeat and packing
+        run: python3 scripts/benchmark-ci-builds.py --tool '${{ matrix.tool }}' --phase seed --jobs 4
+      # Unique short-lived artifacts avoid evicting normal CI's dependency caches.
+      # Bundles are already zstd-compressed; preserve the measured byte counts.
+      - name: Upload cache snapshot
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cache-${{ matrix.tool }}
+          path: target/ci-artifacts/
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+      - name: Upload measurements and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: evidence-seed-${{ matrix.tool }}
+          path: target/ci-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+  consumer:
+    name: Fresh runner and code edit / ${{ matrix.tool }}
+    needs: seed
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [cargo, cargo-kache, bazel]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare common native environment
+        run: |
+          mkdir -p "$TMPDIR"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake pkg-config zstd \
+            libfontconfig-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
+            libssl-dev libzstd-dev libvulkan-dev
+          df -h .
+      - name: Prepare pinned Rust
+        run: python3 scripts/prepare-ci-rust.py
+      - name: Download cache snapshot (transfer timing)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: cache-${{ matrix.tool }}
+          path: target/ci-incoming
+      - name: Measure extraction, fresh-checkout reuse and unseen core edit
+        run: python3 scripts/benchmark-ci-builds.py --tool '${{ matrix.tool }}' --phase consumer --jobs 4
+      - name: Upload measurements and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: evidence-consumer-${{ matrix.tool }}
+          path: target/ci-results/
+          retention-days: 14
+          if-no-files-found: warn
