@@ -186,10 +186,15 @@ impl Render for Probe {
             .child(self.report.clone())
     }
 }
-pub fn launch_probe(source: String, font: Option<String>, output: PathBuf) {
+pub fn launch_probe(
+    source: String,
+    font: Option<String>,
+    output: PathBuf,
+    activation_token: Option<String>,
+) {
     let failed = Arc::new(AtomicBool::new(true));
     let result = failed.clone();
-    gpui_kit::application().run(move |cx| {
+    crate::app::application_with_activation_token(activation_token).run(move |cx| {
         gpui_kit::init(cx);
         let family = font.unwrap_or_else(|| {
             if cfg!(target_os = "macos") {

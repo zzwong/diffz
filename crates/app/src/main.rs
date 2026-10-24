@@ -354,7 +354,11 @@ fn app_bundle(exe: &Path) -> Option<&Path> {
 /// shows the app, and otherwise as this executable in a session of its own. Either way its
 /// stderr goes to the log in `state`.
 #[cfg(all(unix, feature = "desktop"))]
-fn launch(args: Vec<std::ffi::OsString>, state: &Path) -> Result<()> {
+fn launch(
+    args: Vec<std::ffi::OsString>,
+    state: &Path,
+    activation_token: Option<String>,
+) -> Result<()> {
     use diffz_adapters::handoff::log_file;
     let exe = std::env::current_exe()?.canonicalize()?;
     let log = log_file(state)?;
@@ -388,7 +392,7 @@ fn launch(args: Vec<std::ffi::OsString>, state: &Path) -> Result<()> {
         }
         return Ok(());
     }
-    diffz_adapters::process::spawn_detached(&exe, &args, log)?;
+    diffz_adapters::process::spawn_detached(&exe, &args, log, activation_token)?;
     Ok(())
 }
 #[cfg(all(unix, feature = "desktop"))]
@@ -401,14 +405,20 @@ fn writes(options: &Options) -> diffz_adapters::handoff::Writes {
 /// Gives the request to the window running on `state`, or starts one in the background. Either
 /// way this returns once a window has the request, without waiting for it to close.
 #[cfg(all(unix, feature = "desktop"))]
-fn hand_off(options: &Options, state: &Path) -> Result<()> {
+fn hand_off(options: &Options, state: &Path, activation_token: Option<String>) -> Result<()> {
     use diffz_adapters::handoff::{Delivery, deliver};
     let request = handed_request(options)?;
-    let result = deliver(state, request.as_ref(), writes(options), || {
-        launch_args(options, state, request.as_ref())
-            .and_then(|args| launch(args, state))
-            .map_err(|e| format!("{e:#}").into())
-    })
+    let result = deliver(
+        state,
+        request.as_ref(),
+        writes(options),
+        activation_token,
+        |token| {
+            launch_args(options, state, request.as_ref())
+                .and_then(|args| launch(args, state, token))
+                .map_err(|e| format!("{e:#}").into())
+        },
+    )
     .map(|delivery| match delivery {
         Delivery::HandedOff => "handed_off",
         Delivery::Launched => "launched",
@@ -445,11 +455,13 @@ fn report(out: &mut impl Write, result: Result<&str>, request: Option<&OpenReque
 fn serve(
     listener: diffz_adapters::handoff::Listener,
 ) -> smol::channel::Receiver<diffz_ui::Handoff> {
-    let (tx, rx) = smol::channel::unbounded();
+    let (tx, rx) = smol::channel::bounded(1);
     std::thread::spawn(move || {
         while let Ok(mut incoming) = listener.accept() {
             let handoff = diffz_ui::Handoff {
                 request: incoming.request.take(),
+                activation_token: incoming.activation_token.take(),
+                accepted_at: incoming.accepted_at,
                 reply: Box::new(move |result| incoming.reply(result)),
             };
             if tx.send_blocking(handoff).is_err() {
@@ -461,10 +473,13 @@ fn serve(
 }
 
 fn main() {
+    // SAFETY: this is the first operation in main, before profiling, GPUI or
+    // our worker threads. Never move process-environment mutation into serve.
+    let activation_token = unsafe { capture_activation_token() };
     diffz_core::timing::mark("main");
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     start_profile_heap_samples();
-    if let Err(e) = run() {
+    if let Err(e) = run(activation_token) {
         eprintln!("diffz: {e:#}");
         std::process::exit(1);
     }
@@ -512,7 +527,30 @@ fn start_profile_heap_samples() {
         }
     });
 }
-fn run() -> Result<()> {
+/// Must run at the single-threaded process entry point.
+unsafe fn capture_activation_token() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let value = std::env::var_os("XDG_ACTIVATION_TOKEN");
+        // SAFETY: caller guarantees no threads or environment readers exist yet.
+        unsafe { std::env::remove_var("XDG_ACTIVATION_TOKEN") };
+        captured_activation_token(value)
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+#[cfg(target_os = "linux")]
+fn captured_activation_token(value: Option<std::ffi::OsString>) -> Option<String> {
+    value?
+        .into_string()
+        .ok()
+        .and_then(diffz_adapters::handoff::admit_activation_token)
+}
+fn run(activation_token: Option<String>) -> Result<()> {
+    #[cfg(feature = "desktop")]
+    let mut activation_token = activation_token;
+    #[cfg(not(feature = "desktop"))]
+    let _ = activation_token;
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(text) = early_exit(&args) {
         return print(&text);
@@ -578,7 +616,12 @@ fn run() -> Result<()> {
             .context("probe source is not UTF-8")?;
         #[cfg(feature = "desktop")]
         {
-            diffz_ui::probe::launch_probe(source, desktop_font(options.font)?, output);
+            diffz_ui::probe::launch_probe(
+                source,
+                desktop_font(options.font)?,
+                output,
+                activation_token,
+            );
             return Ok(());
         }
         #[cfg(not(feature = "desktop"))]
@@ -595,7 +638,7 @@ fn run() -> Result<()> {
     // Linux desktop launchers start diffz like a terminal does, so it hands off or detaches.
     #[cfg(all(unix, feature = "desktop"))]
     if !options.inspect && !options.foreground && std::os::unix::process::parent_id() != 1 {
-        return hand_off(&options, &state);
+        return hand_off(&options, &state, activation_token);
     }
     let open = || Services::new_with_providers(&state, options.writes, options.gitlab_writes);
     // Another window can take the state first when two start at once; it gets the request.
@@ -606,6 +649,7 @@ fn run() -> Result<()> {
             &state,
             handed_request(&options)?.as_ref(),
             writes(&options),
+            &mut activation_token,
             open,
         )? {
             Some(services) => services,
@@ -652,6 +696,7 @@ fn run() -> Result<()> {
             services,
             diffz_ui::LaunchOptions {
                 initial: options.request,
+                initial_activation_token: activation_token,
                 registry: std::sync::Arc::new(registry),
                 font_family: desktop_font(options.font)?,
                 theme: options.theme,
@@ -673,6 +718,109 @@ fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn startup_capture_admission_preserves_only_bounded_utf8() {
+        use std::os::unix::ffi::OsStringExt;
+        for value in [
+            None,
+            Some("".into()),
+            Some("x".repeat(4097).into()),
+            Some(std::ffi::OsString::from_vec(vec![0xff])),
+        ] {
+            assert!(captured_activation_token(value).is_none());
+        }
+        for value in [" ", "synthetic \n opaque ☃"] {
+            assert!(captured_activation_token(Some(value.into())).as_deref() == Some(value));
+        }
+        assert!(captured_activation_token(Some("x".repeat(4096).into())).is_some());
+    }
+    #[cfg(all(unix, feature = "desktop"))]
+    #[test]
+    fn bounded_bridge_moves_tokens_and_starts_age_only_at_accept() {
+        use diffz_adapters::handoff::{Listener, Writes, socket_path};
+        use std::{
+            io::Write as _,
+            os::unix::net::UnixStream,
+            time::{Duration, Instant},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let rx = serve(Listener::bind(dir.path(), Writes::default()).unwrap());
+        let connect = |token: &str| {
+            let mut stream = UnixStream::connect(socket_path(dir.path())).unwrap();
+            let frame = serde_json::json!({"version":1,"request":null,"activation_token":token});
+            writeln!(stream, "{frame}").unwrap();
+            stream
+        };
+        let _first = connect("first-synthetic");
+        let active = rx.recv_blocking().unwrap();
+        assert!(active.activation_token.as_deref() == Some("first-synthetic"));
+        let _second = connect("second-synthetic");
+        let _third = connect("third-synthetic");
+        let _fourth = connect("fourth-synthetic");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while rx.len() != 1 {
+            assert!(
+                Instant::now() < deadline,
+                "bridge did not queue its one message"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(rx.capacity(), Some(1));
+        // One active plus one queued; the listener's next send blocks, so a
+        // fourth connection cannot receive an accept timestamp yet.
+        std::thread::sleep(Duration::from_millis(25));
+        let released = Instant::now();
+        let second = rx.recv_blocking().unwrap();
+        let third = rx.recv_blocking().unwrap();
+        let fourth = rx.recv_blocking().unwrap();
+        assert!(second.activation_token.as_deref() == Some("second-synthetic"));
+        assert!(third.activation_token.as_deref() == Some("third-synthetic"));
+        assert!(fourth.activation_token.as_deref() == Some("fourth-synthetic"));
+        assert!(fourth.accepted_at >= released);
+        // Move-out before reply means the reply closure owns no token copy.
+        let mut active = active;
+        assert!(active.activation_token.take().is_some());
+        (active.reply)(Ok(()));
+        drop((second, third, fourth));
+        // Wake the otherwise idle accept loop after closing the UI receiver.
+        drop(rx);
+        let _last = connect("discarded-synthetic");
+    }
+
+    #[cfg(all(unix, feature = "desktop"))]
+    #[test]
+    fn receiver_drop_releases_a_listener_blocked_on_enqueue() {
+        use diffz_adapters::handoff::{Listener, Writes, socket_path};
+        use std::{
+            io::{Read as _, Write as _},
+            os::unix::net::UnixStream,
+            time::{Duration, Instant},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let rx = serve(Listener::bind(dir.path(), Writes::default()).unwrap());
+        let connect = || {
+            let mut stream = UnixStream::connect(socket_path(dir.path())).unwrap();
+            stream
+                .write_all(b"{\"version\":1,\"request\":null,\"activation_token\":\"synthetic\"}\n")
+                .unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            stream
+        };
+        let _queued = connect();
+        let mut blocked = connect();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while rx.len() != 1 {
+            assert!(Instant::now() < deadline, "first enqueue did not finish");
+            std::thread::yield_now();
+        }
+        drop(rx);
+        let mut bytes = Vec::new();
+        assert!(blocked.read_to_end(&mut bytes).is_ok());
+        assert!(bytes.is_empty());
+    }
     #[test]
     fn no_arguments_name_no_source() {
         assert!(parse(Vec::<String>::new()).unwrap().request.is_none());

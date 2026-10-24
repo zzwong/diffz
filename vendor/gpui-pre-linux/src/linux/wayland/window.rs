@@ -1856,6 +1856,23 @@ impl PlatformWindow for WaylandWindow {
         None
     }
 
+    fn supports_activation_token(&self) -> bool {
+        self.borrow().globals.activation.is_some()
+    }
+
+    fn activate_with_token(&self, token: String) -> bool {
+        let state = self.borrow();
+        submit_external_activation(
+            token,
+            &state.surface,
+            state.globals.activation.as_ref().map(|activation| {
+                move |token: String, surface: &wl_surface::WlSurface| {
+                    activation.activate(token, surface)
+                }
+            }),
+        )
+    }
+
     fn activate(&self) {
         // Try to request an activation token. Even though the activation is likely going to be rejected,
         // KWin and Mutter can use the app_id to visually indicate we're requesting attention.
@@ -2413,4 +2430,43 @@ fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) ->
     }
 
     bounds
+}
+
+// Uses only the existing activation global and target surface. In particular this
+// path neither creates a self-token nor touches unrelated pending activations.
+fn submit_external_activation<S>(token: String, surface: &S, submit: Option<impl FnOnce(String, &S)>) -> bool {
+    if token.is_empty() || token.contains('\0') {
+        return false;
+    }
+    let Some(submit) = submit else { return false; };
+    submit(token, surface);
+    // Submission is not compositor acceptance, attention, or focus.
+    true
+}
+
+#[cfg(test)]
+mod external_activation_tests {
+    use super::submit_external_activation;
+
+    #[test]
+    fn external_submission_is_exact_and_once_without_a_diffz_size_limit() {
+        let token = "opaque \n token".repeat(500);
+        let expected = token.clone();
+        let mut calls = 0;
+        let target_surface = 42;
+        assert!(submit_external_activation(token, &target_surface, Some(|actual, surface: &u32| {
+            assert!(actual == expected);
+            assert!(std::ptr::eq(surface, &target_surface));
+            calls += 1;
+        })));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn invalid_or_unsupported_context_never_calls_the_sink() {
+        for token in ["", "a\0b"] {
+            assert!(!submit_external_activation(token.into(), &42, Some(|_, _: &u32| panic!("invalid submission"))));
+        }
+        assert!(!submit_external_activation("synthetic".into(), &42, None::<fn(String, &u32)>));
+    }
 }

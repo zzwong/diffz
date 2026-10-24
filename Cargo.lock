@@ -2848,7 +2848,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre"
 version = "0.3.9"
-source = "git+https://github.com/zzwong/gpui-pre?rev=09db735dfcb4dff2310f07cfa9ce36ac49228abc#09db735dfcb4dff2310f07cfa9ce36ac49228abc"
+source = "git+https://github.com/zzwong/gpui-pre?rev=d79c3d1191aa68d4753e1ca410c2d10c261b4572#d79c3d1191aa68d4753e1ca410c2d10c261b4572"
 dependencies = [
  "accesskit",
  "anyhow",
