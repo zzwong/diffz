@@ -1,3 +1,4 @@
+mod activation;
 mod appearance;
 mod profile;
 mod review_flow;
@@ -33,6 +34,7 @@ use std::{
 pub struct LaunchOptions {
     /// `None` starts on the Open panel.
     pub initial: Option<OpenRequest>,
+    pub initial_activation_token: Option<String>,
     pub registry: Arc<Registry>,
     pub font_family: Option<String>,
     pub theme: Option<String>,
@@ -42,6 +44,9 @@ pub struct LaunchOptions {
 /// `reply` learns whether the window took the request.
 pub struct Handoff {
     pub request: Option<OpenRequest>,
+    pub activation_token: Option<String>,
+    /// Measured from socket accept, not launcher mint time or kernel backlog.
+    pub accepted_at: Instant,
     pub reply: Box<dyn FnOnce(Result<(), String>) + Send>,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -702,8 +707,24 @@ fn highlight_file(
 }
 static WINDOW_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Runs the desktop application. Returns `false` when no window could be created.
-pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> bool {
-    gpui_kit::application()
+pub(crate) fn application_with_activation_token(token: Option<String>) -> gpui_kit::Application {
+    let application = gpui_kit::application();
+    #[cfg(target_os = "linux")]
+    {
+        application.with_windowing(WindowingRequest::Windowed(GraphicalEnvironment {
+            activation_token: token,
+            ..GraphicalEnvironment::detect()
+        }))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = token;
+        application
+    }
+}
+
+pub fn launch(services: Arc<dyn WorkbenchServices>, mut options: LaunchOptions) -> bool {
+    application_with_activation_token(options.initial_activation_token.take())
         .with_assets(crate::icons::Assets)
         .run(move |cx| {
             diffz_core::timing::mark("gpui run");
@@ -786,7 +807,22 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                 let Some(handoffs) = handoffs else {
                     return;
                 };
-                while let Ok(handoff) = handoffs.recv().await {
+                while let Ok(mut handoff) = handoffs.recv().await {
+                    // Classify at actual UI use, not bridge time. Supported external
+                    // context (even locally expired) suppresses only this handoff's
+                    // later generic activation. Submission is not proof of focus.
+                    let Ok(activation) = window.update(cx, |_, window, _| {
+                        let supported = window.supports_activation_token();
+                        activation::activate_external(
+                            handoff.activation_token.take(),
+                            handoff.accepted_at,
+                            Instant::now(),
+                            supported,
+                            |token| window.activate_window_with_token(token),
+                        )
+                    }) else {
+                        break;
+                    };
                     // The view of a review just opened saves a moment later; wait for saves
                     // like that instead of refusing the request.
                     for _ in 0..50 {
@@ -796,8 +832,10 @@ pub fn launch(services: Arc<dyn WorkbenchServices>, options: LaunchOptions) -> b
                         smol::Timer::after(Duration::from_millis(100)).await;
                     }
                     let Ok(result) = window.update(cx, |_, window, cx| {
-                        window.activate_window();
-                        cx.activate(true);
+                        activation.activate_later(|| {
+                            window.activate_window();
+                            cx.activate(true);
+                        });
                         workbench.update(cx, |app, cx| app.take_handoff(handoff.request, cx))
                     }) else {
                         // Dropped unanswered, so the sender starts a window of its own.

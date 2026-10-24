@@ -9,17 +9,17 @@ combines application PR #102 and Dependabot #107.
 
 ## Sources and patches
 
-`Cargo.toml` pins each fork to the tested Git commit. GPUI's integration branch
+`Cargo.toml` pins each fork to an exact Git commit; validation is revision-specific. GPUI's integration branch
 is `zzwong/gpui-pre:diffz/main`; GPUI PR #3 integrates the 0.3.9 port. Old
 revisions remain usable by consumers pinned to them.
 
 | Source | Patch retained | Exact revision |
 | --- | --- | --- |
-| gpui-pre | Visual magnification, exact live raster/cache retention, viewport/accessibility and overlay mapping | `09db735dfcb4dff2310f07cfa9ce36ac49228abc` |
+| gpui-pre | Visual magnification, exact live raster/cache retention, viewport/accessibility, overlay mapping and activation-context API | `d79c3d1191aa68d4753e1ca410c2d10c261b4572` |
 | gpui-pre-wgpu | Vulkan-first initialization and lazy path textures | `389e7f33bed4f6237ccb53f2b4884d996274a453` |
 | gpui-base | Caret blink timeout and inactive-window behavior | `6235089ccddd423369749017dabb4f6df8a3c169` |
 | gpui-pre-macos | Demand-driven display link and idle timeout | `28057de61df9442cb521497a63193e70dc36019f` |
-| gpui-pre-linux | X11 frame-demand scheduling | Vendored published 0.3.9 plus `patches/gpui-pre-linux-0.3.9-x11-demand.patch` |
+| gpui-pre-linux | X11 frame-demand scheduling and direct Wayland activation handoff | Vendored published 0.3.9 plus `patches/gpui-pre-linux-0.3.9-x11-demand.patch` and `patches/gpui-pre-linux-0.3.9-activation.patch` |
 
 The 0.3.9 port preserves upstream display-change notifications and frame-signal
 metadata. Window resize re-clamps magnification and remaps the platform mouse
@@ -32,6 +32,29 @@ The Bazel graph matches Cargo's new snapshot and icon assets. After changing
 with `CARGO_BAZEL_REPIN=1 scripts/bazel-trial.sh fetch //:all_build`. The generated
 Linux target excludes inactive optional dependencies, including weak `scap?/x11`
 edges that Cargo metadata can retain. Check both build paths after regeneration.
+
+## Activation integration (October 24, 2026)
+
+[GPUI PR #4](https://github.com/zzwong/gpui-pre/pull/4) adds default-unsupported
+activation-context APIs and token-safe Debug formatting. The only real override
+is Diffz's vendored Wayland `PlatformWindow`; X11/macOS retain the default and
+ordinary activation. [Activation handoff](activation-handoff.md) documents the
+finite ownership, limits and qualification boundaries.
+
+The source/manifest-only update changes no dependency declarations inside GPUI.
+The Git source in `Cargo.lock` matches the exact reviewed companion commit;
+`--locked` application CI must still validate that graph. The historical
+October 19 results below do **not** qualify the new revision. Direct GPUI/vendor
+tests, isolated backend feature builds and native focus tests remain separate
+from the ordinary workspace CI.
+
+The owner [retired the Bazel pilot](https://github.com/zzwong/diffz/issues/119#issuecomment-6386995653)
+and [closed its trial without merge](https://github.com/zzwong/diffz/pull/150#issuecomment-6386995399).
+The Bazel regeneration guidance elsewhere on this page describes that historical
+pilot, not an activation-patch acceptance gate. Tracked Bazel files are retained
+unchanged and their old GPUI graph is **not qualified for this new pin**. No
+regeneration, further pilot qualification, or tracked-file deletion is part of
+this update. Cargo's exact lockfile and authentic GPUI integration remain required.
 
 ## October 19, 2026 validation
 
