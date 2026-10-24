@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Identify the prepared Debian/Ubuntu builder before restoring Cargo artifacts.
 
-Run inside the same disposable container that will compile the package, after
-apt and rustup have finished. This is an observed native-environment identity,
-not a claim that a mutable distribution image is a hermetic build toolchain.
+Run in the same prepared container or hosted Ubuntu runner that will compile,
+after apt and rustup have finished. This is an observed native-environment
+identity, not a claim that the environment is a hermetic build toolchain.
 Only the digest goes to stdout; the allowlisted evidence is saved separately.
 """
 
@@ -80,22 +80,43 @@ def tool_identity(name, hashes):
     return {"sha256": hashes[path], "version": capture([str(path), *flags])}
 
 
-def native_identity(image_id):
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
-        raise ValueError("image identity must be a resolved Docker sha256 image ID")
+def native_environment():
     architecture = capture(["dpkg", "--print-architecture"])
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", architecture):
         raise ValueError("invalid Debian architecture")
     packages = installed_packages(capture(["dpkg-query", "-W", f"-f={PACKAGE_FORMAT}"]))
     hashes = {}
     return {
-        "schema_version": SCHEMA_VERSION,
-        "base_image_id": image_id,
         "architecture": architecture,
         "packages": packages,
         "tools": {name: tool_identity(name, hashes) for name in TOOLS},
         "cc_target": capture(["cc", "-dumpmachine"]),
     }
+
+
+def native_identity(image_id):
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+        raise ValueError("image identity must be a resolved Docker sha256 image ID")
+    # Retain the existing container receipt and digest format unchanged.
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "base_image_id": image_id,
+        **native_environment(),
+    }
+
+
+def hosted_identity(environment):
+    image = {}
+    for name in ("ImageOS", "ImageVersion"):
+        value = environment.get(name, "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value):
+            raise ValueError(f"{name} must identify the hosted runner image")
+        image[name] = value
+    if not image["ImageOS"].startswith("ubuntu"):
+        raise ValueError("hosted native identity supports Ubuntu runners only")
+    # Hosted image labels are evidence, not immutable Docker IDs. Native package
+    # versions and actual compiler/linker bytes remain part of this identity.
+    return {"schema_version": 2, "runner_image": image, **native_environment()}
 
 
 def identity_digest(identity):
@@ -105,11 +126,13 @@ def identity_digest(identity):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image-id", required=True, help="resolved ID of the base image used by this container")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--image-id", help="resolved ID of the base image used by this container")
+    source.add_argument("--hosted-ubuntu", action="store_true", help="use the hosted runner's ImageOS and ImageVersion")
     parser.add_argument("--output", type=Path, required=True, help="receipt outside the Cargo target/cache directories")
     args = parser.parse_args()
     try:
-        identity = native_identity(args.image_id)
+        identity = hosted_identity(os.environ) if args.hosted_ubuntu else native_identity(args.image_id)
         digest = identity_digest(identity)
         receipt = {"sha256": digest, "identity": identity}
         # Refuse to overwrite an earlier receipt or follow a caller's symlink.

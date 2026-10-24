@@ -35,6 +35,7 @@ jobs:
           python3 scripts/tests/test_benchmark_cold_builds.py -v
           python3 scripts/tests/test_qualify_bazel_cache.py -v
           python3 scripts/tests/test_prepare_ci_rust.py -v
+          python3 scripts/tests/test_hosted_build_environment.py -v
           python3 scripts/tests/test_bootstrap_kache.py -v
           python3 scripts/tests/test_run_kache.py -v
           python3 scripts/tests/test_cranelift_generators.py -v
@@ -85,12 +86,23 @@ jobs:
             build-essential clang cmake pkg-config \
             libfontconfig-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
-            libssl-dev libzstd-dev libvulkan-dev
+            libssl-dev libzstd-dev libvulkan-dev desktop-file-utils
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
-      # Keep compiler/config hashing while excluding unrelated image toolchains.
+      - name: Identify prepared native build environment
+        id: native-environment
+        run: |
+          receipt="$RUNNER_TEMP/diffz-native-environment.json"
+          digest="$(python3 scripts/debian-build-environment.py --hosted-ubuntu --output "$receipt")"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid native build identity' >&2; exit 1; }
+          cat "$receipt"
+          printf 'sha256=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      # Include native identity in both exact and fallback keys. Keep the
+      # action's existing Rust/compiler/config hashing and branch trust scopes.
       - name: Cache Cargo registry and dependency artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: hosted-native-v1-${{ steps.native-environment.outputs.sha256 }}
       - name: Test every crate with all features
         run: cargo test --locked --workspace --all-features
       - name: Lint every crate with all features
@@ -100,7 +112,6 @@ jobs:
       # Installs only under RUNNER_TEMP.
       - name: Smoke-test install-dev and uninstall-dev
         run: |
-          sudo apt-get install -y --no-install-recommends desktop-file-utils
           root="$RUNNER_TEMP/install-dev"
           export XDG_STATE_HOME="$root/xdg-state"
           dirs=(PREFIX="$root/prefix" DATADIR="$root/share" DEV_STATE_DIR="$root/state")
