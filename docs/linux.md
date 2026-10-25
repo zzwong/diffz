@@ -42,12 +42,23 @@ from that directory.
 The release workflow builds Fedora 44 x86_64 packages, then installs the
 checksummed RPM in a separate, fresh Fedora 44 container. DNF resolves the
 RPM's required dependencies with weak dependencies disabled; no build tools
-or extra runtime libraries are installed by the smoke job. The gate checks
-linked libraries, `--version`, `--help`, patch inspection, and the installed
+or extra runtime libraries are installed by the smoke job. The RPM explicitly
+requires matching-architecture `vulkan-loader` and `libwayland-client` because
+these libraries are loaded dynamically, outside automatic ELF dependencies.
+The gate checks those requirements in the built RPM before installation, then
+checks linked libraries, `--version`, `--help`, patch inspection, and the installed
 desktop entry, AppStream metadata, icon, license, and third-party notices.
 A failed smoke job blocks the existing GitHub release publication. This is
 headless installation coverage; GPU rendering and live Wayland/X11 behavior
 still need separate desktop validation.
+
+These runtime libraries do not supply a GPU driver. Desktop use still needs a
+working Vulkan driver appropriate for your GPU: use `mesa-vulkan-drivers` for
+supported Mesa GPUs, or keep your GPU vendor's driver. Do not replace a working
+vendor driver just to install Diffz. The renderer can try EGL/OpenGL when
+Vulkan cannot drive the surface, but that opportunistic fallback is not
+separately qualified by this packaging gate and is not a substitute for the
+documented Vulkan setup. EGL is not required for the Vulkan path.
 
 Pull requests that change Fedora build or packaging inputs run these same
 build and smoke jobs. They upload workflow artifacts for inspection, skip the

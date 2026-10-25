@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/smoke-linux-rpm.sh"
 PACKAGE = "diffz-0.3.1-1.fc44.x86_64.rpm"
 IDENTITY = "diffz-0.3.1-1.fc44.x86_64"
+LOADER_REQUIREMENTS = ("vulkan-loader(x86-64)", "libwayland-client(x86-64)")
 
 
 class RpmSmokeTests(unittest.TestCase):
@@ -41,6 +42,9 @@ exit "${INSTALL_STATUS:-0}"
         self.command("rpm", """#!/bin/sh
 if [ "$1" = -qp ] && [ "$3" = '%{NAME}' ]; then
   printf '%s' "${PACKAGE_NAME:-diffz}"
+elif [ "$1" = -qp ] && [ "$3" = '[%{REQUIRENAME}\\n]' ]; then
+  printf '%s' "$PACKAGE_REQUIREMENTS"
+  exit "$REQUIREMENTS_STATUS"
 elif [ "$1" = -qp ]; then
   printf '%s' "$PACKAGE_IDENTITY"
 else
@@ -63,6 +67,8 @@ exit "${LDD_STATUS:-71}"
             INSTALL_STATUS="0",
             RPM_STATUS="0",
             PACKAGE_NAME="diffz",
+            PACKAGE_REQUIREMENTS="\n".join(LOADER_REQUIREMENTS),
+            REQUIREMENTS_STATUS="0",
             INSTALLED_IDENTITY=IDENTITY,
             LDD_STATUS="71",
             LDD_OUTPUT="mock loader failure",
@@ -130,6 +136,52 @@ exit "${LDD_STATUS:-71}"
             "install", "-y", "--setopt=install_weak_deps=False",
             "--setopt=tsflags=", str(self.package),
         ])
+
+    def test_rejects_each_missing_loader_requirement_before_install(self):
+        for requirement in LOADER_REQUIREMENTS:
+            with self.subTest(requirement=requirement):
+                remaining = [name for name in LOADER_REQUIREMENTS
+                             if name != requirement]
+                result = self.smoke(PACKAGE_REQUIREMENTS="\n".join(remaining))
+                self.assert_no_install(result)
+                self.assertIn(f"required runtime dependency: {requirement}",
+                              result.stderr)
+
+    def test_rejects_empty_loader_requirements_before_install(self):
+        self.assert_no_install(self.smoke(PACKAGE_REQUIREMENTS=""))
+
+    def test_rejects_unqualified_wrong_arch_or_lookalike_requirements(self):
+        for requirement in LOADER_REQUIREMENTS:
+            name = requirement.split("(", 1)[0]
+            for replacement in (name, f"{name}(x86-32)", f"{name}(aarch-64)",
+                                f"{name}-devel(x86-64)", f"prefix-{requirement}"):
+                with self.subTest(requirement=requirement, replacement=replacement):
+                    requirements = [replacement if item == requirement else item
+                                    for item in LOADER_REQUIREMENTS]
+                    self.assert_no_install(self.smoke(
+                        PACKAGE_REQUIREMENTS="\n".join(requirements)))
+
+    def test_propagates_failed_requirement_query_with_valid_output(self):
+        result = self.smoke(REQUIREMENTS_STATUS="31")
+        self.assert_no_install(result)
+        self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
+
+    def test_accepts_loader_names_among_other_generated_requirements(self):
+        requirements = ["libc.so.6()(64bit)", *reversed(LOADER_REQUIREMENTS),
+                        "fontconfig", "dejavu-sans-mono-fonts"]
+        result = self.smoke(PACKAGE_REQUIREMENTS="\n".join(requirements))
+        self.assertEqual(result.returncode, 71, result.stdout + result.stderr)
+        self.assertTrue(self.log.exists(), result.stdout + result.stderr)
+
+    def test_spec_declares_matching_architecture_runtime_loaders(self):
+        spec = (REPO / "packaging/linux/rpm/diffz.spec").read_text()
+        # The smoke metadata names are deliberately scoped to the current target.
+        self.assertRegex(spec, r"(?m)^BuildArch:\s+x86_64$")
+        for requirement in LOADER_REQUIREMENTS:
+            name = requirement.split("(", 1)[0]
+            with self.subTest(requirement=requirement):
+                self.assertRegex(
+                    spec, rf"(?m)^Requires:\s+{re.escape(name)}%\{{\?_isa\}}$")
 
     def test_propagates_failed_install(self):
         result = self.smoke(INSTALL_STATUS="23")
