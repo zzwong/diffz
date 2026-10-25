@@ -240,6 +240,18 @@ def stop_state_processes(state, keep_pid):
             pass
 
 
+def settle_evidence(stages):
+    """Keep every completed settle stage, even if a later stage fails."""
+    timeouts = [name for name, stage in stages.items() if stage["timeout"]]
+    return {
+        # Preserve this legacy field's final-completed-stage meaning.
+        "settle_seconds": next(reversed(stages.values()))["seconds"] if stages else None,
+        "settle_timeout": bool(timeouts),
+        "settle_timeout_stages": timeouts,
+        "settle_stages": stages,
+    }
+
+
 def run_one(bin_path, spec, run, out, temp, idle_seconds, sample_seconds, malloc_trim):
     name, _, source, steps, after = spec
     directory = out / "raw" / f"{name}-run{run}"
@@ -249,6 +261,7 @@ def run_one(bin_path, spec, run, out, temp, idle_seconds, sample_seconds, malloc
     args = (str(temp / "large.patch"),) if source == "PATCH" else source or ()
     log = directory / "app.log"
     heap = directory / "heap.jsonl"
+    settle_stages = {}
     env = dict(os.environ, DIFFZ_PROFILE_STEPS=str(steps), DIFFZ_PROFILE_HEAP=str(heap))
     if malloc_trim:
         env["DIFFZ_PROFILE_MALLOC_TRIM"] = "1"
@@ -257,6 +270,7 @@ def run_one(bin_path, spec, run, out, temp, idle_seconds, sample_seconds, malloc
                                 cwd=ROOT, env=env, stdout=writer, stderr=subprocess.STDOUT)
         try:
             elapsed, timeout = settle(proc, state, log, steps)
+            settle_stages["initial"] = {"seconds": elapsed, "timeout": timeout}
             handoff_status = None
             if after == "idle":
                 time.sleep(idle_seconds)
@@ -271,6 +285,7 @@ def run_one(bin_path, spec, run, out, temp, idle_seconds, sample_seconds, malloc
                 except (ValueError, IndexError, KeyError):
                     handoff_status = "failed"
                 elapsed, timeout = settle(proc, state, log, 0)
+                settle_stages["handoff"] = {"seconds": elapsed, "timeout": timeout}
             start = read_proc(proc.pid)
             samples = [{"seconds": 0, **start}]
             for second in range(sample_seconds):
@@ -288,7 +303,7 @@ def run_one(bin_path, spec, run, out, temp, idle_seconds, sample_seconds, malloc
                 "cpu_percent": round(100 * (end["cpu_ticks"] - start["cpu_ticks"]) / ticks / sample_seconds, 3),
                 "voluntary_csw_per_s": round((end["voluntary_csw"] - start["voluntary_csw"]) / sample_seconds, 2),
                 "nonvoluntary_csw_per_s": round((end["nonvoluntary_csw"] - start["nonvoluntary_csw"]) / sample_seconds, 2),
-                "settle_seconds": elapsed, "settle_timeout": timeout,
+                **settle_evidence(settle_stages),
                 "handoff_status": handoff_status, "steps": steps,
                 "stepped": int(re.search(r"diffz-profile stepped (\d+)", log.read_text(errors="replace")).group(1)) if steps and re.search(r"diffz-profile stepped (\d+)", log.read_text(errors="replace")) else 0,
                 "busy": bool(quiet_failures()),
@@ -297,7 +312,7 @@ def run_one(bin_path, spec, run, out, temp, idle_seconds, sample_seconds, malloc
             print(f"  {name}: PSS {result['pss_bytes']/1e6:.1f} MB, CPU {result['cpu_percent']:.2f}%", flush=True)
             return result
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
-            result = {"failed": str(error)}
+            result = {"failed": str(error), **settle_evidence(settle_stages)}
             (directory / "meta.json").write_text(json.dumps(result, indent=2) + "\n")
             print(f"  {name}: {error}", file=sys.stderr, flush=True)
             return result
