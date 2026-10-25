@@ -72,6 +72,7 @@ jobs:
     env:
       # Fresh runner each time: incremental artifacts only cost time and cache space.
       CARGO_INCREMENTAL: 0
+      DIFFZ_EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,20 +86,25 @@ jobs:
             build-essential clang cmake pkg-config \
             libfontconfig-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libx11-xcb-dev libxcursor-dev libxi-dev libxcb1-dev \
-            libssl-dev libzstd-dev libvulkan-dev
+            libssl-dev libzstd-dev libvulkan-dev \
+            libegl1
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       # Keep compiler/config hashing while excluding unrelated image toolchains.
       - name: Cache Cargo registry and dependency artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Test every crate with all features
-        run: cargo test --locked --workspace --all-features
+        run: |
+          cargo test --locked --workspace --all-features
+          # Receipt binds the existing executable to this checkout and attempt.
+          python3 -I -S -B scripts/smoke-hosted-x11.py --record-build
       - name: Lint every crate with all features
         run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
       # Cargo's integration-test build produces the ordinary app binary. Reuse its
       # all-features/test-support graph; package jobs qualify default-feature builds.
       # Installs only under RUNNER_TEMP.
       - name: Smoke-test install-dev and uninstall-dev
+        id: native-installer
         run: |
           sudo apt-get install -y --no-install-recommends desktop-file-utils
           root="$RUNNER_TEMP/install-dev"
@@ -127,10 +133,33 @@ jobs:
           fi
           test -d "$root/state"
 
-      # Exact-source dependency unit gates; does not launch a display/compositor.
+      # Evidence-only prerequisite diagnostic; the prior strict failure is retained.
+      # No compiler/test uses the unaccepted candidate lock. Exit 2 awaits review.
       # Keep this after the existing native application and installer gates.
-      - name: Qualify GPUI activation unit targets and backend feature graphs
-        run: python3 scripts/qualify-gpui-activation.py --output "$RUNNER_TEMP/gpui-activation-qualification"
+      - name: Collect GPUI prerequisite evidence and unaccepted lock proposals
+        timeout-minutes: 5
+        run: python3 scripts/qualify-gpui-activation.py --output "$RUNNER_TEMP/gpui-activation-evidence" --vendor-lock-proposal-only --include-core-lock-proposal
+
+      # REVIEW REQUIRED: real private X11, not focus/Wayland qualification.
+      # Independent of the GPUI dependency gate's result, but never launches
+      # after failed/skipped native app gates or cancellation. No duplicate build.
+      - name: Observe real X11 fixture handoff
+        id: x11-smoke
+        if: ${{ !cancelled() && steps.native-installer.outcome == 'success' }}
+        run: python3 -I -S -B scripts/smoke-hosted-x11.py
+
+      # REVIEW REQUIRED: new evidence upload; reuses the existing repo action pin.
+      # Only the wrapper's bounded allowlist, never its private working directory.
+      - name: Retain X11 smoke evidence for three days
+        if: ${{ always() && steps.x11-smoke.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diffz-x11-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/diffz-x11-evidence/
+          if-no-files-found: error
+          retention-days: 3
+          include-hidden-files: false
+          compression-level: 6
 
   # The patched macOS backend must compile when upgrading the shared GPUI stack.
   # Release packaging is tag/manual-only, so it cannot guard dependency PRs.
