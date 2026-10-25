@@ -230,13 +230,19 @@ def identity(pid, state, binary):
     return {"pid": pid, "start_ticks": int(fields[19]), "uid": uid}
 
 
-def png(path, width, height, rgb):
+def png(path, width, height, rgb, *, exclusive=False):
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
     rows = b"".join(b"\0" + rgb[y * width * 3:(y + 1) * width * 3] for y in range(height))
     payload = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
     payload += chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
-    path.write_bytes(payload)
+    if exclusive:
+        # The failed-reference diagnostic shares the existing three-PNG allowlist.
+        need(len(payload) <= 3 * 1024**2, "failed reference PNG exceeds existing cap")
+        with path.open("xb") as stream:
+            stream.write(payload)
+    else:
+        path.write_bytes(payload)
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -266,11 +272,13 @@ def ready(display, binary, state):
     return window, ident
 
 
-def stable_crop(display, window, expected=None):
+def stable_crop(display, window, expected=None, *, diagnostic=None, rejected=None):
     previous, since = None, 0.0
+    started, samples = time.monotonic(), 0
     def sample():
-        nonlocal previous, since
+        nonlocal previous, since, samples
         pixels = display.capture(window, ROI)
+        samples += 1
         if pixels != previous or (expected is not None and pixels != expected):
             previous, since = pixels, time.monotonic()
             return None
@@ -278,6 +286,21 @@ def stable_crop(display, window, expected=None):
             return None
         # Reject uniform/blank surfaces, but never call this text recognition.
         colors = set(zip(pixels[0::3], pixels[1::3], pixels[2::3]))
+        if diagnostic is not None:
+            diagnostic.update({"samples": samples,
+                "elapsed_seconds": time.monotonic() - started,
+                "stable_seconds": time.monotonic() - since,
+                "crop_sha256": hashlib.sha256(pixels).hexdigest(),
+                "crop_bytes": len(pixels), "unique_rgb_colors": len(colors),
+                "required_unique_rgb_colors": 16, "rectangle": list(ROI)})
+        if len(colors) < 16 and rejected is not None:
+            # Preserve the failed oracle, not a replacement image or a later retry.
+            # No hook is invoked for timeout, ownership, or X11-protocol failures.
+            try:
+                rejected(pixels, sorted(colors))
+            except Exception as error:
+                if diagnostic is not None:
+                    diagnostic["failure_evidence_error"] = str(error)
         need(len(colors) >= 16, "reader crop is blank or insufficiently rendered")
         return pixels
     return wait_for(sample, "stable rendered reader reference", seconds=40)
@@ -314,7 +337,41 @@ def run(args, result):
         result["reader_roi"] = list(ROI)
         result["reference_transport"] = invoke(binary, reference_state, "F02", "launched", root, "reference-F02")
         reference_window, reference_identity = ready(display, binary, reference_state)
-        reference = stable_crop(display, reference_window)
+        result["reference_ready"] = {"xid": reference_window, **reference_identity,
+            "first_content_paint_marker_observed": True,
+            "required_client_size": list(GEOMETRY[2:])}
+        reference_diagnostic = {}
+        result["reference_crop_observation"] = reference_diagnostic
+
+        def retain_rejected_reference(pixels, colors):
+            remaining()  # Do not extend the existing observer/guardian deadlines.
+            need(display.find(reference_state, binary) == (reference_window, reference_identity),
+                 "failed reference window/process ownership changed")
+            attr = display.attributes(reference_window)
+            need(attr.map_state == 2 and (attr.width, attr.height) == GEOMETRY[2:],
+                 "failed reference client geometry changed")
+            need(identity(reference_identity["pid"], reference_state, binary) == reference_identity,
+                 "failed reference process identity changed")
+            need(len(pixels) == ROI[2] * ROI[3] * 3 and len(colors) < 16,
+                 "not the bounded rejected reference crop")
+            path = root / "reference-F02.png"
+            need(not path.exists() and not path.is_symlink(), "reference image already exists")
+            # Encode only the exact already-read failing ROI: no extra capture,
+            # root-window screenshot, new image slot, or arbitrary fallback.
+            image_hash = png(path, ROI[2], ROI[3], pixels, exclusive=True)
+            result["reference_failure_evidence"] = {
+                "diagnostic_only": True, "oracle_passed": False,
+                "image_kind": "exact-rejected-reader-roi", "fixture": "F02",
+                "xid": reference_window, **reference_identity,
+                "ownership_rechecked_before_retention": True,
+                "client_size": [attr.width, attr.height], "client_map_state": attr.map_state,
+                "rectangle": list(ROI), "rgb_colors": colors,
+                "image": {"path": str(path), "sha256": image_hash,
+                          "width": ROI[2], "height": ROI[3]},
+                "scope": "Only the failed F02 reference ROI; not a full client screenshot, handoff, renderer, adapter, focus, or Wayland qualification."}
+
+        reference = stable_crop(display, reference_window,
+                                diagnostic=reference_diagnostic, rejected=retain_rejected_reference)
         result["reference"] = {"xid": reference_window, **reference_identity,
             "crop_sha256": hashlib.sha256(reference).hexdigest(),
             "image": snapshot(display, reference_window, root, "reference-F02")}

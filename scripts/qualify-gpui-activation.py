@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -25,6 +27,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import tomllib
@@ -130,6 +133,82 @@ def bounded_regular_bytes(path: Path, limit: int) -> bytes:
         data = handle.read(limit + 1)
     require(len(data) <= limit, f"Diagnostic input exceeds {limit}-byte bound: {path}")
     return data
+
+
+def bounded_cache_bytes(cargo_home: Path, relative: PurePosixPath, limit: int,
+                        *, optional: bool = False) -> bytes | None:
+    """Read one explicit cache file with no symlink traversal or directory scan."""
+    require(not relative.is_absolute() and relative.parts
+            and all(part not in ("", ".", "..") for part in relative.parts), "Unsafe cache path")
+    directory = os.open(cargo_home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in relative.parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        try:
+            descriptor = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 dir_fd=directory)
+        except FileNotFoundError:
+            if optional:
+                return None
+            raise
+        with os.fdopen(descriptor, "rb") as handle:
+            require(stat.S_ISREG(os.fstat(handle.fileno()).st_mode), "Cache input is not a regular file")
+            data = handle.read(limit + 1)
+        require(len(data) <= limit, "Cached input exceeds its literal byte limit")
+        return data
+    finally:
+        os.close(directory)
+
+
+def pinned_cached_archive(cargo_home: Path, package_root: Path, package_name: str,
+                          package_version: str, checksum: str) -> tuple[bytes, dict, dict]:
+    """Authenticate one existing .crate; index bounded bytes, never extract or fetch."""
+    prefix = package_name + "-" + package_version
+    source_relative = package_root.relative_to(cargo_home / "registry/src")
+    require(len(source_relative.parts) == 2 and source_relative.name == prefix,
+            "Unexpected exact registry source-cache layout")
+    registry = source_relative.parts[0]
+    require(re.fullmatch(r"index[.]crates[.]io-[0-9a-f]+", registry) is not None,
+            "Only the metadata-selected ordinary crates.io cache is admitted")
+    relative = PurePosixPath("registry", "cache", registry, prefix + ".crate")
+    compressed_limit, expanded_limit, member_limit = 1024 * 1024, 8 * 1024 * 1024, 256
+    compressed = bounded_cache_bytes(cargo_home, relative, compressed_limit)
+    require(hashlib.sha256(compressed).hexdigest() == checksum,
+            "Cached registry archive differs from the original locked checksum")
+    with gzip.GzipFile(fileobj=io.BytesIO(compressed), mode="rb") as stream:
+        expanded = stream.read(expanded_limit + 1)
+    require(len(expanded) <= expanded_limit, "Cached archive exceeds expanded byte limit")
+    files, seen = {}, set()
+    with tarfile.open(fileobj=io.BytesIO(expanded), mode="r:") as archive:
+        for member in archive:
+            require(len(seen) < member_limit, "Cached archive member-count limit exceeded")
+            require(member.type in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE)
+                    and member.sparse is None, "Archive links/special/sparse members refused")
+            name = member.name[:-1] if member.isdir() and member.name.endswith("/") else member.name
+            path = PurePosixPath(name)
+            require(len(name) <= 512 and not path.is_absolute() and str(path) == name
+                    and ".." not in path.parts and "\\" not in name
+                    and path.parts and path.parts[0] == prefix,
+                    "Unsafe or wrong-root archive member")
+            require(name not in seen, "Duplicate archive member refused")
+            seen.add(name)
+            if member.isdir():
+                require(member.size == 0, "Directory archive member has payload")
+                continue
+            require(len(path.parts) >= 2 and 0 <= member.size <= expanded_limit
+                    and 0 <= member.offset_data <= len(expanded) - member.size,
+                    "Archive member range is invalid")
+            files[str(PurePosixPath(*path.parts[1:]))] = (member.offset_data, member.size)
+    require("Cargo.toml" in files, "Authenticated archive has no normalized manifest")
+    provenance = {"path": str(cargo_home.joinpath(*relative.parts)), "sha256": checksum,
+                  "compressed_bytes": len(compressed), "expanded_bytes": len(expanded),
+                  "members": len(seen), "compressed_limit_bytes": compressed_limit,
+                  "expanded_limit_bytes": expanded_limit, "member_limit": member_limit,
+                  "acquired": False, "independently_hashed": True,
+                  "selection": "one metadata-derived cache path; no scan, extraction, fallback or network"}
+    return expanded, files, provenance
 
 
 def verify_blob(path: Path, expected: str) -> bytes:
@@ -828,12 +907,9 @@ class Harness:
         root = manifest.parent.resolve(strict=True)
         cargo_home = Path(self.receipt["cargo_home"])
         require(root.is_relative_to(cargo_home / "registry/src"), "Metadata path is outside the admitted registry source cache")
-        checksum_path = root / ".cargo-checksum.json"
-        checksum_bytes = bounded_regular_bytes(checksum_path, 1024 * 1024)
-        checksum = json.loads(checksum_bytes)
-        require(checksum["package"] == package_checksum and isinstance(checksum["files"], dict),
-                "Local Cargo checksum-manifest package value mismatches locked package")
-        files = checksum["files"]
+        require(manifest == root / "Cargo.toml", "Metadata manifest has a noncanonical parent")
+        archive_bytes, files, archive_provenance = pinned_cached_archive(
+            cargo_home, root, package_name, package_version, package_checksum)
         records = []
         total_bytes = 0
         receipt = {
@@ -842,9 +918,9 @@ class Harness:
             "selection_lock": str(lock_path), "selection_lock_git_blob": lock_blob,
             "selection_context": "original core own-lock" if selection_lock else "application lock",
             "metadata_manifest_path": str(manifest), "canonical_package_root": str(root),
-            "checksum_manifest_sha256": hashlib.sha256(checksum_bytes).hexdigest(),
-            "verification_scope": "file hashes checked against local Cargo checksum manifest; its package checksum string matches pinned lock",
-            "registry_archive_acquired": False, "registry_archive_independently_hashed": False,
+            "registry_archive": archive_provenance,
+            "verification_scope": "selected regular archive members bound to original locked compressed-archive SHA256 and byte-compared with metadata-selected source-cache files",
+            "registry_archive_acquired": False, "registry_archive_independently_hashed": True,
             "file_limit_bytes": 131072, "total_limit_bytes": 393216,
             "total_budget_shared_across_cached_packages": True,
             "source_files": records,
@@ -855,22 +931,27 @@ class Harness:
             nonlocal total_bytes
             path = PurePosixPath(relative)
             require(not path.is_absolute() and ".." not in path.parts, "Unsafe explicit macro source path")
-            local = root.joinpath(*path.parts)
-            if optional and not local.exists() and not local.is_symlink():
+            require(str(path) == relative and "\\" not in relative, "Noncanonical macro source path")
+            local_relative = PurePosixPath(root.relative_to(cargo_home).as_posix(), relative)
+            if optional and relative not in files:
+                require(bounded_cache_bytes(cargo_home, local_relative, 131072, optional=True) is None,
+                        "Source-cache optional file is absent from authenticated archive")
                 record = {"package": package_name, "path": relative, "reason": reason, "state": "optional-absent"}
                 records.append(record)
                 print("CACHED_MACRO_SOURCE_OPTIONAL_ABSENT " + json.dumps(record), flush=True)
                 return None
-            require(relative in files, f"Explicit macro source missing from checksum manifest: {relative}")
-            require(local.resolve().is_relative_to(root), "Macro source path escapes package")
-            data = bounded_regular_bytes(local, 131072)
-            require(self.cached_macro_source_bytes + len(data) <= 393216, "Shared macro-source total diagnostic bound exceeded")
+            require(relative in files, f"Explicit macro source missing from authenticated archive: {relative}")
+            offset, length = files[relative]
+            require(length <= 131072, "Selected archive member exceeds source-file bound")
+            require(self.cached_macro_source_bytes + length <= 393216, "Shared macro-source total diagnostic bound exceeded")
+            data = archive_bytes[offset:offset + length]
+            require(bounded_cache_bytes(cargo_home, local_relative, 131072) == data,
+                    f"Metadata-selected cached source differs from authenticated archive: {relative}")
             digest = hashlib.sha256(data).hexdigest()
-            require(digest == files[relative], f"Macro source checksum-manifest mismatch: {relative}")
             text = data.decode("utf-8")
             total_bytes += len(data)
             self.cached_macro_source_bytes += len(data)
-            record = {"package": package_name, "path": relative, "reason": reason, "state": "checksum-manifest-validated",
+            record = {"package": package_name, "path": relative, "reason": reason, "state": "locked-archive-and-source-cache-validated",
                       "bytes": len(data), "sha256": digest}
             records.append(record)
             print("CACHED_MACRO_SOURCE_BEGIN " + json.dumps(record, separators=(",", ":")), flush=True)
