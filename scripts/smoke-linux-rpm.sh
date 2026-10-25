@@ -28,6 +28,15 @@ if [[ "$name" != diffz ]]; then
 fi
 identity_format='%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}'
 expected="$(rpm -qp --queryformat "$identity_format" "$package")"
+# The current RPM target is x86_64. Check the artifact's explicit dynamic-library
+# requirements before installing: preinstalled libraries must not mask omissions.
+requires="$(rpm -qp --queryformat '[%{REQUIRENAME}\n]' "$package")"
+for requirement in 'vulkan-loader(x86-64)' 'libwayland-client(x86-64)'; do
+  if ! grep -Fxq -- "$requirement" <<< "$requires"; then
+    echo "The RPM is missing a required runtime dependency: $requirement" >&2
+    exit 1
+  fi
+done
 # Install only the package and its required dependencies. Explicit libraries
 # or recommended packages could conceal incomplete RPM runtime requirements.
 # Clear container transaction flags such as nodocs so %doc payload is installed.

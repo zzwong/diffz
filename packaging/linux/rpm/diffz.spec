@@ -9,6 +9,9 @@ BuildRequires:  desktop-file-utils
 BuildRequires:  appstream
 Requires:       fontconfig
 Requires:       dejavu-sans-mono-fonts
+# These libraries are loaded dynamically, outside automatic ELF dependencies.
+Requires:       vulkan-loader%{?_isa}
+Requires:       libwayland-client%{?_isa}
 
 %description
 Diffz is a desktop application for reviewing diff and patch files.
