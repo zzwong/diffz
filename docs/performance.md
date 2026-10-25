@@ -33,6 +33,19 @@ samples after settling; `--sample-seconds` can shorten a diagnostic run. The
 `idle` scenario first waits 240 seconds by default. Interrupted runs stop the
 processes started against the private state directories.
 
+For a handoff, both the initial large-review settle and the post-handoff settle
+must be considered. Each completed stage is retained in `meta.json` under
+`settle_stages` (`initial` and, when reached, `handoff`), with its seconds and
+timeout flag. `settle_timeout` is true if either stage timed out, and
+`settle_timeout_stages` names those stages; a later successful settle cannot
+erase an earlier timeout. A later failure also retains already completed stage
+evidence. For compatibility, `settle_seconds` remains the duration of the last
+completed settle stage, not their sum (null when no stage completed). Timed-out
+runs are still sampled and flagged, not silently treated as settled; rerun a
+flagged scenario before drawing a conclusion from it. Older saved profiles
+lack this per-stage evidence and are not rewritten or retrospectively
+reclassified by this change.
+
 | Metric | Source | Meaning |
 | --- | --- | --- |
 | `pss_bytes` | `/proc/PID/smaps_rollup` | Proportional resident memory. Shared pages are split across processes. |
