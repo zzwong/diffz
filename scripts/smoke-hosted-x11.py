@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""REVIEW CANDIDATE, NOT RUN: bounded GitHub-hosted Xvfb handoff smoke.
+"""Bounded GitHub-hosted Xvfb handoff smoke.
 
 No installation, Cargo invocation, existing-display connection, WM, or focus
 claim. The private process-tree guardian is sampled, not a security sandbox.
@@ -27,7 +27,7 @@ import time
 
 SELF = Path(__file__).resolve()
 OBSERVER = SELF.with_name("observe-x11-handoff.py")
-OBSERVER_SHA = "aed395eaffa076d6372731a2aa0af49b6237a1c0c305d04c67dd633270154af5"
+OBSERVER_SHA = "846eb669480471e4a16bf92278367a9312e295e0fbd0f82cbf3f14825f106ab1"
 WORK_SECONDS, TOTAL_SECONDS, SAMPLE_SECONDS = 230, 240, 0.1
 RSS_CAP, RESOURCE_FLOOR = 2 * 1024**3, 2_700_000_000
 LOG_CAP, DATA_CAP, EVIDENCE_CAP = 8 * 1024**2, 64 * 1024**2, 12 * 1024**2
@@ -533,6 +533,8 @@ def guard():
             # observation/signaling failed. Job timeout remains the final boundary.
             time.sleep(1 if cleanup_delayed else SAMPLE_SECONDS)
     passed = False
+    result = {}
+    guard_error = None
     try:
         elapsed = time.monotonic() - started
         observer = root / "observer-result.json"
@@ -579,8 +581,9 @@ def guard():
         export_evidence(root, evidence)
     except Exception as error:
         passed = False
+        guard_error = type(error).__name__ + ": " + str(error)
         write_json(evidence / "guard-error.json", {"phase_a_passed": False,
-                   "error": type(error).__name__ + ": " + str(error)})
+                   "error": guard_error})
     finally:
         for name in ("server.auth", "client.auth"):
             path = root / name
@@ -597,6 +600,8 @@ def guard():
         "focus_verified": False, "software_adapter_verified": False,
         "content_text_independently_read": False})
     print(json.dumps({"phase_a_passed": passed, "evidence": str(evidence),
+                      "reason": reason, "worker_exit": returncode,
+                      "observer_error": result.get("error"), "guard_error": guard_error,
                       "focus_verified": False, "software_adapter_verified": False}))
     return 0 if passed else 1
 

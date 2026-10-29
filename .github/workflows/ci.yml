@@ -38,6 +38,7 @@ jobs:
           python3 scripts/tests/test_hosted_build_environment.py -v
           python3 scripts/tests/test_bootstrap_kache.py -v
           python3 scripts/tests/test_run_kache.py -v
+          python3 scripts/tests/test_qualify_gpui_activation.py -v
           python3 scripts/tests/test_cranelift_generators.py -v
           python3 scripts/tests/test_bazel_vendor_boundary.py -v
       - name: Install pinned Rust toolchain
@@ -144,14 +145,10 @@ jobs:
           fi
           test -d "$root/state"
 
-      # Evidence-only prerequisite diagnostic; the prior strict failure is retained.
-      # No compiler/test uses the unaccepted candidate lock. Exit 2 awaits review.
-      # Keep this after the existing native application and installer gates.
-      - name: Collect GPUI prerequisite evidence and unaccepted lock proposals
-        timeout-minutes: 5
-        run: python3 scripts/qualify-gpui-activation.py --output "$RUNNER_TEMP/gpui-activation-evidence" --vendor-lock-proposal-only --include-core-lock-proposal
+      - name: Test GPUI activation and isolated Linux backends
+        run: python3 scripts/qualify-gpui-activation.py
 
-      # REVIEW REQUIRED: real private X11, not focus/Wayland qualification.
+      # Real private X11 handoff, not focus/Wayland qualification.
       # Independent of the GPUI dependency gate's result, but never launches
       # after failed/skipped native app gates or cancellation. No duplicate build.
       - name: Observe real X11 fixture handoff
@@ -159,7 +156,7 @@ jobs:
         if: ${{ !cancelled() && steps.native-installer.outcome == 'success' }}
         run: python3 -I -S -B scripts/smoke-hosted-x11.py
 
-      # REVIEW REQUIRED: new evidence upload; reuses the existing repo action pin.
+      # Reuses the existing repo action pin.
       # Only the wrapper's bounded allowlist, never its private working directory.
       - name: Retain X11 smoke evidence for three days
         if: ${{ always() && steps.x11-smoke.outcome != 'skipped' }}

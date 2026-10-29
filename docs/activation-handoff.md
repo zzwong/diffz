@@ -72,14 +72,17 @@ explicit dependency unit-test commands are required because workspace tests
 alone do not run those crates' tests:
 
 ```sh
-cargo test --locked -p gpui-pre --features test-support --lib activation
-cargo test --locked -p gpui-pre-linux --lib activation
-cargo check --locked -p gpui-pre-linux --no-default-features --features wayland
-cargo check --locked -p gpui-pre-linux --no-default-features --features x11
+python3 scripts/qualify-gpui-activation.py
 ```
 
-These commands are validation gates, not a claim that they have passed. Record
-exact commits and actual outcomes in the PR. GPUI core's own-checkout tests,
+The script stages the unchanged vendor source as a workspace member under
+`target/`, because Cargo cannot select features on an external workspace
+dependency. It retains the app's patches and profiles. Offline resolution may
+prune the copied lock, but rejects any new package, version, source or checksum;
+the app lock is unchanged. It runs all four activation tests and verifies that
+each backend check excludes the opposite backend and test support.
+
+Record exact commits and actual outcomes in the PR. GPUI core's own-checkout tests,
 `bash scripts/check.sh core`, `bash scripts/check.sh native`, and native X11/macOS
 handoff smoke checks remain separate obligations.
 

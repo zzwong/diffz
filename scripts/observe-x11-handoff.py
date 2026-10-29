@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source-only candidate: phase-A private-X11 rendered handoff observer.
+"""Private-X11 rendered handoff observer.
 
 Must run only under the separately admitted display/resource guardian. This
 does not start a display, install anything, claim focus, or relax that guardian.
@@ -22,7 +22,7 @@ import zlib
 APP_ID = b"io.github.zzwong.Diffz"
 GEOMETRY = (20, 20, 1100, 700)
 # Interior reader pixels, excluding title/toolbar/file tree/footer/scrollbar.
-ROI = (330, 140, 700, 300)
+ROI = (300, 85, 770, 320)
 DEADLINE = 0.0
 
 

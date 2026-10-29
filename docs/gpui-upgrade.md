@@ -15,7 +15,7 @@ revisions remain usable by consumers pinned to them.
 
 | Source | Patch retained | Exact revision |
 | --- | --- | --- |
-| gpui-pre | Visual magnification, exact live raster/cache retention, viewport/accessibility, overlay mapping and activation-context API | `d79c3d1191aa68d4753e1ca410c2d10c261b4572` |
+| gpui-pre | Visual magnification, exact live raster/cache retention, viewport/accessibility, overlay mapping and activation-context API | `7f8bb39b9e7febfd21d17075934dc9dc0cf5501f` |
 | gpui-pre-wgpu | Vulkan-first initialization and lazy path textures | `389e7f33bed4f6237ccb53f2b4884d996274a453` |
 | gpui-base | Caret blink timeout and inactive-window behavior | `6235089ccddd423369749017dabb4f6df8a3c169` |
 | gpui-pre-macos | Demand-driven display link and idle timeout | `28057de61df9442cb521497a63193e70dc36019f` |
