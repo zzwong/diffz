@@ -18,6 +18,9 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_VERSION = 1
 CHECKSUM_NIGHTLY = date(2026, 9, 2)
+ERROR_SOURCE = "crates/app/src/main.rs"
+ERROR_MARKER = "diffz-benchmark-deliberate-compile-error"
+ERROR_EDIT = ('\ncompile_error!("' + ERROR_MARKER + '");\n').encode()
 PROBES = (
     ("core", "crates/core/src/patch.rs", b"max_files: 10_000,", 1),
     ("ui", "crates/ui/src/magnify.rs", b"MAX_SCALE: f32 = 5.0;", 1),
@@ -47,7 +50,7 @@ def parse_args(argv=None):
     parser.add_argument("--cargo-fingerprint", choices=("default", "mtime", "content", "both"),
                         default="default", help="Explicit modes require one dated nightly >= 2026-09-02")
     parser.add_argument("--cargo-scenario", action="append", default=[],
-                        choices=("noop", "edit", "fresh-worktree"),
+                        choices=("noop", "edit", "fresh-worktree", "error-repair"),
                         help="Additional Cargo phases after each artifact-cold build; repeatable")
     parser.add_argument("--cc", default="/usr/bin/clang" if platform.system() == "Darwin" else "/usr/bin/gcc")
     parser.add_argument("--cxx", default="/usr/bin/clang++" if platform.system() == "Darwin" else "/usr/bin/g++")
@@ -166,6 +169,29 @@ def inherited_cargo_config_hashes(root):
     return {str(path.resolve()): hashlib.sha256(path.read_bytes()).hexdigest()
             for directory in directories for path in (directory / "config", directory / "config.toml")
             if path.is_file()}
+
+
+@contextmanager
+def compile_error(root):
+    """Inject only into the driver's disposable worktree; restore exact bytes."""
+    source = root / ERROR_SOURCE
+    if root.resolve() == ROOT.resolve() or source.is_symlink() or not source.resolve().is_relative_to(root.resolve()):
+        raise RuntimeError("Compile-error probe requires an owned source worktree")
+    original = source.read_bytes()
+    if ERROR_MARKER.encode() in original:
+        raise RuntimeError("Compile-error marker already exists in source")
+    changed = original + ERROR_EDIT
+    if source.read_bytes() != original:
+        raise RuntimeError(f"Source changed concurrently; refusing to overwrite {source}")
+    source.write_bytes(changed)
+    try:
+        yield dict(path=ERROR_SOURCE, appended=ERROR_EDIT.decode(),
+                   original_sha256=hashlib.sha256(original).hexdigest(),
+                   changed_sha256=hashlib.sha256(changed).hexdigest())
+    finally:
+        if source.read_bytes() != changed:
+            raise RuntimeError(f"Source changed concurrently; refusing to overwrite {source}")
+        source.write_bytes(original)
 
 
 @contextmanager
@@ -308,10 +334,27 @@ def main(argv=None):
         # A comparison explicitly tests each named profile, including dev.
         return [] if profile == "dev" and len(profiles) == 1 else ["--profile=" + profile]
 
-    def build(name, command, cwd, env, profile, *, scenario, iteration):
-        run(name, command + ["build", "--locked", "--timings", f"-j{args.jobs}",
+    def build(name, command, cwd, env, profile, *, scenario, iteration, expected_error=False):
+        row = run(name, command + ["build", "--locked", "--timings", f"-j{args.jobs}",
                             "--target-dir", env["CARGO_TARGET_DIR"]] + workload + profile_flags(profile),
-            cwd=cwd, env=env, phase="build", cargo_profile=profile, scenario=scenario, iteration=iteration)
+            cwd=cwd, env=env, phase="build", cargo_profile=profile, scenario=scenario, iteration=iteration,
+            check=not expected_error)
+        if expected_error:
+            # Cargo uses 101 for compilation failure. A missing tool, signal,
+            # unrelated failure or unexpected success does not qualify.
+            diagnostic = "error: " + ERROR_MARKER
+            log_text = (evidence / (name + ".log")).read_text(errors="replace")
+            log_text = re.sub(r"\x1b\[[0-9;]*m", "", log_text)
+            matched = diagnostic in log_text
+            valid = row["exit_code"] == 101 and matched
+            record(dict(name=name + "-validation", phase="validation", scenario=scenario,
+                        cargo_profile=profile, iteration=iteration, build_exit_code=row["exit_code"],
+                        expected_exit_code=101, diagnostic_matched=matched, exit_code=0 if valid else 1))
+            if not valid:
+                raise RuntimeError(f"{name} did not produce the expected compile error; see {evidence / (name + '.log')}")
+            # Cargo may leave the previous successful timing HTML behind.
+            # Never label that stale report as this failed build's timing.
+            return
         timing = Path(env["CARGO_TARGET_DIR"]) / "cargo-timings/cargo-timing.html"
         shutil.copyfile(timing, evidence / (name + "-timing.html"))
 
@@ -391,6 +434,16 @@ def main(argv=None):
                                       scenario="edit-" + probe[0], iteration=i)
                             build(f"{label}-undo-{probe[0]}-{i}", command, source, env, profile,
                                   scenario="undo-" + probe[0], iteration=i)
+                    if "error-repair" in args.cargo_scenario:
+                        if source not in worktrees:
+                            raise RuntimeError("Compile-error probe requires an owned source worktree")
+                        name = f"{label}-error-{i}"
+                        with compile_error(source) as edit:
+                            (evidence / (name + "-source.json")).write_text(json.dumps(edit, indent=2) + "\n")
+                            build(name, command, source, env, profile,
+                                  scenario="compile-error", iteration=i, expected_error=True)
+                        build(f"{label}-repair-{i}", command, source, env, profile,
+                              scenario="error-repair", iteration=i)
         if "cargo" in tools:
             for profile, mode, label in variants:
                 verification_profile = "test" if profile == "dev" and len(profiles) == 1 else profile
