@@ -220,6 +220,11 @@ is claimed.
 Existing Linux/macOS CI and release gates are retained. This result does not
 close the broader baseline/cache/profile adoption issues.
 
+The first hosted macOS run passed all-target compilation, the feature-matrix
+tests, linting and the debug build, then reached the 30-minute job limit during
+release compilation. The CI job budget is now 45 minutes; the full suite and
+release build remain required by that job.
+
 ## Reproduction and retained evidence
 
 Use a clean isolated worktree and a fresh evidence directory:
