@@ -1,0 +1,575 @@
+{
+  "source_revision": "045b8fe2483dd892e3fc04ce9a4c848ad98c7dc4",
+  "lto": {
+    "baseline": {
+      "seconds": [
+        109.2751831239948,
+        109.13347140800033,
+        100.58181517200137
+      ],
+      "median": 109.13347140800033,
+      "min": 100.58181517200137,
+      "max": 109.2751831239948,
+      "unit_spans": [
+        {
+          "duration": 51.95,
+          "sections": {
+            "frontend": 15.62,
+            "codegen": 36.330000000000005
+          }
+        },
+        {
+          "duration": 50.9,
+          "sections": {
+            "frontend": 15.21,
+            "codegen": 35.69
+          }
+        },
+        {
+          "duration": 47.37,
+          "sections": {
+            "frontend": 13.15,
+            "codegen": 34.22
+          }
+        }
+      ]
+    },
+    "candidate": {
+      "seconds": [
+        103.47507309699722,
+        104.13960465400305,
+        99.06855249200453
+      ],
+      "median": 103.47507309699722,
+      "min": 99.06855249200453,
+      "max": 104.13960465400305,
+      "unit_spans": [
+        {
+          "duration": 45.13,
+          "sections": {
+            "frontend": 13.41,
+            "codegen": 31.720000000000002
+          }
+        },
+        {
+          "duration": 45.95,
+          "sections": {
+            "frontend": 13.68,
+            "codegen": 32.27
+          }
+        },
+        {
+          "duration": 43.91,
+          "sections": {
+            "frontend": 13.6,
+            "codegen": 30.309999999999995
+          }
+        }
+      ]
+    }
+  },
+  "runtime": {
+    "grammar": {
+      "baseline": {
+        "seconds": [
+          0.060934478002309334,
+          0.06513666899991222,
+          0.06231545700575225,
+          0.04623481100134086,
+          0.04374748799455119,
+          0.046179375996871386,
+          0.04408694599987939,
+          0.044909996999194846,
+          0.04400190599699272,
+          0.04932180199830327,
+          0.044377143000019714,
+          0.04485001399734756,
+          0.06330858800356509,
+          0.04566786299983505,
+          0.05789642700256081
+        ],
+        "count": 15,
+        "median": 0.046179375996871386,
+        "min": 0.04374748799455119,
+        "max": 0.06513666899991222
+      },
+      "candidate": {
+        "seconds": [
+          0.07365287299762713,
+          0.07336808700347319,
+          0.07425138000689913,
+          0.06486862400197424,
+          0.05342895600188058,
+          0.052223836006305646,
+          0.07458423700154526,
+          0.053071823000209406,
+          0.05380995399900712,
+          0.05262373000005027,
+          0.07434058799844934,
+          0.051806941999529954,
+          0.05428510799538344,
+          0.07415480799681973,
+          0.052790282999922056
+        ],
+        "count": 15,
+        "median": 0.05428510799538344,
+        "min": 0.051806941999529954,
+        "max": 0.07458423700154526
+      }
+    },
+    "component": {
+      "baseline": {
+        "seconds": [
+          0.054155803998582996,
+          0.05397589600033825,
+          0.05320000499341404,
+          0.0524755109945545,
+          0.04011923700454645,
+          0.03817037700355286,
+          0.05437350399733987,
+          0.038531147001776844,
+          0.038034451004932635,
+          0.03807624999899417,
+          0.039278553005715366,
+          0.05554854700312717,
+          0.04403180300141685,
+          0.04703999600315001,
+          0.04172343700338388
+        ],
+        "count": 15,
+        "median": 0.04403180300141685,
+        "min": 0.038034451004932635,
+        "max": 0.05554854700312717
+      },
+      "candidate": {
+        "seconds": [
+          0.06283978399733314,
+          0.06310450300225057,
+          0.06299901400052477,
+          0.04742276699835202,
+          0.046408827998675406,
+          0.045844745996873826,
+          0.04436823599826312,
+          0.04446175200428115,
+          0.04508740000164835,
+          0.04503108400240308,
+          0.045222133994684555,
+          0.04680302999622654,
+          0.04486146500130417,
+          0.04453815699525876,
+          0.047012133996759076
+        ],
+        "count": 15,
+        "median": 0.045844745996873826,
+        "min": 0.04436823599826312,
+        "max": 0.06310450300225057
+      }
+    }
+  },
+  "fixtures": {
+    "F01": {
+      "equal_parsed_json": true,
+      "sha256": [
+        "e0068ac77ce7b3cdad458a7aa70f2e2d39f5d3b1228d587be9cfc0f6f9caeac9",
+        "e0068ac77ce7b3cdad458a7aa70f2e2d39f5d3b1228d587be9cfc0f6f9caeac9"
+      ]
+    },
+    "F02": {
+      "equal_parsed_json": true,
+      "sha256": [
+        "c9f786a609cb417dcfbe42dc7c1c9d6d8e9890a2ca24bb32ae4a7c6428c324d5",
+        "c9f786a609cb417dcfbe42dc7c1c9d6d8e9890a2ca24bb32ae4a7c6428c324d5"
+      ]
+    },
+    "F03": {
+      "equal_parsed_json": true,
+      "sha256": [
+        "e54a732628714cc02263b0c8e7dd3dc9dea5d649f89272194dd27006dab8ee11",
+        "e54a732628714cc02263b0c8e7dd3dc9dea5d649f89272194dd27006dab8ee11"
+      ]
+    }
+  },
+  "self_profiles": {
+    "cranelift_codegen": {
+      "wall": 20.67168387399579,
+      "kernel_user": 68.110992,
+      "kernel_system": 1.7473459999999998,
+      "max_process_rss_kib": 2067920,
+      "summed_self_event_seconds": 84.214149276,
+      "selected_events": {
+        "LLVM_thinlto": {
+          "self_seconds": 5.475516359,
+          "count": 1
+        },
+        "self_profile_alloc_query_strings": {
+          "self_seconds": 0.053814822,
+          "count": 1
+        },
+        "collect_and_partition_mono_items": {
+          "self_seconds": 0.001555479,
+          "count": 1
+        },
+        "codegen_module": {
+          "self_seconds": 1.294854583,
+          "count": 16
+        },
+        "LLVM_lto_optimize": {
+          "self_seconds": 17.490164655,
+          "count": 16
+        },
+        "LLVM_module_optimize": {
+          "self_seconds": 18.56024271,
+          "count": 16
+        },
+        "typeck_root": {
+          "self_seconds": 1.744166004,
+          "count": 14166
+        },
+        "monomorphization_collector_graph_walk": {
+          "self_seconds": 0.033256189,
+          "count": 1
+        },
+        "mir_borrowck": {
+          "self_seconds": 1.153241026,
+          "count": 13564
+        },
+        "LLVM_module_codegen_emit_obj": {
+          "self_seconds": 16.299594567,
+          "count": 16
+        }
+      }
+    },
+    "gpui": {
+      "wall": 14.693263531997218,
+      "kernel_user": 54.446816,
+      "kernel_system": 1.438797,
+      "max_process_rss_kib": 2074876,
+      "summed_self_event_seconds": 64.823204748,
+      "selected_events": {
+        "LLVM_thinlto": {
+          "self_seconds": 2.382928539,
+          "count": 1
+        },
+        "self_profile_alloc_query_strings": {
+          "self_seconds": 0.050247385,
+          "count": 1
+        },
+        "collect_and_partition_mono_items": {
+          "self_seconds": 0.002149978,
+          "count": 1
+        },
+        "codegen_module": {
+          "self_seconds": 2.151189563,
+          "count": 16
+        },
+        "LLVM_lto_optimize": {
+          "self_seconds": 12.72705495,
+          "count": 16
+        },
+        "LLVM_module_optimize": {
+          "self_seconds": 14.928018588,
+          "count": 16
+        },
+        "typeck_root": {
+          "self_seconds": 0.871908257,
+          "count": 12563
+        },
+        "monomorphization_collector_graph_walk": {
+          "self_seconds": 0.035194008,
+          "count": 1
+        },
+        "mir_borrowck": {
+          "self_seconds": 0.663014556,
+          "count": 12194
+        },
+        "LLVM_module_codegen_emit_obj": {
+          "self_seconds": 11.925011708,
+          "count": 16
+        }
+      }
+    },
+    "gpui_base": {
+      "wall": 16.25051256799634,
+      "kernel_user": 78.440802,
+      "kernel_system": 1.7218939999999998,
+      "max_process_rss_kib": 2313340,
+      "summed_self_event_seconds": 94.292079043,
+      "selected_events": {
+        "LLVM_thinlto": {
+          "self_seconds": 3.835512283,
+          "count": 1
+        },
+        "self_profile_alloc_query_strings": {
+          "self_seconds": 0.047776263,
+          "count": 1
+        },
+        "collect_and_partition_mono_items": {
+          "self_seconds": 0.001950493,
+          "count": 1
+        },
+        "codegen_module": {
+          "self_seconds": 2.967210545,
+          "count": 16
+        },
+        "LLVM_lto_optimize": {
+          "self_seconds": 19.495272574,
+          "count": 16
+        },
+        "LLVM_module_optimize": {
+          "self_seconds": 22.135425316,
+          "count": 16
+        },
+        "typeck_root": {
+          "self_seconds": 0.717261144,
+          "count": 7219
+        },
+        "monomorphization_collector_graph_walk": {
+          "self_seconds": 0.051840878,
+          "count": 1
+        },
+        "mir_borrowck": {
+          "self_seconds": 0.519105811,
+          "count": 6974
+        },
+        "LLVM_module_codegen_emit_obj": {
+          "self_seconds": 19.912079218,
+          "count": 16
+        }
+      }
+    },
+    "gpui_component": {
+      "wall": 20.415901078995375,
+      "kernel_user": 89.04962,
+      "kernel_system": 2.388326,
+      "max_process_rss_kib": 2923336,
+      "summed_self_event_seconds": 110.197650379,
+      "selected_events": {
+        "LLVM_thinlto": {
+          "self_seconds": 5.884041658,
+          "count": 1
+        },
+        "self_profile_alloc_query_strings": {
+          "self_seconds": 0.065132461,
+          "count": 1
+        },
+        "collect_and_partition_mono_items": {
+          "self_seconds": 0.002484969,
+          "count": 1
+        },
+        "codegen_module": {
+          "self_seconds": 3.20422161,
+          "count": 16
+        },
+        "LLVM_lto_optimize": {
+          "self_seconds": 20.809132481,
+          "count": 16
+        },
+        "LLVM_module_optimize": {
+          "self_seconds": 23.63135407,
+          "count": 16
+        },
+        "typeck_root": {
+          "self_seconds": 1.02272273,
+          "count": 6862
+        },
+        "monomorphization_collector_graph_walk": {
+          "self_seconds": 0.057776299,
+          "count": 1
+        },
+        "mir_borrowck": {
+          "self_seconds": 0.736082093,
+          "count": 6655
+        },
+        "LLVM_module_codegen_emit_obj": {
+          "self_seconds": 24.565322396,
+          "count": 16
+        }
+      }
+    },
+    "diffz_ui": {
+      "wall": 2.9370411389973015,
+      "kernel_user": 4.34718,
+      "kernel_system": 0.289256,
+      "max_process_rss_kib": 786852,
+      "summed_self_event_seconds": 5.476460998,
+      "selected_events": {
+        "self_profile_alloc_query_strings": {
+          "self_seconds": 0.012180012,
+          "count": 1
+        },
+        "collect_and_partition_mono_items": {
+          "self_seconds": 0.001070305,
+          "count": 1
+        },
+        "codegen_module": {
+          "self_seconds": 0.652687137,
+          "count": 16
+        },
+        "LLVM_module_optimize": {
+          "self_seconds": 0.097533543,
+          "count": 16
+        },
+        "typeck_root": {
+          "self_seconds": 0.239284404,
+          "count": 901
+        },
+        "monomorphization_collector_graph_walk": {
+          "self_seconds": 0.020687141,
+          "count": 1
+        },
+        "mir_borrowck": {
+          "self_seconds": 0.154922325,
+          "count": 849
+        },
+        "LLVM_module_codegen_emit_obj": {
+          "self_seconds": 1.5679784780000001,
+          "count": 16
+        }
+      }
+    },
+    "diffz": {
+      "wall": 0.7530185870054993,
+      "kernel_user": 1.475777,
+      "kernel_system": 2.418433,
+      "max_process_rss_kib": 1468376,
+      "summed_self_event_seconds": 0.888379106,
+      "selected_events": {
+        "self_profile_alloc_query_strings": {
+          "self_seconds": 0.002018631,
+          "count": 1
+        },
+        "collect_and_partition_mono_items": {
+          "self_seconds": 4.7959e-05,
+          "count": 1
+        },
+        "codegen_module": {
+          "self_seconds": 0.031445194,
+          "count": 6
+        },
+        "LLVM_module_optimize": {
+          "self_seconds": 0.005595606,
+          "count": 7
+        },
+        "typeck_root": {
+          "self_seconds": 0.010283302,
+          "count": 29
+        },
+        "monomorphization_collector_graph_walk": {
+          "self_seconds": 0.000697424,
+          "count": 1
+        },
+        "mir_borrowck": {
+          "self_seconds": 0.005933062,
+          "count": 28
+        },
+        "LLVM_module_codegen_emit_obj": {
+          "self_seconds": 0.094441522,
+          "count": 7
+        },
+        "run_linker": {
+          "self_seconds": 0.497267151,
+          "count": 1
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "scope": "Linux compiler investigation; no production profile/backend changes promoted",
+  "controls": {
+    "source_revision": "045b8fe2483dd892e3fc04ce9a4c848ad98c7dc4",
+    "rustc": "1.99.0 b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+    "plain_cargo": "1.99.0",
+    "paired_cargo_driver": "1.101.0-nightly cad07cf8e597397fff5d0f6cb79c9f870c0b1dd2 (nightly-2026-10-28)",
+    "jobs": 16,
+    "affinity": "0-31",
+    "incremental": false,
+    "workload": "diffz default desktop/syntax/wasm, dev, artifact-cold, downloaded sources warm",
+    "lock_sha256": "10e047857c7f91bded01bea417bd88d10428aec6fb7fbd6fb87328907d1b1850"
+  },
+  "baseline": {
+    "command_seconds": 100.1184,
+    "observed_span_seconds": 99.82,
+    "units": 849,
+    "ready_wait_seconds": 71.15,
+    "max_ready_waiting": 92
+  },
+  "backend_trial": {
+    "toolchain": "nightly-2026-10-28",
+    "rustc": "1.101.0 41089d07a0a2afc16adfe28a760d94d73d7298a4",
+    "cranelift_backend_sha256": "041b5cb8e1b8cc1b2d966f3ae3bc3958ebd590473a9debe9b676e8f2a34c7093",
+    "commands": [
+      {
+        "name": "llvm-build",
+        "seconds": 105.60175951600104,
+        "exit_code": 0,
+        "user_seconds": 1509.366291,
+        "system_seconds": 56.44264,
+        "max_process_rss_kib": 2926592
+      },
+      {
+        "name": "llvm-inspect-F01",
+        "seconds": 0.02570287299749907,
+        "exit_code": 0,
+        "user_seconds": 0.004737,
+        "system_seconds": 0.011314,
+        "max_process_rss_kib": 34252
+      },
+      {
+        "name": "llvm-inspect-F02",
+        "seconds": 0.015188687000772916,
+        "exit_code": 0,
+        "user_seconds": 0.008485999999999999,
+        "system_seconds": 0.00242,
+        "max_process_rss_kib": 34252
+      },
+      {
+        "name": "llvm-inspect-F03",
+        "seconds": 0.010442812003020663,
+        "exit_code": 0,
+        "user_seconds": 0.004128,
+        "system_seconds": 0.002786,
+        "max_process_rss_kib": 34252
+      },
+      {
+        "name": "llvm-test-compile",
+        "seconds": 49.805052261996025,
+        "exit_code": 0,
+        "user_seconds": 503.230088,
+        "system_seconds": 30.256584,
+        "max_process_rss_kib": 2869716
+      },
+      {
+        "name": "llvm-tests",
+        "seconds": 2.6804897249967325,
+        "exit_code": 0,
+        "user_seconds": 11.66124,
+        "system_seconds": 2.696114,
+        "max_process_rss_kib": 141716
+      },
+      {
+        "name": "cranelift-build",
+        "seconds": 47.00095373699878,
+        "exit_code": 101,
+        "user_seconds": 432.710615,
+        "system_seconds": 39.44561,
+        "max_process_rss_kib": 1775048
+      },
+      {
+        "name": "cranelift-test-compile",
+        "seconds": 34.351336647996504,
+        "exit_code": 101,
+        "user_seconds": 118.783194,
+        "system_seconds": 23.854652,
+        "max_process_rss_kib": 1771376
+      }
+    ]
+  },
+  "decisions": {
+    "cranelift-lto-off-cgu16": "retain-experiment; extension-workflow regression",
+    "rustc_codegen_cranelift": "defer; application and test graph link failures",
+    "tpde": "defer; backend integration unmerged and nightly option absent",
+    "frontend-threads": "defer; frontend dominance not established",
+    "generic-boundary": "defer; no measured narrow boundary",
+    "linker-release-profile": "defer; small final-link budget and separate release workload"
+  }
+}

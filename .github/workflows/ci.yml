@@ -33,6 +33,7 @@ jobs:
       - name: Check build benchmark and cache qualification fixtures
         run: |
           python3 scripts/tests/test_benchmark_cold_builds.py -v
+          python3 -B scripts/tests/test_analyze_cargo_timings.py -v
           python3 scripts/tests/test_qualify_bazel_cache.py -v
           python3 scripts/tests/test_prepare_ci_rust.py -v
           python3 scripts/tests/test_hosted_build_environment.py -v
@@ -185,6 +186,7 @@ jobs:
         run: |
           python3 scripts/tests/test_bootstrap_kache.py -v
           python3 scripts/tests/test_run_kache.py -v
+          python3 -B scripts/tests/test_analyze_cargo_timings.py -v
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       - name: Cache Cargo registry and dependency artifacts
