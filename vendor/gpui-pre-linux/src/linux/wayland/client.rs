@@ -197,13 +197,20 @@ fn set_ime_cursor_rectangle_after_done(
 const FRAME_RETRY_INTERVAL: Duration = Duration::from_micros(16_667);
 
 pub(crate) fn take_startup_activation_token_from_environment() -> Option<String> {
-    let token = std::env::var(XDG_ACTIVATION_TOKEN_ENV_VAR)
-        .ok()
-        .filter(|token| !token.is_empty());
-    // Per the xdg-activation spec, so that programs we launch don't inherit the token.
-    // SAFETY: `LinuxPlatform::new` calls this before it starts any threads.
-    unsafe { std::env::remove_var(XDG_ACTIVATION_TOKEN_ENV_VAR) };
-    token
+    startup_activation_token(std::env::var_os(XDG_ACTIVATION_TOKEN_ENV_VAR), || {
+        // Per xdg-activation, programs we launch must not inherit this token.
+        // SAFETY: LinuxPlatform::new takes a present value before its threads start.
+        unsafe { std::env::remove_var(XDG_ACTIVATION_TOKEN_ENV_VAR) };
+    })
+}
+
+fn startup_activation_token(value: Option<std::ffi::OsString>, unset: impl FnOnce()) -> Option<String> {
+    // Diffz removes this before starting its threads. True absence needs no
+    // late mutation; present invalid Unicode must still be removed.
+    let value = value?;
+    unset();
+    // The 4 KiB policy belongs to Diffz, not every GPUI caller.
+    value.into_string().ok().filter(|token| !token.is_empty())
 }
 
 /// Takes the Wayland connection that `WAYLAND_SOCKET` hands to this process, as libwayland does.
@@ -555,14 +562,18 @@ pub(crate) enum PendingActivation {
 }
 
 impl WaylandClientState {
-    fn consume_startup_activation_token(&mut self, surface: &wl_surface::WlSurface) {
-        let Some(startup_activation_token) = self.startup_activation_token.take() else {
-            return;
-        };
-        let Some(activation) = self.globals.activation.as_ref() else {
-            return;
-        };
-        activation.activate(startup_activation_token, surface);
+    fn consume_startup_activation_token(&mut self, surface: &wl_surface::WlSurface, toplevel: bool) {
+        consume_startup_token(&mut self.startup_activation_token, toplevel,
+            self.globals.activation.as_ref().map(|activation| {
+                move |token| activation.activate(token, surface)
+            }));
+    }
+}
+
+fn consume_startup_token(token: &mut Option<String>, toplevel: bool, submit: Option<impl FnOnce(String)>) {
+    if !toplevel { return; }
+    if let (Some(token), Some(submit)) = (token.take(), submit) {
+        submit(token);
     }
 }
 
@@ -1337,9 +1348,7 @@ impl WaylandConnection {
             target_output,
         )?;
 
-        if window.0.toplevel().is_some() {
-            state.consume_startup_activation_token(&window.0.surface());
-        }
+        state.consume_startup_activation_token(&window.0.surface(), window.0.toplevel().is_some());
         state.windows.insert(surface_id, window.0.clone());
 
         Ok(Box::new(window))
@@ -3475,5 +3484,43 @@ mod tests {
             text_input.cursor_rectangles.borrow().as_slice(),
             &[(10, 20, 1, 18)]
         );
+    }
+}
+
+#[cfg(test)]
+mod activation_lifetime_tests {
+    use super::{consume_startup_token, startup_activation_token};
+
+    #[test]
+    fn absent_environment_is_not_mutated_but_every_present_value_is_removed() {
+        use std::os::unix::ffi::OsStringExt;
+        let mut removals = 0;
+        assert!(startup_activation_token(None, || removals += 1).is_none());
+        assert_eq!(removals, 0);
+        for value in [std::ffi::OsString::new(), std::ffi::OsString::from_vec(vec![0xff])] {
+            assert!(startup_activation_token(Some(value), || removals += 1).is_none());
+        }
+        assert_eq!(removals, 2);
+        let large = "x".repeat(4097);
+        assert!(startup_activation_token(Some(large.clone().into()), || removals += 1).as_ref() == Some(&large));
+        assert_eq!(removals, 3);
+    }
+
+    #[test]
+    fn startup_token_is_consumed_only_by_the_first_toplevel() {
+        let mut token = Some("synthetic-startup".to_owned());
+        let mut submissions = 0;
+        consume_startup_token(&mut token, false, Some(|_| panic!("popup activation")));
+        assert!(token.is_some());
+        consume_startup_token(&mut token, true, Some(|actual| {
+            assert!(actual == "synthetic-startup");
+            submissions += 1;
+        }));
+        assert!(token.is_none());
+        consume_startup_token(&mut token, true, Some(|_| panic!("replayed startup")));
+        assert_eq!(submissions, 1);
+        let mut unsupported = Some("synthetic-startup".to_owned());
+        consume_startup_token(&mut unsupported, true, None::<fn(String)>);
+        assert!(unsupported.is_none());
     }
 }
