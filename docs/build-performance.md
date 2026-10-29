@@ -1,5 +1,9 @@
 # Bazel trial and build performance
 
+For the current Rust 1.99.0 / Cranelift 0.135.7 investigation and compiler
+candidate decisions, see [the October 29 qualification report](compiler-profile-2026-10-29.md).
+The measurements below retain their original revision and toolchain scope.
+
 Measured on 2026-10-19, starting at `fe0581b`, on x86_64 Linux with a Ryzen AI
 MAX+ 395 (16 cores / 32 threads). Rust is 1.98.1, Bazel 8.4.2, and rules_rust
 0.74.0. The trial builds the desktop executable, all four crates, all 30 unit
