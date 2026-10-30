@@ -1,0 +1,52 @@
+name: Generate Wasmtime security lockfile
+on:
+  push:
+    branches: [prep/wasmtime-48-0-8-lock-20261030]
+permissions:
+  contents: read
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install repository-pinned official Rust
+        run: python3 scripts/prepare-ci-rust.py
+      - name: Resolve security patch with Cargo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("crates/core/Cargo.toml")
+          text = p.read_text()
+          old = '[dependencies.wasmtime]\nversion = "48"'
+          assert text.count(old) == 1
+          p.write_text(text.replace(old, '[dependencies.wasmtime]\nversion = "48.0.8"'))
+          PY
+          cargo update -p wasmtime@48.0.7 --precise 48.0.8
+          cargo metadata --locked --no-deps --format-version 1 > /dev/null
+          mkdir "$RUNNER_TEMP/wasmtime-lock"
+          cp Cargo.lock "$RUNNER_TEMP/wasmtime-lock/Cargo.lock"
+          cp crates/core/Cargo.toml "$RUNNER_TEMP/wasmtime-lock/core-Cargo.toml"
+          {
+            git rev-parse HEAD
+            rustc -vV
+            cargo -V
+            sha256sum Cargo.lock crates/core/Cargo.toml rust-toolchain.toml scripts/prepare-ci-rust.py
+          } > "$RUNNER_TEMP/wasmtime-lock/receipt.txt"
+          git diff --stat
+          git diff -- Cargo.lock crates/core/Cargo.toml
+      - name: Retain data-only resolution outputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wasmtime-48-0-8-lock
+          path: |
+            ${{ runner.temp }}/wasmtime-lock/Cargo.lock
+            ${{ runner.temp }}/wasmtime-lock/core-Cargo.toml
+            ${{ runner.temp }}/wasmtime-lock/receipt.txt
+          if-no-files-found: error
+          retention-days: 3
+          include-hidden-files: false
