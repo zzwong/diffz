@@ -1230,19 +1230,46 @@ mod tests {
     fn native_literal_patch_uses_real_detector() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(non_unicode_argument());
-        std::fs::write(&path, "").unwrap();
-        assert_eq!(
-            parse([path.as_os_str().to_owned()]).unwrap().request,
-            Some(OpenRequest::Patch(std::path::absolute(&path).unwrap()))
-        );
+        let created = match std::fs::write(&path, "") {
+            Ok(()) => true,
+            // macOS filesystems can reject a non-UTF-8 filename at creation.
+            // Darwin EILSEQ is 92; other creation errors must still fail the test.
+            #[cfg(target_os = "macos")]
+            Err(error) => {
+                assert_eq!(error.raw_os_error(), Some(92), "{error}");
+                assert!(!path.exists());
+                assert!(parse([path.as_os_str().to_owned()]).is_err());
+                false
+            }
+            #[cfg(not(target_os = "macos"))]
+            Err(error) => panic!("cannot create native filename fixture: {error}"),
+        };
+        if created {
+            assert_eq!(
+                parse([path.as_os_str().to_owned()]).unwrap().request,
+                Some(OpenRequest::Patch(std::path::absolute(&path).unwrap()))
+            );
+        }
         assert_eq!(
             parse(["--patch".into(), path.as_os_str().to_owned()])
                 .unwrap()
                 .request,
             Some(OpenRequest::Patch(path.clone()))
         );
+        let error = parse([
+            "--patch".into(),
+            path.as_os_str().to_owned(),
+            "--json".into(),
+        ])
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "source cannot be represented in JSON; use a UTF-8 path"
+        );
         assert!(parse([path.as_os_str().to_owned(), "--json".into()]).is_err());
-        std::fs::remove_file(&path).unwrap();
+        if created {
+            std::fs::remove_file(&path).unwrap();
+        }
         assert!(parse([path.as_os_str().to_owned()]).is_err());
     }
     #[test]
