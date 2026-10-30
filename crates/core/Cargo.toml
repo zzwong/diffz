@@ -55,7 +55,7 @@ gleam = ["syntax", "dep:tree-sitter-gleam"]
 wasm = ["syntax", "tree-sitter/wasm", "dep:wasmtime"]
 
 [dependencies.wasmtime]
-version = "48"
+version = "48.0.8"
 optional = true
 default-features = false
 features = ["component-model", "cranelift", "runtime", "std"]

@@ -50,7 +50,7 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(set(m.locked_crates(self.lock())), set(m.CRATES))
 
     def test_version_source_and_checksum_changes_fail(self):
-        for key, value in (("version", "0.135.8"), ("source", "git+https://example.invalid"),
+        for key, value in (("version", "0.0.0"), ("source", "git+https://example.invalid"),
                            ("checksum", "bad")):
             with self.subTest(key=key):
                 lock = self.lock()

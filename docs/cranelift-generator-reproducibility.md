@@ -1,8 +1,11 @@
 # Cranelift generator reproducibility
 
 The opt-in Bazel graph carries two narrow patches for the locked Cranelift
-0.135.7 release. Cargo dependencies, features, optimization, debug policy and
-release gates are unchanged. Tracking: [#142](https://github.com/zzwong/diffz/issues/142).
+0.135.8 release. The Wasmtime 48.0.8 security update advances the locked
+Cranelift dependencies; features, optimization, debug policy and release gates
+are unchanged. The upstream assembler and ISLE build scripts retain the exact
+source identities guarded by the verifier. Real generator qualification remains
+an enforced CI gate for the updated archives. Tracking: [#142](https://github.com/zzwong/diffz/issues/142).
 
 `cranelift-assembler-x64` generates `generated-files.rs` for its path-listing
 helper. The original embeds the producer's absolute output directory. The patch
@@ -71,6 +74,6 @@ Do not interpret Bazel's local `DIFFERENT_FILES` counter as remote-cache misses.
 When upgrading Cranelift, recheck the upstream fixes and remove these patches when
 unneeded. Until then, the explicit version and source checks require requalification.
 
-Upstream source: [assembler](https://github.com/bytecodealliance/wasmtime/blob/v48.0.7/cranelift/assembler-x64/build.rs),
-[helper](https://github.com/bytecodealliance/wasmtime/blob/v48.0.7/cranelift/assembler-x64/src/main.rs),
-[ISLE](https://github.com/bytecodealliance/wasmtime/blob/v48.0.7/cranelift/isle/isle/build.rs).
+Upstream source: [assembler](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/assembler-x64/build.rs),
+[helper](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/assembler-x64/src/main.rs),
+[ISLE](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/isle/isle/build.rs).
