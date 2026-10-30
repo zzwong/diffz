@@ -29,6 +29,7 @@ SELF = Path(__file__).resolve()
 OBSERVER = SELF.with_name("observe-x11-handoff.py")
 OBSERVER_SHA = "846eb669480471e4a16bf92278367a9312e295e0fbd0f82cbf3f14825f106ab1"
 WORK_SECONDS, TOTAL_SECONDS, SAMPLE_SECONDS = 230, 240, 0.1
+DISPLAY_START_SECONDS = 30
 RSS_CAP, RESOURCE_FLOOR = 2 * 1024**3, 2_700_000_000
 LOG_CAP, DATA_CAP, EVIDENCE_CAP = 8 * 1024**2, 64 * 1024**2, 12 * 1024**2
 PACKAGES = ("xvfb", "xauth", "libx11-6", "libegl1", "libegl-mesa0", "libglvnd0",
@@ -219,6 +220,56 @@ def server_listeners(pid, start, endpoint):
     return {"tcp": tcp, "unix": unix}
 
 
+def wait_display_number(read_fd, server_handle, work_deadline):
+    """Read one bounded displayfd frame without reaping or signalling Xvfb.
+
+    Startup shares the original work budget; it cannot extend the guardian's
+    deadline. Keep the pipe nonblocking even after readiness, and accumulate
+    fragmented writes rather than treating one read as a complete response.
+    """
+    started = time.monotonic()
+    deadline = min(started + DISPLAY_START_SECONDS, work_deadline)
+    answer = bytearray()
+    reason = "deadline"
+    try:
+        os.set_blocking(read_fd, False)
+        with selectors.DefaultSelector() as selector:
+            selector.register(read_fd, selectors.EVENT_READ, "display")
+            selector.register(server_handle, selectors.EVENT_READ, "exit")
+            while True:
+                remaining = deadline - time.monotonic()
+                need(remaining > 0, "Xvfb displayfd deadline")
+                events = selector.select(remaining)
+                # Never accept a late reply, including a delayed selector return.
+                need(time.monotonic() < deadline, "Xvfb displayfd deadline")
+                if any(key.data == "exit" for key, _ in events):
+                    reason = "server-exit"
+                    raise RuntimeError("Xvfb exited before display readiness")
+                if not events:
+                    continue
+                try:
+                    chunk = os.read(read_fd, 7 - len(answer))
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    reason = "eof"
+                    raise RuntimeError("Xvfb displayfd EOF before readiness")
+                answer.extend(chunk)
+                if len(answer) > 6 or answer == b"\n" or not re.fullmatch(rb"[0-9]{0,5}\n?", answer):
+                    reason = "malformed"
+                    raise RuntimeError("Xvfb displayfd malformed response")
+                if answer.endswith(b"\n"):
+                    need(time.monotonic() < deadline, "Xvfb displayfd deadline")
+                    reason = "ready"
+                    return bytes(answer)
+    finally:
+        # Safe bounded metadata only; the existing worker.log is retained on
+        # failure. Do not expose auth cookies or invent successful readiness.
+        print(json.dumps({"xvfb_startup": reason, "response_bytes": len(answer),
+                          "elapsed_seconds": time.monotonic() - started,
+                          "startup_limit_seconds": DISPLAY_START_SECONDS}), flush=True)
+
+
 def worker(root, parent):
     need(os.getppid() == parent, "worker parent changed")
     preflight = json.loads((root / "preflight.json").read_text())
@@ -257,10 +308,8 @@ def worker(root, parent):
             server_handle = os.pidfd_open(server.pid, 0)
             os.close(write_fd)
             write_fd = None
-            with selectors.DefaultSelector() as selector:
-                selector.register(read_fd, selectors.EVENT_READ)
-                need(selector.select(10), "Xvfb displayfd deadline")
-                answer = os.read(read_fd, 32)
+            answer = wait_display_number(read_fd, server_handle,
+                                         preflight["work_deadline_monotonic"])
         finally:
             os.close(read_fd)
             if write_fd is not None:
