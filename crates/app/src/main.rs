@@ -13,6 +13,7 @@ use diffz_core::{
 #[cfg(any(test, all(unix, feature = "desktop")))]
 use std::path::Path;
 use std::{
+    ffi::OsString,
     io::{ErrorKind, Write},
     path::PathBuf,
     sync::Arc,
@@ -88,7 +89,14 @@ struct Options {
     probe: Option<PathBuf>,
     probe_output: Option<PathBuf>,
 }
-fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
+fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Options> {
+    parse_with_detect(args, detect)
+}
+/// Keep argument parsing independent of positional-source filesystem detection.
+fn parse_with_detect(
+    args: impl IntoIterator<Item = OsString>,
+    detect: impl FnOnce(PathBuf) -> Result<OpenRequest>,
+) -> Result<Options> {
     let mut it = args.into_iter();
     let mut source = None;
     let mut state = None;
@@ -105,18 +113,23 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
     let mut probe = None;
     let mut probe_output = None;
     while let Some(arg) = it.next() {
+        // Only option names are text. Filesystem operands stay in their native encoding.
+        let flag = arg.to_str().unwrap_or("");
         let mut next = || {
             it.next()
-                .with_context(|| format!("missing value after {arg}"))
+                .with_context(|| format!("missing value after {flag}"))
         };
-        match arg.as_str() {
-            "--fixture" => set_source(&mut source, OpenRequest::Fixture(next()?))?,
+        match flag {
+            "--fixture" => set_source(
+                &mut source,
+                OpenRequest::Fixture(text_argument(next()?, flag)?),
+            )?,
             "--patch" => set_source(&mut source, OpenRequest::Patch(PathBuf::from(next()?)))?,
             "--pr" => set_source(
                 &mut source,
                 OpenRequest::Remote {
                     provider: ProviderId::GITHUB,
-                    address: next()?,
+                    address: text_argument(next()?, flag)?,
                 },
             )?,
             "--git" => set_source(
@@ -134,10 +147,13 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
             )?,
             "--resume" => set_source(
                 &mut source,
-                OpenRequest::Resume(diffz_core::domain::SnapshotId(next()?)),
+                OpenRequest::Resume(diffz_core::domain::SnapshotId(text_argument(
+                    next()?,
+                    flag,
+                )?)),
             )?,
-            "--base" => base = next()?,
-            "--head" => head = next()?,
+            "--base" => base = text_argument(next()?, flag)?,
+            "--head" => head = text_argument(next()?, flag)?,
             "--state-dir" => state = Some(PathBuf::from(next()?)),
             "--allow-github-writes" => writes = true,
             "--allow-gitlab-writes" => gitlab_writes = true,
@@ -145,18 +161,21 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
                 &mut source,
                 OpenRequest::Remote {
                     provider: ProviderId::GITLAB,
-                    address: next()?,
+                    address: text_argument(next()?, flag)?,
                 },
             )?,
-            "--compare" => set_source(&mut source, compare_request(next()?)?)?,
+            "--compare" => {
+                set_source(&mut source, compare_request(text_argument(next()?, flag)?)?)?
+            }
             "--inspect" => inspect = true,
             "--foreground" => foreground = true,
             "--json" => json = true,
-            "--font" => font = Some(next()?),
-            "--theme" => theme = Some(next()?),
+            "--font" => font = Some(text_argument(next()?, flag)?),
+            // Theme selection is a textual UI contract, even when it names a path.
+            "--theme" => theme = Some(text_argument(next()?, flag)?),
             "--probe" => probe = Some(PathBuf::from(next()?)),
             "--probe-output" => probe_output = Some(PathBuf::from(next()?)),
-            _ if !arg.starts_with('-') => {
+            _ if !arg.as_encoded_bytes().starts_with(b"-") => {
                 positional = true;
                 set_source(&mut source, OpenRequest::Patch(PathBuf::from(arg)))?
             }
@@ -177,6 +196,10 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
     if probe.is_some() != probe_output.is_some() {
         bail!("pass --probe together with --probe-output")
     }
+    // Fail before launching or handing off a source that the JSON report cannot encode.
+    if json {
+        json_source(request.as_ref())?;
+    }
     Ok(Options {
         request,
         state,
@@ -191,11 +214,23 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options> {
         probe_output,
     })
 }
+/// Textual operands cannot be repaired lossily: that could select a different ref or source.
+fn text_argument(value: OsString, flag: &str) -> Result<String> {
+    value
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("value after {flag} must be valid UTF-8"))
+}
 /// A lone argument is a patch when that path is a file, and otherwise the address of whichever
 /// review provider's parser accepts it, passed on unchanged.
 fn detect(path: PathBuf) -> Result<OpenRequest> {
+    // CLI arguments are already delimited: whitespace belongs to the filename.
+    // Native paths are checked before the Open panel's free-text normalization.
+    if path.is_file() {
+        return Ok(OpenRequest::Patch(std::path::absolute(path)?));
+    }
     if let Some(input) = path.to_str()
         && let Some(detected) = detect_source(input)
+        && matches!(detected.request, OpenRequest::Remote { .. })
     {
         return Ok(detected.request);
     }
@@ -228,7 +263,7 @@ fn set_source(source: &mut Option<OpenRequest>, request: OpenRequest) -> Result<
     *source = Some(request);
     Ok(())
 }
-fn early_exit(args: &[String]) -> Option<String> {
+fn early_exit(args: &[OsString]) -> Option<String> {
     if args.iter().any(|s| s == "--help" || s == "-h") {
         Some(HELP.to_string())
     } else if args.iter().any(|s| s == "--version" || s == "-V") {
@@ -246,6 +281,12 @@ fn print_to(out: &mut impl Write, text: &str) -> std::io::Result<()> {
 }
 fn print(text: &str) -> Result<()> {
     print_to(&mut std::io::stdout().lock(), text).context("failed writing to stdout")
+}
+fn error_line(error: &anyhow::Error) -> serde_json::Value {
+    serde_json::json!({ "status": "error", "message": format!("{error:#}") })
+}
+fn json_source(request: Option<&OpenRequest>) -> Result<serde_json::Value> {
+    serde_json::to_value(request).context("source cannot be represented in JSON; use a UTF-8 path")
 }
 #[cfg(feature = "desktop")]
 fn desktop_font(requested: Option<String>) -> Result<Option<String>> {
@@ -407,7 +448,20 @@ fn writes(options: &Options) -> diffz_adapters::handoff::Writes {
 #[cfg(all(unix, feature = "desktop"))]
 fn hand_off(options: &Options, state: &Path, activation_token: Option<String>) -> Result<()> {
     use diffz_adapters::handoff::{Delivery, deliver};
-    let request = handed_request(options)?;
+    let request = handed_request(options).and_then(|request| {
+        // A Unicode relative path can become non-UTF-8 in a native working directory.
+        if options.json {
+            json_source(request.as_ref())?;
+        }
+        Ok(request)
+    });
+    let request = match request {
+        Ok(request) => request,
+        Err(error) if options.json => {
+            return report(&mut std::io::stdout().lock(), Err(error), None);
+        }
+        Err(error) => return Err(error),
+    };
     let result = deliver(
         state,
         request.as_ref(),
@@ -437,13 +491,15 @@ fn hand_off(options: &Options, state: &Path, activation_token: Option<String>) -
 fn handed_request(options: &Options) -> Result<Option<OpenRequest>> {
     options.request.clone().map(absolute).transpose()
 }
-/// Prints the outcome of a handoff as one JSON line. The outcome alone sets the exit status: a
-/// request the window took stays taken when stdout is gone.
+/// Prints the outcome of a handoff as one JSON line. Sources are checked before dispatch;
+/// output I/O never changes the outcome, so a taken request stays taken when stdout is gone.
 #[cfg(any(test, all(unix, feature = "desktop")))]
 fn report(out: &mut impl Write, result: Result<&str>, request: Option<&OpenRequest>) -> Result<()> {
+    // Keep this fallible even when called without the parser's preflight.
+    let result = result.and_then(|status| json_source(request).map(|source| (status, source)));
     let line = match &result {
-        Ok(status) => serde_json::json!({ "status": status, "source": request }),
-        Err(e) => serde_json::json!({ "status": "error", "message": format!("{e:#}") }),
+        Ok((status, source)) => serde_json::json!({ "status": status, "source": source }),
+        Err(e) => error_line(e),
     };
     if let Err(e) = print_to(out, &line.to_string()) {
         eprintln!("diffz: could not write the status line: {e}");
@@ -551,7 +607,7 @@ fn run(activation_token: Option<String>) -> Result<()> {
     let mut activation_token = activation_token;
     #[cfg(not(feature = "desktop"))]
     let _ = activation_token;
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     if let Some(text) = early_exit(&args) {
         return print(&text);
     }
@@ -602,8 +658,7 @@ fn run(activation_token: Option<String>) -> Result<()> {
     let mut options = parse(args).inspect_err(|e| {
         // An agent reading --json output gets unusable input reported the same way.
         if json {
-            let line = serde_json::json!({ "status": "error", "message": format!("{e:#}") });
-            let _ = print(&line.to_string());
+            let _ = print(&error_line(e).to_string());
         }
     })?;
     #[cfg(not(feature = "desktop"))]
@@ -718,6 +773,251 @@ fn run(activation_token: Option<String>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// New argument-boundary fixtures never inspect paths or open sources.
+    fn parse_pure(args: impl IntoIterator<Item = OsString>) -> Result<Options> {
+        parse_with_detect(args, |_| panic!("unexpected positional detection"))
+    }
+    #[cfg(unix)]
+    fn non_unicode_argument() -> OsString {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(b"native-\xff-name".to_vec())
+    }
+    #[cfg(windows)]
+    fn non_unicode_argument() -> OsString {
+        use std::os::windows::ffi::OsStringExt;
+        OsString::from_wide(&[b'n' as u16, 0xd800, b'e' as u16])
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn native_source_path_operands_are_lossless() {
+        let path = non_unicode_argument();
+        for flag in ["--patch", "--git", "--staged", "--worktree"] {
+            let options = parse_pure([flag.into(), path.clone()]).unwrap();
+            let expected = match flag {
+                "--patch" => OpenRequest::Patch(PathBuf::from(&path)),
+                "--git" => OpenRequest::LocalGit {
+                    root: PathBuf::from(&path),
+                    base: "main".into(),
+                    head: "HEAD".into(),
+                },
+                "--staged" => OpenRequest::LocalIndex(PathBuf::from(&path)),
+                "--worktree" => OpenRequest::LocalWorktree(PathBuf::from(&path)),
+                _ => unreachable!(),
+            };
+            assert_eq!(options.request, Some(expected), "{flag}");
+        }
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn native_state_and_probe_paths_are_lossless() {
+        let mut state = non_unicode_argument();
+        state.push("-state");
+        let mut source = non_unicode_argument();
+        source.push("-source");
+        let mut output = non_unicode_argument();
+        output.push("-output");
+        let options = parse_pure([
+            "--state-dir".into(),
+            state.clone(),
+            "--probe".into(),
+            source.clone(),
+            "--probe-output".into(),
+            output.clone(),
+            "--json".into(),
+        ])
+        .unwrap();
+        assert_eq!(options.state, Some(PathBuf::from(state)));
+        assert_eq!(options.probe, Some(PathBuf::from(source)));
+        assert_eq!(options.probe_output, Some(PathBuf::from(output)));
+        assert!(options.json);
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn native_positional_path_reaches_detection_losslessly() {
+        let path = non_unicode_argument();
+        let options = parse_with_detect([path.clone(), "--inspect".into()], |received| {
+            assert_eq!(received.as_os_str(), path.as_os_str());
+            Ok(OpenRequest::Patch(received))
+        })
+        .unwrap();
+        assert_eq!(options.request, Some(OpenRequest::Patch(path.into())));
+        assert!(options.inspect);
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn json_rejects_unrepresentable_source_paths_before_dispatch() {
+        for flag in ["--patch", "--git", "--staged", "--worktree"] {
+            let error =
+                parse_pure([flag.into(), non_unicode_argument(), "--json".into()]).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "source cannot be represented in JSON; use a UTF-8 path"
+            );
+        }
+        let error = parse_with_detect([non_unicode_argument(), "--json".into()], |path| {
+            Ok(OpenRequest::Patch(path))
+        })
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "source cannot be represented in JSON; use a UTF-8 path"
+        );
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn json_report_serialization_failure_is_a_structured_error() {
+        let request = OpenRequest::Patch(non_unicode_argument().into());
+        let mut out = Vec::new();
+        let error = report(&mut out, Ok("launched"), Some(&request)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "source cannot be represented in JSON; use a UTF-8 path"
+        );
+        let line: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(line["status"], "error");
+        assert!(
+            line["message"]
+                .as_str()
+                .unwrap()
+                .contains(&error.to_string())
+        );
+        assert!(line.get("source").is_none());
+        assert_eq!(out.iter().filter(|&&byte| byte == b'\n').count(), 1);
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn non_unicode_text_values_are_rejected_with_the_flag() {
+        for flag in [
+            "--fixture",
+            "--pr",
+            "--mr",
+            "--compare",
+            "--resume",
+            "--base",
+            "--head",
+            "--font",
+            "--theme",
+        ] {
+            let error = parse_pure([flag.into(), non_unicode_argument()]).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                format!("value after {flag} must be valid UTF-8")
+            );
+        }
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn non_unicode_option_names_are_not_positional_paths() {
+        let mut flag = OsString::from("--");
+        flag.push(non_unicode_argument());
+        let error = parse_pure([flag.clone()]).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("unknown argument {flag:?}; use --help")
+        );
+    }
+    #[test]
+    fn unicode_paths_and_text_remain_unchanged() {
+        let path = "répertoire/変更";
+        let options = parse_pure(
+            [
+                "--git",
+                path,
+                "--base",
+                "版本一",
+                "--head",
+                "révision",
+                "--font",
+                "字体",
+                "--theme",
+                "thèmes/夜/colors.toml",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        assert_eq!(
+            options.request,
+            Some(OpenRequest::LocalGit {
+                root: path.into(),
+                base: "版本一".into(),
+                head: "révision".into(),
+            })
+        );
+        assert_eq!(options.font.as_deref(), Some("字体"));
+        assert_eq!(options.theme.as_deref(), Some("thèmes/夜/colors.toml"));
+    }
+    #[test]
+    fn unknown_unicode_flags_keep_the_existing_diagnostic() {
+        let error = parse_pure(["--未知".into()]).unwrap_err();
+        assert_eq!(error.to_string(), "unknown argument \"--未知\"; use --help");
+    }
+    #[test]
+    fn all_value_flags_keep_the_missing_value_diagnostic() {
+        for flag in [
+            "--fixture",
+            "--patch",
+            "--pr",
+            "--git",
+            "--staged",
+            "--worktree",
+            "--resume",
+            "--base",
+            "--head",
+            "--state-dir",
+            "--mr",
+            "--compare",
+            "--font",
+            "--theme",
+            "--probe",
+            "--probe-output",
+        ] {
+            let error = parse_pure([flag.into()]).unwrap_err();
+            assert_eq!(error.to_string(), format!("missing value after {flag}"));
+        }
+    }
+    #[test]
+    fn flag_shaped_path_operands_are_still_values() {
+        let options = parse_pure(["--patch", "--json"].map(OsString::from)).unwrap();
+        assert_eq!(options.request, Some(OpenRequest::Patch("--json".into())));
+        assert!(!options.json);
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn early_exits_do_not_decode_other_os_arguments() {
+        for flag in ["--help", "-h"] {
+            assert_eq!(
+                early_exit(&[non_unicode_argument(), flag.into()]).as_deref(),
+                Some(HELP)
+            );
+        }
+        let version = format!("diffz {}", env!("CARGO_PKG_VERSION"));
+        for flag in ["--version", "-V"] {
+            assert_eq!(
+                early_exit(&[non_unicode_argument(), flag.into()]).as_deref(),
+                Some(version.as_str())
+            );
+        }
+    }
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn non_unicode_text_errors_have_structured_json_diagnostics() {
+        let mut bad_flag = OsString::from("--");
+        bad_flag.push(non_unicode_argument());
+        for args in [
+            vec!["--font".into(), non_unicode_argument(), "--json".into()],
+            vec![bad_flag, "--json".into()],
+        ] {
+            let error = parse_pure(args).unwrap_err();
+            let expected = error.to_string();
+            let mut out = Vec::new();
+            let returned = report(&mut out, Err(error), None).unwrap_err();
+            assert_eq!(returned.to_string(), expected);
+            let line: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert_eq!(line["status"], "error");
+            assert_eq!(line["message"], expected);
+            assert_eq!(out.iter().filter(|&&byte| byte == b'\n').count(), 1);
+        }
+    }
     #[cfg(target_os = "linux")]
     #[test]
     fn startup_capture_admission_preserves_only_bounded_utf8() {
@@ -823,12 +1123,12 @@ mod tests {
     }
     #[test]
     fn no_arguments_name_no_source() {
-        assert!(parse(Vec::<String>::new()).unwrap().request.is_none());
+        assert!(parse(Vec::<OsString>::new()).unwrap().request.is_none());
     }
     #[test]
     fn a_fixture_is_only_opened_when_named() {
         assert_eq!(
-            parse(["--fixture", "F01"].map(str::to_string))
+            parse(["--fixture", "F01"].map(OsString::from))
                 .unwrap()
                 .request,
             Some(OpenRequest::Fixture("F01".into()))
@@ -847,9 +1147,103 @@ mod tests {
     fn positional_patch_preserves_the_file_path() {
         let (_dir, path) = patch_file();
         assert!(matches!(
-            parse([path.clone(), "--inspect".into()]).unwrap().request,
+            parse([OsString::from(&path), "--inspect".into()]).unwrap().request,
             Some(OpenRequest::Patch(p)) if p == std::path::Path::new(&path)
         ));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn positional_patch_keeps_trailing_whitespace_and_unicode() {
+        let dir = tempfile::tempdir().unwrap();
+        let trimmed = dir.path().join("review 雪.patch");
+        let exact = dir.path().join("review 雪.patch ");
+        std::fs::write(&trimmed, "").unwrap();
+        std::fs::write(&exact, "").unwrap();
+        for args in [
+            vec![exact.as_os_str().to_owned()],
+            vec!["--patch".into(), exact.as_os_str().to_owned()],
+        ] {
+            assert_eq!(
+                parse(args).unwrap().request,
+                Some(OpenRequest::Patch(exact.clone()))
+            );
+        }
+        std::fs::remove_file(&trimmed).unwrap();
+        assert_eq!(
+            parse([exact.as_os_str().to_owned()]).unwrap().request,
+            Some(OpenRequest::Patch(exact))
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn missing_literal_patch_does_not_open_trimmed_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let trimmed = dir.path().join("review.patch");
+        std::fs::write(&trimmed, "").unwrap();
+        let missing = dir.path().join("review.patch ");
+        assert!(parse([missing.as_os_str().to_owned()]).is_err());
+        assert_eq!(
+            parse(["--patch".into(), missing.as_os_str().to_owned()])
+                .unwrap()
+                .request,
+            Some(OpenRequest::Patch(missing))
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn positional_patch_keeps_leading_relative_whitespace() {
+        // Own a unique cwd-relative fixture without changing the process-wide cwd.
+        let dir = tempfile::Builder::new()
+            .prefix(" diffz-literal-")
+            .tempdir_in(".")
+            .unwrap();
+        let relative = PathBuf::from(dir.path().file_name().unwrap()).join("review.patch");
+        std::fs::write(&relative, "").unwrap();
+        let input = relative.to_str().unwrap().to_string();
+        assert!(input.starts_with(' '));
+        assert_eq!(
+            parse([OsString::from(input)]).unwrap().request,
+            Some(OpenRequest::Patch(std::path::absolute(relative).unwrap()))
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn existing_review_address_shaped_file_takes_precedence() {
+        let dir = tempfile::Builder::new()
+            .prefix("diffz-literal-")
+            .tempdir_in(".")
+            .unwrap();
+        let relative = PathBuf::from(dir.path().file_name().unwrap()).join("repo#123");
+        let input = relative.to_str().unwrap().to_string();
+        assert!(matches!(
+            GithubTarget::parse(&input),
+            Ok(GithubTarget::Pr(_))
+        ));
+        std::fs::write(&relative, "").unwrap();
+        assert_eq!(
+            parse([OsString::from(input)]).unwrap().request,
+            Some(OpenRequest::Patch(std::path::absolute(relative).unwrap()))
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn native_literal_patch_uses_real_detector() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(non_unicode_argument());
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(
+            parse([path.as_os_str().to_owned()]).unwrap().request,
+            Some(OpenRequest::Patch(std::path::absolute(&path).unwrap()))
+        );
+        assert_eq!(
+            parse(["--patch".into(), path.as_os_str().to_owned()])
+                .unwrap()
+                .request,
+            Some(OpenRequest::Patch(path.clone()))
+        );
+        assert!(parse([path.as_os_str().to_owned(), "--json".into()]).is_err());
+        std::fs::remove_file(&path).unwrap();
+        assert!(parse([path.as_os_str().to_owned()]).is_err());
     }
     #[test]
     fn positional_review_addresses_pass_through_unchanged() {
@@ -870,7 +1264,7 @@ mod tests {
                 ProviderId::GITLAB,
             ),
         ] {
-            let options = parse([address.to_string()]).unwrap();
+            let options = parse([OsString::from(address)]).unwrap();
             assert_eq!(
                 options.request,
                 Some(OpenRequest::Remote {
@@ -882,7 +1276,7 @@ mod tests {
     }
     #[test]
     fn unrecognized_positional_lists_what_is_accepted() {
-        let error = parse(["no/such/change.patch".to_string()])
+        let error = parse(["no/such/change.patch".into()])
             .unwrap_err()
             .to_string();
         assert!(
@@ -897,21 +1291,21 @@ mod tests {
             vec!["owner/repo#1", "--fixture", "F01"],
             vec!["--mr", "group/project!1", "owner/repo#1"],
         ] {
-            let error = parse(args.into_iter().map(str::to_string)).unwrap_err();
+            let error = parse(args.into_iter().map(OsString::from)).unwrap_err();
             assert_eq!(error.to_string(), "pass a single source per launch");
         }
     }
     #[test]
     fn launch_flags_are_parsed() {
-        let options = parse(["--foreground", "--json"].map(str::to_string)).unwrap();
+        let options = parse(["--foreground", "--json"].map(OsString::from)).unwrap();
         assert!(options.foreground && options.json && options.request.is_none());
-        let options = parse(Vec::<String>::new()).unwrap();
+        let options = parse(Vec::<OsString>::new()).unwrap();
         assert!(!options.foreground && !options.json);
     }
     #[test]
     fn launched_windows_get_absolute_paths_and_run_in_the_foreground() {
         let options =
-            parse(["--git", "repo", "--base", "v1", "--allow-gitlab-writes"].map(str::to_string))
+            parse(["--git", "repo", "--base", "v1", "--allow-gitlab-writes"].map(OsString::from))
                 .unwrap();
         let request = absolute(options.request.clone().unwrap()).unwrap();
         let args = launch_args(&options, Path::new("state"), Some(&request)).unwrap();
@@ -929,14 +1323,14 @@ mod tests {
             "--allow-gitlab-writes".into(),
         ];
         assert_eq!(args, expected);
-        let options = parse(["group/project!4".to_string()]).unwrap();
+        let options = parse(["group/project!4".into()]).unwrap();
         let args = launch_args(&options, Path::new("/state"), options.request.as_ref()).unwrap();
         assert_eq!(
             args[3..],
             ["--mr", "group/project!4"].map(std::ffi::OsString::from)
         );
         let compare = "https://gitlab.com/g/p/-/compare/v1...v2";
-        let options = parse([compare.to_string()]).unwrap();
+        let options = parse([compare.into()]).unwrap();
         let args = launch_args(&options, Path::new("/state"), options.request.as_ref()).unwrap();
         assert_eq!(
             args[3..],
@@ -962,7 +1356,7 @@ mod tests {
             vec!["one.patch", "--fixture", "F01"],
             vec!["--fixture", "F01", "one.patch"],
         ] {
-            let error = parse(args.into_iter().map(str::to_string)).unwrap_err();
+            let error = parse(args.into_iter().map(OsString::from)).unwrap_err();
             assert_eq!(error.to_string(), "pass a single source per launch");
         }
     }
@@ -979,9 +1373,9 @@ mod tests {
         for file in [None, Some(path.as_str())] {
             let args = exec.split_whitespace().skip(1).filter_map(|arg| {
                 if arg == "%f" {
-                    file.map(str::to_string)
+                    file.map(OsString::from)
                 } else {
-                    Some(arg.to_string())
+                    Some(OsString::from(arg))
                 }
             });
             let request = parse(args).unwrap().request;
@@ -1005,7 +1399,7 @@ mod tests {
     }
     #[test]
     fn conflicting_sources_are_rejected() {
-        assert!(parse(["--pr", "o/r#1", "--fixture", "F01"].map(str::to_string)).is_err());
+        assert!(parse(["--pr", "o/r#1", "--fixture", "F01"].map(OsString::from)).is_err());
     }
     #[test]
     fn compare_url_picks_its_provider() {
@@ -1020,7 +1414,7 @@ mod tests {
                 ProviderId::GITLAB,
             ),
         ] {
-            let request = parse(["--compare", url].map(str::to_string))
+            let request = parse(["--compare", url].map(OsString::from))
                 .unwrap()
                 .request;
             assert_eq!(
@@ -1041,11 +1435,11 @@ mod tests {
             "https://example.com/",
         ] {
             assert!(
-                parse(["--compare", url].map(str::to_string)).is_err(),
+                parse(["--compare", url].map(OsString::from)).is_err(),
                 "{url}"
             );
         }
-        assert!(parse(["--compare".to_string()]).is_err());
+        assert!(parse(["--compare".into()]).is_err());
     }
     #[test]
     fn unknown_flags_are_rejected() {
@@ -1070,8 +1464,10 @@ mod tests {
         let request = OpenRequest::Fixture("F01".into());
         report(&mut out, Ok("handed_off"), Some(&request)).unwrap();
         let line: serde_json::Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(line["status"], "handed_off");
-        assert!(line["source"].is_object());
+        assert_eq!(
+            line,
+            serde_json::json!({ "status": "handed_off", "source": { "Fixture": "F01" } })
+        );
     }
     #[test]
     fn closed_stdout_ends_output_cleanly() {
@@ -1092,11 +1488,11 @@ mod tests {
     fn version_is_handled_before_parse() {
         let expected = format!("diffz {}", env!("CARGO_PKG_VERSION"));
         assert_eq!(
-            early_exit(&["--version".to_string()]).as_deref(),
+            early_exit(&["--version".into()]).as_deref(),
             Some(expected.as_str())
         );
         assert_eq!(
-            early_exit(&["-V".to_string()]).as_deref(),
+            early_exit(&["-V".into()]).as_deref(),
             Some(expected.as_str())
         );
         assert!(early_exit(&[]).is_none());
