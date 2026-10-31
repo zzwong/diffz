@@ -22,7 +22,7 @@ import tempfile
 import time
 import tomllib
 
-VERSION = "0.135.7"
+VERSION = "0.135.8"
 CRATES = ("cranelift-srcgen", "cranelift-assembler-x64-meta",
           "cranelift-assembler-x64", "cranelift-isle")
 SOURCE_BLOBS = {

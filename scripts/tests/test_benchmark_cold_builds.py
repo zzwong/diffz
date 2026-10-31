@@ -87,6 +87,19 @@ elif operation == "build":
             core.write_text("concurrent human edit\n")
         if os.environ.get("FIXTURE_FAIL_EDIT"):
             sys.exit(23)
+    error_marker = "diffz-benchmark-deliberate-compile-error"
+    broken = error_marker in sources["crates/app/src/main.rs"]
+    if broken:
+        behavior = os.environ.get("FIXTURE_ERROR_BEHAVIOR", "expected")
+        if behavior == "concurrent":
+            (cwd / "crates/app/src/main.rs").write_text("concurrent human edit\n")
+        if behavior != "success":
+            if behavior != "unrelated":
+                print(("\x1b[31merror\x1b[0m: " if behavior == "color" else "error: ") + error_marker)
+            (target / "fixture-error-seen").write_text("failed")
+            sys.exit(127 if behavior == "missing" else 101)
+    elif (target / "fixture-error-seen").exists() and os.environ.get("FIXTURE_FAIL_REPAIR"):
+        sys.exit(23)
     timing = target / "cargo-timings/cargo-timing.html"
     timing.parent.mkdir(parents=True, exist_ok=True)
     timing.write_text("<title>Compiler fixture; not a performance sample</title>")
@@ -177,6 +190,122 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), expected)
         self.assertEqual((self.root / "target/ordinary/keep").read_text(), "ordinary target must survive")
         self.assertEqual((self.root / "target/ordinary-build/keep").read_text(), "ordinary build dir must survive")
+
+    def test_error_repair_preserves_failure_receipt_and_restores_source(self):
+        self.invoke("--cargo-workload", "desktop", "--cargo-scenario", "error-repair")
+        rows = self.read_rows()
+        builds = [row for row in rows if row["phase"] == "build"]
+        self.assertEqual([(row["scenario"], row["exit_code"]) for row in builds],
+                         [("cold", 0), ("compile-error", 101), ("error-repair", 0)])
+        calls = [call for call in self.compiler_calls() if call["operation"] == "build"]
+        self.assertEqual(calls[0]["sources"], calls[2]["sources"])
+        self.assertIn(BENCH.ERROR_MARKER, calls[1]["sources"][BENCH.ERROR_SOURCE])
+        self.assertEqual(calls[1]["args"], calls[2]["args"])
+        self.assertEqual(calls[1]["target"], calls[2]["target"])
+        self.assertNotEqual(calls[1]["cwd"], str(self.root))
+        self.assertFalse((self.evidence / "cargo-error-1-timing.html").exists())
+        self.assertTrue((self.evidence / "cargo-repair-1-timing.html").exists())
+        validation = next(row for row in rows if row["name"] == "cargo-error-1-validation")
+        self.assertEqual(validation["build_exit_code"], 101)
+        self.assertEqual(validation["expected_exit_code"], 101)
+        self.assertTrue(validation["diagnostic_matched"])
+        self.assertEqual(validation["exit_code"], 0)
+        receipt = json.loads((self.evidence / "cargo-error-1-source.json").read_text())
+        self.assertEqual(receipt["path"], BENCH.ERROR_SOURCE)
+        self.assertNotEqual(receipt["original_sha256"], receipt["changed_sha256"])
+        self.assertTrue(json.loads((self.evidence / "completion.json").read_text())["completed"])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def check_rejected_compile_error(self, behavior, code):
+        with mock.patch.dict(os.environ, {"FIXTURE_ERROR_BEHAVIOR": behavior}):
+            with self.assertRaisesRegex(RuntimeError, "did not produce the expected compile error"):
+                self.invoke("--cargo-scenario", "error-repair")
+        rows = self.read_rows()
+        self.assertEqual(next(row for row in rows if row["name"] == "cargo-error-1")["exit_code"], code)
+        self.assertFalse(any(row["scenario"] == "error-repair" for row in rows))
+        self.assertFalse(json.loads((self.evidence / "completion.json").read_text())["completed"])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def test_error_repair_rejects_unexpected_success(self):
+        self.check_rejected_compile_error("success", 0)
+
+    def test_error_repair_rejects_unrelated_compile_failure(self):
+        self.check_rejected_compile_error("unrelated", 101)
+
+    def test_error_repair_rejects_command_failure(self):
+        self.check_rejected_compile_error("missing", 127)
+
+    def test_error_repair_failed_recovery_is_not_completed(self):
+        with mock.patch.dict(os.environ, {"FIXTURE_FAIL_REPAIR": "1"}):
+            with self.assertRaisesRegex(RuntimeError, "cargo-repair-1 failed"):
+                self.invoke("--cargo-scenario", "error-repair")
+        rows = self.read_rows()
+        self.assertEqual(next(row for row in rows if row["name"] == "cargo-error-1")["exit_code"], 101)
+        self.assertEqual(next(row for row in rows if row["name"] == "cargo-repair-1")["exit_code"], 23)
+        self.assertFalse(json.loads((self.evidence / "completion.json").read_text())["completed"])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def test_error_repair_concurrent_edit_is_retained(self):
+        with mock.patch.dict(os.environ, {"FIXTURE_ERROR_BEHAVIOR": "concurrent"}):
+            with self.assertRaisesRegex(RuntimeError, "Source changed concurrently"):
+                self.invoke("--cargo-scenario", "error-repair")
+        completion = json.loads((self.evidence / "completion.json").read_text())
+        self.assertFalse(completion["completed"])
+        self.assertEqual(len(completion["retained_worktrees"]), 1)
+        retained = Path(completion["retained_worktrees"][0])
+        self.assertEqual((retained / BENCH.ERROR_SOURCE).read_text(), "concurrent human edit\n")
+        self.assert_original_checkout()
+
+    def test_error_repair_preflight_does_not_build(self):
+        self.invoke("--preflight", "--cargo-scenario", "error-repair")
+        self.assertEqual(self.compiler_calls(), [])
+        self.assertFalse(self.evidence.exists())
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def test_error_repair_accepts_colored_diagnostic(self):
+        with mock.patch.dict(os.environ, {"FIXTURE_ERROR_BEHAVIOR": "color"}):
+            self.invoke("--cargo-scenario", "error-repair")
+        self.assertTrue(json.loads((self.evidence / "completion.json").read_text())["completed"])
+        self.assert_original_checkout()
+
+    def test_error_repair_fingerprint_pairs_and_unrelated_worktree(self):
+        other = self.base / "unrelated-worktree"
+        self.git("worktree", "add", "--detach", str(other), "HEAD")
+        sentinel = other / "keep.txt"
+        sentinel.write_text("unrelated worktree change")
+        self.invoke("--cargo-scenario", "error-repair", "--cargo-toolchain", "nightly-2026-10-19",
+                    "--cargo-fingerprint", "both", "--iterations", "2")
+        rows = self.read_rows()
+        errors = [row for row in rows if row["scenario"] == "compile-error" and row["phase"] == "build"]
+        repairs = [row for row in rows if row["scenario"] == "error-repair"]
+        self.assertEqual([row["fingerprint"] for row in errors], ["mtime", "content", "content", "mtime"])
+        for error, repair in zip(errors, repairs):
+            self.assertEqual(error["command"], repair["command"])
+            self.assertEqual(error["target_dir"], repair["target_dir"])
+            self.assertEqual(error["exit_code"], 101)
+            self.assertEqual(repair["exit_code"], 0)
+        self.assertEqual(len({row["target_dir"] for row in errors}), 2)
+        self.assertEqual(sentinel.read_text(), "unrelated worktree change")
+        self.assertIn(str(other), self.git("worktree", "list", "--porcelain"))
+        self.assert_original_checkout()
+
+    def test_error_repair_profile_pairs_keep_isolated_targets(self):
+        self.invoke("--cargo-scenario", "error-repair", "--cargo-compare-profile", "fast-dev",
+                    "--iterations", "2")
+        builds = [row for row in self.read_rows() if row["phase"] == "build"]
+        errors = [row for row in builds if row["scenario"] == "compile-error"]
+        repairs = [row for row in builds if row["scenario"] == "error-repair"]
+        self.assertEqual([row["cargo_profile"] for row in errors], ["dev", "fast-dev", "fast-dev", "dev"])
+        self.assertTrue(all(row["exit_code"] == 101 for row in errors))
+        for error, repair in zip(errors, repairs):
+            self.assertEqual(error["command"], repair["command"])
+            self.assertEqual(error["target_dir"], repair["target_dir"])
+        self.assertEqual(len({row["target_dir"] for row in errors}), 2)
+        self.assert_original_checkout()
 
     def test_legacy_cold_workload_and_tool_order_are_preserved(self):
         self.invoke("--tool", "both", "--iterations", "2")
