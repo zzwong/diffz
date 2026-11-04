@@ -50,7 +50,7 @@ jobs:
       # The setup exports a stable job-owned RUSTUP_HOME. rust-cache hashes every
       # installed compiler, so unrelated runner-image toolchains must stay outside it.
       - name: Cache Cargo registry and dependency artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Run core checks
         run: bash scripts/check.sh core
       - name: Check real Cranelift generator reproducibility
@@ -105,7 +105,7 @@ jobs:
       # Include native identity in both exact and fallback keys. Keep the
       # action's existing Rust/compiler/config hashing and branch trust scopes.
       - name: Cache Cargo registry and dependency artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: hosted-native-v1-${{ steps.native-environment.outputs.sha256 }}
       - name: Test every crate with all features
@@ -192,7 +192,7 @@ jobs:
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       - name: Cache Cargo registry and dependency artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Check every macOS target with all features
         run: cargo check --locked --workspace --all-features --all-targets
       # Same check suite as make check-native, without the optional Kache wrapper.
