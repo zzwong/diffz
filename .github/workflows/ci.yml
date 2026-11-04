@@ -50,7 +50,7 @@ jobs:
       # The setup exports a stable job-owned RUSTUP_HOME. rust-cache hashes every
       # installed compiler, so unrelated runner-image toolchains must stay outside it.
       - name: Cache Cargo registry and dependency artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Run core checks
         run: bash scripts/check.sh core
       - name: Check real Cranelift generator reproducibility
@@ -105,7 +105,7 @@ jobs:
       # Include native identity in both exact and fallback keys. Keep the
       # action's existing Rust/compiler/config hashing and branch trust scopes.
       - name: Cache Cargo registry and dependency artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: hosted-native-v1-${{ steps.native-environment.outputs.sha256 }}
       - name: Test every crate with all features
@@ -162,7 +162,7 @@ jobs:
       # Only the wrapper's bounded allowlist, never its private working directory.
       - name: Retain X11 smoke evidence for three days
         if: ${{ always() && steps.x11-smoke.outcome != 'skipped' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: diffz-x11-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/diffz-x11-evidence/
@@ -192,7 +192,7 @@ jobs:
       - name: Install pinned Rust toolchain
         run: python3 scripts/prepare-ci-rust.py
       - name: Cache Cargo registry and dependency artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Check every macOS target with all features
         run: cargo check --locked --workspace --all-features --all-targets
       # Same check suite as make check-native, without the optional Kache wrapper.
