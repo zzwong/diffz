@@ -37,7 +37,7 @@ tempfile = "3"
 gpui-kit = "=0.7.3"
 
 smol = "2"
-toml = { version = "1.1", default-features = false, features = ["parse"] }
+toml = { version = "1.1", default-features = false, features = ["parse", "serde"] }
 unicode-linebreak = "0.1.5"
 
 # Temporary: carries the Vulkan-first GPU init and on-demand path textures that are
