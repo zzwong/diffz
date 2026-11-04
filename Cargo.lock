@@ -1471,7 +1471,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "thiserror 2.0.21",
- "toml 0.8.23",
+ "toml 1.1.5+spec-1.1.0",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-c",
