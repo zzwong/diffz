@@ -64,6 +64,30 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(m.VerificationError):
             m.locked_crates(lock)
 
+    def test_other_versions_do_not_replace_patched_packages(self):
+        lock = self.lock()
+        expected = m.locked_crates(lock)
+        other = [dict(p, version="0.137.1", checksum="2" * 64)
+                 for p in lock["package"]]
+        for packages in (other + lock["package"], lock["package"] + other):
+            with self.subTest(other_first=packages[0]["version"] != m.VERSION):
+                self.assertEqual(m.locked_crates({"package": packages}), expected)
+
+    def test_missing_patched_package_fails_with_other_version_present(self):
+        lock = self.lock()
+        lock["package"][0]["version"] = "0.137.1"
+        with self.assertRaises(m.VerificationError):
+            m.locked_crates(lock)
+
+    def test_other_version_cannot_hide_invalid_patched_source_or_checksum(self):
+        for key, value in (("source", "git+https://example.invalid"), ("checksum", "bad")):
+            with self.subTest(key=key):
+                lock = self.lock()
+                lock["package"].append(dict(lock["package"][0], version="0.137.1"))
+                lock["package"][0][key] = value
+                with self.assertRaises(m.VerificationError):
+                    m.locked_crates(lock)
+
     def test_unpack_verified_regular_source(self):
         path = self.archive([(f"{self.prefix}/src/lib.rs", "file")])
         root = self.unpack(path)

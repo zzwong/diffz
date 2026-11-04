@@ -56,8 +56,11 @@ def git_blob(data: bytes) -> str:
 def locked_crates(lock: dict) -> dict[str, dict]:
     result = {}
     for name in CRATES:
-        matches = [p for p in lock["package"] if p["name"] == name]
-        require(len(matches) == 1, f"expected one locked package: {name}")
+        # Bazel applies these patches only to VERSION. Other dependency trees
+        # may legitimately retain a different, unpatched Cranelift release.
+        matches = [p for p in lock["package"]
+                   if p["name"] == name and p["version"] == VERSION]
+        require(len(matches) == 1, f"expected one locked package: {name} {VERSION}")
         p = matches[0]
         require(p["version"] == VERSION, f"requalify {name} patches for {p['version']}")
         require(p.get("source") == "registry+https://github.com/rust-lang/crates.io-index",
