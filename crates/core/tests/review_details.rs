@@ -16,6 +16,109 @@ fn removes_hidden_metadata_and_keeps_code_examples() {
     assert!(!visible_markdown("![pixel](https://example.com/x)").contains("!["));
 }
 #[test]
+fn provider_markdown_keeps_inline_code_and_following_paragraphs() {
+    for body in [
+        "Use `<!--` to begin an HTML comment.\n\nDo not remove this paragraph.",
+        "Keep `<!-- example -->` literal.",
+        "The `<img src=\"sample.png\">` tag is an example.",
+        "Use `![alt](sample.png)` for an image.",
+        "Use `` `<!--` ![alt](sample.png) `` with a longer delimiter.",
+        "Use `<!--\nexample -->` across lines.",
+        "Пример `<!--` и `![画面](sample.png)` stays literal. 🦀",
+    ] {
+        assert_eq!(visible_markdown(body), body, "{body}");
+    }
+}
+#[test]
+fn provider_markdown_keeps_fence_lengths_and_literal_contents() {
+    for body in [
+        "```markdown\n![alt](sample.png)\n```",
+        "````html\n```\n<!-- example -->\n````",
+        "~~~~html\n~~~\n<!-- example -->\n~~~~",
+        "```html\n```not-a-closing-fence\n<!-- example -->\n```",
+        "```html\n<!-- example -->\n![alt](sample.png)\n",
+        "```html\r\n<!-- example -->\r\n```\r\n",
+    ] {
+        assert_eq!(visible_markdown(body), body, "{body}");
+    }
+}
+#[test]
+fn provider_markdown_keeps_indented_and_nested_code() {
+    for body in [
+        "    <!-- example -->\n    ![alt](sample.png)  \n",
+        "\t<img src=\"sample.png\">\n",
+        "> ```html\n> <!-- example -->\n> ![alt](sample.png)\n> ```",
+        "- Example:\n\n  ```html\n  <!-- example -->\n  ![alt](sample.png)\n  ```",
+        "- Example:\n\n      <!-- example -->\n      ![alt](sample.png)\n",
+    ] {
+        assert_eq!(visible_markdown(body), body, "{body}");
+    }
+}
+#[test]
+fn provider_markdown_still_hides_real_metadata_and_html_images() {
+    assert_eq!(
+        visible_markdown("Before <!-- hidden\nmetadata -->after"),
+        "Before after"
+    );
+    assert_eq!(
+        visible_markdown("Before <IMG src=\"sample.png\"> after"),
+        "Before [image] after"
+    );
+    assert_eq!(
+        visible_markdown("Before <!-- hidden\nrest of hidden metadata"),
+        "Before "
+    );
+    assert_eq!(
+        visible_markdown("`<!-- literal -->` <!-- hidden -->tail"),
+        "`<!-- literal -->` tail"
+    );
+}
+#[test]
+fn provider_markdown_suppresses_images_created_by_comment_removal() {
+    assert_eq!(
+        visible_markdown("!<!-- hidden -->[alt](sample.png)"),
+        "[image: alt](sample.png)"
+    );
+    assert_eq!(
+        visible_markdown("![alt][picture]\n\n[picture]: sample.png"),
+        "[image: alt][picture]\n\n[picture]: sample.png"
+    );
+    assert_eq!(
+        visible_markdown("![picture]\n\n[picture]: sample.png"),
+        "[image: picture]\n\n[picture]: sample.png"
+    );
+}
+#[test]
+fn provider_markdown_keeps_legacy_hidden_state_across_code_ranges() {
+    assert_eq!(
+        visible_markdown("Before <!-- hidden `secret` rest"),
+        "Before "
+    );
+    assert_eq!(
+        visible_markdown("Unmatched ` then <!-- hidden -->visible."),
+        "Unmatched ` then visible."
+    );
+}
+#[test]
+fn provider_markdown_does_not_join_code_delimiters_when_hiding_metadata() {
+    for (body, expected) in [
+        (
+            "``![alt](sample.png)``<!-- hidden -->`x`",
+            "``![alt](sample.png)``<!---->`x`",
+        ),
+        (
+            "`one`<!-- first --><!-- second -->`two`",
+            "`one`<!---->`two`",
+        ),
+        (
+            "`one`<!-- hidden\nmetadata -->``two``",
+            "`one`<!---->``two``",
+        ),
+    ] {
+        assert_eq!(visible_markdown(body), expected);
+    }
+}
+#[test]
 fn old_cached_snapshot_deserializes_without_overview() {
     let s = Snapshot::new(
         "test".into(),
