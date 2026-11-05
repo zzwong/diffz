@@ -24,7 +24,11 @@ UI_TESTS = diffz_crate(
     name = "ui", package = "crates/ui", crate_name = "diffz_ui",
     features = ["default", "syntax"], deps = [":core"],
     compile_data = glob(["crates/ui/icons/**"]),
-    unit_compile_data = ["fixtures/split-asymmetric/change.patch"],
+    unit_compile_data = [
+        "fixtures/split-asymmetric/change.patch",
+        "crates/ui/src/app/testdata/release_step_github.py",
+    ],
+    unit_deps = [":adapters"],
 )
 APP_TESTS = diffz_crate(
     name = "app", package = "crates/app", crate_name = "diffz",

@@ -13,7 +13,7 @@ _FLAGS = ["-Copt-level=0", "-Cdebuginfo=1"] + select({
 def workspace_rustc_flags():
     return _FLAGS
 
-def diffz_crate(name, package, crate_name, features, deps, compile_data = [], unit_compile_data = []):
+def diffz_crate(name, package, crate_name, features, deps, compile_data = [], unit_compile_data = [], unit_deps = []):
     # Keep compiler inputs separate from fixtures read by the test launcher.
     # A runtime-only fixture or packaging edit must not invalidate every crate.
     crate_compile_data = _MANIFESTS + compile_data
@@ -31,9 +31,11 @@ def diffz_crate(name, package, crate_name, features, deps, compile_data = [], un
     rule = rust_binary if name == "app" else rust_library
     rule(name = "diffz" if name == "app" else name, crate_name = crate_name, crate_root = source,
          srcs = srcs, compile_data = crate_compile_data, **common)
+    unit_common = dict(common)
+    unit_common["deps"] = common["deps"] + unit_deps
     rust_test(name = name + "_unit_bin", crate_name = crate_name, crate_root = source,
               srcs = srcs + native.glob([package + "/tests/support/**/*.rs"], allow_empty = True),
-              compile_data = crate_compile_data + unit_compile_data, tags = ["manual"], **common)
+              compile_data = crate_compile_data + unit_compile_data, tags = ["manual"], **unit_common)
     cargo_test(name = name + "_unit", binary = ":" + name + "_unit_bin", data = ["//:fixtures"])
     tests = [":" + name + "_unit"]
     for source in native.glob([package + "/tests/*.rs"], allow_empty = True):
