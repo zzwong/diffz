@@ -322,58 +322,105 @@ pub fn reviewed_progress(
 }
 /// Use this field solely for display; retain the unmodified provider body separately for export and identity.
 pub fn visible_markdown(body: &str) -> String {
-    let mut out = String::new();
-    let mut hidden = false;
-    let mut fence: Option<&str> = None;
-    for line in body.split_inclusive('\n') {
-        let marker = if line.trim_start().starts_with("```") {
-            Some("```")
-        } else if line.trim_start().starts_with("~~~") {
-            Some("~~~")
-        } else {
-            None
-        };
-        if !hidden && (fence.is_some() || marker.is_some()) {
-            out.push_str(line);
-            if let Some(m) = marker {
-                if fence == Some(m) {
-                    fence = None;
-                } else if fence.is_none() {
-                    fence = Some(m);
-                }
-            }
+    let Some(code) = markdown_code_ranges(body) else {
+        return "Markdown preview unavailable".into();
+    };
+    let mut visible = String::with_capacity(body.len());
+    let mut kept_code = Vec::new();
+    let (mut at, mut line_end, mut next_code) = (0, 0, 0);
+    let (mut hidden, mut comment_gap) = (false, false);
+    while at < body.len() {
+        while next_code < code.len() && code[next_code].end <= at {
+            next_code += 1;
+        }
+        // Preserve the legacy hidden-comment policy even for an incomplete
+        // inline comment: its hidden state continues across later code ranges.
+        if !hidden && code.get(next_code).is_some_and(|range| range.start == at) {
+            let range = &code[next_code];
+            let text = &body[range.clone()];
+            separate_code_delimiters(&mut visible, text, comment_gap);
+            let start = visible.len();
+            visible.push_str(text);
+            kept_code.push(start..visible.len());
+            comment_gap = false;
+            at = range.end;
             continue;
         }
-        let mut rest = line;
-        while !rest.is_empty() {
-            if hidden {
-                if let Some(i) = rest.find("-->") {
-                    rest = &rest[i + 3..];
-                    hidden = false;
-                } else {
-                    break;
-                }
-            } else if rest.starts_with("<!--") {
-                hidden = true;
-                rest = &rest[4..];
-            } else if rest
-                .get(..4)
-                .is_some_and(|s| s.eq_ignore_ascii_case("<img"))
-            {
-                if let Some(i) = rest.find('>') {
-                    out.push_str("[image]");
-                    rest = &rest[i + 1..];
-                } else {
-                    break;
-                }
+        if at >= line_end {
+            line_end = body[at..].find('\n').map_or(body.len(), |i| at + i + 1);
+        }
+        let rest = &body[at..line_end];
+        if hidden {
+            if let Some(i) = rest.find("-->") {
+                at += i + 3;
+                hidden = false;
             } else {
-                let c = rest.chars().next().unwrap();
-                out.push(c);
-                rest = &rest[c.len_utf8()..];
+                at = line_end;
             }
+        } else if rest.starts_with("<!--") {
+            hidden = true;
+            comment_gap = true;
+            at += 4;
+        } else if rest
+            .get(..4)
+            .is_some_and(|s| s.eq_ignore_ascii_case("<img"))
+        {
+            if let Some(i) = rest.find('>') {
+                visible.push_str("[image]");
+                comment_gap = false;
+                at += i + 1;
+            } else {
+                at = line_end;
+            }
+        } else {
+            separate_code_delimiters(&mut visible, rest, comment_gap);
+            let c = rest.chars().next().unwrap();
+            visible.push(c);
+            comment_gap = false;
+            at += c.len_utf8();
         }
     }
-    out.replace("![", "[image: ").trim().to_string()
+
+    // Comment removal can join `!` and `[` into an image opener. Keep the
+    // existing final replacement, but use original code's output ranges so
+    // preprocessing cannot reinterpret and then rewrite a literal example.
+    let mut out = String::with_capacity(visible.len());
+    let mut at = 0;
+    for range in kept_code {
+        out.push_str(&visible[at..range.start].replace("![", "[image: "));
+        out.push_str(&visible[range.clone()]);
+        at = range.end;
+    }
+    out.push_str(&visible[at..].replace("![", "[image: "));
+    // Leading indentation and trailing spaces may belong to literal code.
+    out
+}
+
+/// Preserve the boundary between code delimiters when hidden metadata vanishes.
+/// An empty inline HTML comment renders nothing, unlike an inserted text space.
+fn separate_code_delimiters(out: &mut String, next: &str, comment_gap: bool) {
+    if comment_gap && out.ends_with('`') && next.starts_with('`') {
+        out.push_str("<!---->");
+    }
+}
+
+/// Byte ranges from the same Markdown parser the desktop renderer uses. Walking
+/// the tree, rather than scanning fences, also covers code nested in lists/quotes.
+fn markdown_code_ranges(body: &str) -> Option<Vec<std::ops::Range<usize>>> {
+    use markdown::mdast::Node;
+    let root = markdown::to_mdast(body, &markdown::ParseOptions::gfm()).ok()?;
+    let mut pending = vec![&root];
+    let mut ranges = Vec::new();
+    while let Some(node) = pending.pop() {
+        if matches!(node, Node::Code(_) | Node::InlineCode(_)) {
+            let position = node.position()?;
+            ranges.push(position.start.offset..position.end.offset);
+        } else if let Some(children) = node.children() {
+            pending.extend(children);
+        }
+    }
+    ranges.sort_unstable_by_key(|range| range.start);
+    Some(ranges)
 }
 pub use crate::scroll::BoundaryScroll;
 
