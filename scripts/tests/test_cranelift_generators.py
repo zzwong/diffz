@@ -9,6 +9,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "verify-cranelift-generators.py"
 spec = importlib.util.spec_from_file_location("generators", SCRIPT)
@@ -22,7 +23,8 @@ class GuardTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.name = "cranelift-isle"
-        self.prefix = f"{self.name}-{m.VERSION}"
+        self.version = "0.135.8"
+        self.prefix = f"{self.name}-{self.version}"
 
     def archive(self, entries):
         path = self.root / "source.crate"
@@ -40,29 +42,76 @@ class GuardTests(unittest.TestCase):
         return path
 
     def unpack(self, path):
-        return m.unpack_verified(path, self.root / "out", self.name, m.sha256(path.read_bytes()))
+        return m.unpack_verified(path, self.root / "out", self.name, self.version, m.sha256(path.read_bytes()))
 
     def lock(self):
-        return {"package": [{"name": n, "version": m.VERSION, "checksum": "1" * 64,
-                 "source": "registry+https://github.com/rust-lang/crates.io-index"} for n in m.CRATES]}
+        return {"package": [{"name": n, "version": version, "checksum": "1" * 64,
+                 "source": "registry+https://github.com/rust-lang/crates.io-index"}
+                for version in m.SOURCE_BLOBS for n in m.CRATES]}
 
-    def test_exact_locked_packages(self):
-        self.assertEqual(set(m.locked_crates(self.lock())), set(m.CRATES))
-
-    def test_version_source_and_checksum_changes_fail(self):
-        for key, value in (("version", "0.0.0"), ("source", "git+https://example.invalid"),
-                           ("checksum", "bad")):
-            with self.subTest(key=key):
-                lock = self.lock()
-                lock["package"][0][key] = value
-                with self.assertRaises(m.VerificationError):
-                    m.locked_crates(lock)
-
-    def test_duplicate_locked_version_fails(self):
+    def test_all_locked_versions_are_selected_independent_of_order(self):
         lock = self.lock()
-        lock["package"].append(dict(lock["package"][0]))
-        with self.assertRaises(m.VerificationError):
-            m.locked_crates(lock)
+        expected = m.locked_crates(lock)
+        self.assertEqual(set(expected), set(m.SOURCE_BLOBS))
+        for packages in expected.values():
+            self.assertEqual(set(packages), set(m.CRATES))
+        self.assertEqual(m.locked_crates({"package": list(reversed(lock["package"]))}), expected)
+
+    def test_unknown_missing_duplicate_and_invalid_packages_fail(self):
+        cases = []
+        lock = self.lock(); lock["package"].append(dict(lock["package"][0], version="0.999.0")); cases.append(lock)
+        lock = self.lock(); lock["package"].pop(); cases.append(lock)
+        lock = self.lock(); lock["package"].append(dict(lock["package"][0])); cases.append(lock)
+        for key, value in (("source", "git+https://example.invalid"), ("checksum", "bad")):
+            lock = self.lock(); lock["package"][-1][key] = value; cases.append(lock)
+        cases.append({"package": []})
+        for lock in cases:
+            with self.subTest(lock=lock), self.assertRaises(m.VerificationError):
+                m.locked_crates(lock)
+
+    def test_bazel_annotations_cover_every_selected_version(self):
+        versions = m.locked_crates(self.lock())
+        module = (SCRIPT.parents[1] / "MODULE.bazel").read_text()
+        m.verify_annotations(module, versions)
+        for version in versions:
+            for name in m.SOURCE_BLOBS[version]:
+                line = next(line for line in module.splitlines()
+                            if line.startswith(f'crate.annotation(crate = "{name}", version = "={version}",'))
+                with self.subTest(version=version, name=name), self.assertRaises(m.VerificationError):
+                    m.verify_annotations(module.replace(line, ""), versions)
+                with self.subTest(version=version, name=name, bad_patch=True), self.assertRaises(m.VerificationError):
+                    m.verify_annotations(module.replace(line, line.replace("-deterministic.patch", "-wrong.patch")), versions)
+
+    def test_experiment_runs_each_version_and_propagates_failure(self):
+        (self.root / "Cargo.lock").write_text("")
+        (self.root / "MODULE.bazel").write_text("ignored")
+        (self.root / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.99.0"\n')
+        versions = m.locked_crates(self.lock())
+        for failing in (None, "0.137.1"):
+            with self.subTest(failing=failing):
+                out = self.root / ("output-" + str(failing)); out.mkdir()
+                work = self.root / ("work-" + str(failing)); work.mkdir()
+                experiment = m.Experiment(self.root, out, "rustc")
+                visited = []
+
+                def check_version(_experiment, _cargo_home, _scratch, version, _packages):
+                    visited.append(version)
+                    if version == failing:
+                        raise m.VerificationError("failed generator")
+
+                with mock.patch.object(m, "locked_crates", return_value=versions), \
+                     mock.patch.object(m, "verify_annotations"), \
+                     mock.patch.object(m.Experiment, "run", return_value=mock.Mock(stdout=b"rustc 1.99.0 test")), \
+                     mock.patch.object(m.Experiment, "verify_version", new=check_version):
+                    if failing:
+                        with self.assertRaises(m.VerificationError):
+                            experiment.verify(self.root, work)
+                    else:
+                        experiment.verify(self.root, work)
+                self.assertEqual(visited, ["0.135.8", "0.137.1"])
+                self.assertTrue(experiment.report["versions"]["0.135.8"]["completed"])
+                self.assertEqual(experiment.report["versions"]["0.137.1"]["completed"], failing is None)
+                self.assertFalse(experiment.report["completed"])
 
     def test_unpack_verified_regular_source(self):
         path = self.archive([(f"{self.prefix}/src/lib.rs", "file")])
@@ -72,7 +121,7 @@ class GuardTests(unittest.TestCase):
     def test_invalid_archive_hash_writes_nothing(self):
         path = self.archive([(f"{self.prefix}/build.rs", "file")])
         with self.assertRaises(m.VerificationError):
-            m.unpack_verified(path, self.root / "out", self.name, "0" * 64)
+            m.unpack_verified(path, self.root / "out", self.name, self.version, "0" * 64)
         self.assertFalse((self.root / "out").exists())
 
     def test_traversal_absolute_and_foreign_root_rejected_before_writes(self):

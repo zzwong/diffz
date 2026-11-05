@@ -8,6 +8,9 @@ use std::{
 
 #[test]
 fn provider_children_never_inherit_startup_activation_metadata() {
+    // Cargo supplies an absolute executable; Bazel supplies a runfiles-relative one.
+    // Resolve it before replacing PATH with the deliberately isolated provider bin.
+    let app = std::fs::canonicalize(env!("CARGO_BIN_EXE_diffz")).unwrap();
     for token in [
         OsString::from("synthetic-entry-token"),
         OsString::new(),
@@ -23,7 +26,7 @@ fn provider_children_never_inherit_startup_activation_metadata() {
         let git = bin.join("git");
         std::fs::write(&git, "#!/bin/sh\nprintf '%s' \"${XDG_ACTIVATION_TOKEN+present}\" > \"$DIFFZ_TEST_ENV_MARKER\"\nexit 1\n").unwrap();
         std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let result = Command::new(env!("CARGO_BIN_EXE_diffz"))
+        let result = Command::new(&app)
             .args(["--inspect", "--git"])
             .arg(&repo)
             .arg("--state-dir")

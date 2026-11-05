@@ -1,11 +1,12 @@
 # Cranelift generator reproducibility
 
-The opt-in Bazel graph carries two narrow patches for the locked Cranelift
-0.135.8 release. The Wasmtime 48.0.8 security update advances the locked
-Cranelift dependencies; features, optimization, debug policy and release gates
-are unchanged. The upstream assembler and ISLE build scripts retain the exact
-source identities guarded by the verifier. Real generator qualification remains
-an enforced CI gate for the updated archives. Tracking: [#142](https://github.com/zzwong/diffz/issues/142).
+The opt-in Bazel graph carries two narrow patches for both locked Cranelift
+0.135.8 and 0.137.1 releases. Tree-sitter uses Wasmtime 48.0.8 for Wasm
+grammars; component annotators use Wasmtime 50.0.1. Both releases have identical
+upstream assembler and ISLE build scripts, and share the patches. Features,
+optimization and debug policy are unchanged. The verifier checks each resolved
+generator version and fails on unknown versions, incomplete sets, source drift,
+or missing Bazel patch annotations. Tracking: [#142](https://github.com/zzwong/diffz/issues/142).
 
 `cranelift-assembler-x64` generates `generated-files.rs` for its path-listing
 helper. The original embeds the producer's absolute output directory. The patch
@@ -31,10 +32,11 @@ python3 scripts/verify-cranelift-generators.py \
 ```
 
 The verifier does not fetch sources, update Cargo.lock, or compile the desktop.
-It verifies the four source archives against Cargo.lock, rejects version/source
-drift, unpacks regular files into owned scratch, and applies the checked-in
-patches there with zero fuzz. It builds the **real** srcgen and assembler meta
-libraries, both upstream and patched build scripts, and the actual path-listing
+For each resolved version it verifies four source archives against Cargo.lock,
+rejects unsupported versions and source drift, checks the Bazel patch mappings,
+unpacks regular files into owned scratch, and applies the checked-in patches
+there with zero fuzz. Each version has a separate report and command output. It
+builds the **real** srcgen and assembler meta libraries, both upstream and patched build scripts, and the actual path-listing
 helper using `rustc`. It checks:
 
 - Identical assembler code across three output roots per arm, including spaces,
@@ -74,6 +76,8 @@ Do not interpret Bazel's local `DIFFERENT_FILES` counter as remote-cache misses.
 When upgrading Cranelift, recheck the upstream fixes and remove these patches when
 unneeded. Until then, the explicit version and source checks require requalification.
 
-Upstream source: [assembler](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/assembler-x64/build.rs),
+Upstream 48.0.8 source: [assembler](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/assembler-x64/build.rs),
 [helper](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/assembler-x64/src/main.rs),
 [ISLE](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/isle/isle/build.rs).
+The identical 50.0.1 sources are [assembler](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/cranelift/assembler-x64/build.rs)
+and [ISLE](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/cranelift/isle/isle/build.rs).

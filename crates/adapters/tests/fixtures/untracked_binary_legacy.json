@@ -1,0 +1,27 @@
+{
+  "id": "b21c89f1353e6171c621f7aac26e6dccddf27db8fdc9aab8bb50aa9749468bc8",
+  "title": "Legacy untracked binary review",
+  "origin": "git:\"/legacy\":worktree",
+  "patch": {
+    "files": [
+      {
+        "id": "b514c50eb66a9cbac339a78af2047e0d95e0995c0128bcb4143f5dfb8cdf45e1",
+        "old_path": null,
+        "new_path": "untracked.bin",
+        "kind": "Added",
+        "content": "Binary",
+        "old_mode": null,
+        "new_mode": "100644",
+        "old_oid": null,
+        "new_oid": null,
+        "hunks": [],
+        "metadata": [
+          "untracked file; the worktree was left unchanged"
+        ]
+      }
+    ]
+  },
+  "remote": null,
+  "comments": [],
+  "warnings": []
+}

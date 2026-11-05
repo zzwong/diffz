@@ -120,12 +120,16 @@ impl Side {
         self.lines[r.clone()].join("\n")
     }
     fn norm(&self, idx: usize) -> String {
-        let r = &self.blocks[idx];
-        self.lines[r.clone()]
-            .iter()
-            .map(|s| s.trim_end())
-            .collect::<Vec<_>>()
-            .join("\n")
+        // Interior line suffixes can carry Markdown hard breaks. Only ignore
+        // the last source line's trailing whitespace, keeping every separator
+        // (including empty lines at the end of an unclosed code fence).
+        let lines = &self.lines[self.blocks[idx].clone()];
+        let suffix = lines
+            .last()
+            .map_or(0, |line| line.len() - line.trim_end().len());
+        let mut text = lines.join("\n");
+        text.truncate(text.len() - suffix);
+        text
     }
 }
 
@@ -550,6 +554,67 @@ index x..y 100644
             .position(|i| matches!(i, RichItem::Gap { .. }))
             .unwrap();
         assert!(gap_idx > 0 && gap_idx + 1 < items.len());
+    }
+
+    #[test]
+    fn interior_hard_break_changes_are_changed() {
+        for (old, new) in [
+            ("alpha", "alpha  "),
+            ("alpha  ", "alpha"),
+            ("alpha ", "alpha  "),
+            ("alpha  ", "alpha "),
+        ] {
+            let f = file(&format!(
+                "diff --git a/f.md b/f.md\n--- a/f.md\n+++ b/f.md\n@@ -1,2 +1,2 @@\n-{old}\n+{new}\n beta\n"
+            ));
+            assert_eq!(
+                rich_diff(&f),
+                vec![RichItem::Block(RichBlock {
+                    kind: RichKind::Changed,
+                    old: Some(format!("{old}\nbeta")),
+                    new: Some(format!("{new}\nbeta")),
+                    old_line: Some(1),
+                    new_line: Some(1),
+                })],
+                "old={old:?}, new={new:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unchanged_hard_break_and_final_whitespace_stay_same() {
+        let f = file(concat!(
+            "diff --git a/f.md b/f.md\n--- a/f.md\n+++ b/f.md\n@@ -1,2 +1,2 @@\n",
+            " alpha  \n-beta    \n+beta\n",
+        ));
+        assert_eq!(
+            rich_diff(&f),
+            vec![RichItem::Block(RichBlock {
+                kind: RichKind::Same,
+                old: Some("alpha  \nbeta    ".into()),
+                new: Some("alpha  \nbeta".into()),
+                old_line: Some(1),
+                new_line: Some(1),
+            })]
+        );
+    }
+
+    #[test]
+    fn blank_lines_at_the_end_of_an_unclosed_fence_are_changes() {
+        let f = file(concat!(
+            "diff --git a/f.md b/f.md\n--- a/f.md\n+++ b/f.md\n@@ -1,2 +1,4 @@\n",
+            " ```\n code\n+\n+\n",
+        ));
+        assert_eq!(
+            rich_diff(&f),
+            vec![RichItem::Block(RichBlock {
+                kind: RichKind::Changed,
+                old: Some("```\ncode".into()),
+                new: Some("```\ncode\n\n".into()),
+                old_line: Some(1),
+                new_line: Some(1),
+            })]
+        );
     }
 
     #[test]

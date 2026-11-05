@@ -203,6 +203,11 @@ impl Workbench {
             .into_any_element()
     }
 }
+/// Page the visible prose list, leaving the source view's saved position alone.
+pub(crate) fn scroll_page(list: &ListState, forward: bool) {
+    let height = list.viewport_bounds().size.height;
+    list.scroll_by(height * if forward { 0.85 } else { -0.85 });
+}
 /// Thumb top and height for the list's own scroll metrics, or none while the content
 /// fits. The list measures item heights lazily, so the travel it reports can shift as
 /// rows come into view.
@@ -280,6 +285,11 @@ fn pull_bar((edge, progress): (i8, f32), skin: &Skin) -> AnyElement {
 /// A block carrying no Markdown syntax, so rendering it as an HTML paragraph is safe.
 fn plain_paragraph(text: &str) -> bool {
     !text.contains(['`', '[', '*', '_', '<', '>', '|', '!'])
+        // The HTML word-mark path collapses newlines, unlike Markdown hard breaks.
+        && !text.contains("  \n")
+        && !text.contains("\\\n")
+        && !text.contains("  \r\n")
+        && !text.contains("\\\r\n")
         && text.lines().all(|l| {
             let t = l.trim_start();
             !(t.starts_with('#')
@@ -315,11 +325,13 @@ fn to_html(marked: &str, added_color: &str) -> String {
 /// Make the `~~` marks parseable. A span crossing a line is dropped (Markdown
 /// strikethrough stops at list items), and each marker moves outward to the
 /// closest whitespace so it never lands in a code span or on an emphasis delimiter.
-/// Widening spans that meet are merged.
+/// Widening spans that meet are merged. A terminal backslash run stays next to
+/// the newline, since a closing marker there would change the Markdown break.
 fn fit_strikes(marked: &str) -> String {
     let mut out = String::with_capacity(marked.len());
     // Offset in `out` right before the last `~~` that closed, when one exists.
     let mut last_close: Option<usize> = None;
+    let mut last_open: Option<usize> = None;
     let mut rest = marked;
     while let Some(open) = rest.find("~~") {
         out.push_str(&rest[..open]);
@@ -353,6 +365,7 @@ fn fit_strikes(marked: &str) -> String {
             out.push_str(&tail);
         } else {
             out.insert_str(start, "~~");
+            last_open = Some(start);
         }
         out.push_str(inner);
         // Push the closing marker ahead to whitespace.
@@ -362,6 +375,24 @@ fn fit_strikes(marked: &str) -> String {
             .map_or(rest.len(), |(i, _)| i);
         out.push_str(&rest[..extra]);
         rest = &rest[extra..];
+        if rest.starts_with('\n') || rest.starts_with("\r\n") {
+            let slash_start = out.trim_end_matches('\\').len();
+            if slash_start < out.len() {
+                let slashes = out[slash_start..].to_owned();
+                out.truncate(slash_start);
+                if last_open.is_some_and(|start| out.len() == start + 2) {
+                    // A backslash-only change has no text left to strike.
+                    out.truncate(last_open.unwrap_or(0));
+                    last_open = None;
+                    last_close = None;
+                } else {
+                    last_close = Some(out.len());
+                    out.push_str("~~");
+                }
+                out.push_str(&slashes);
+                continue;
+            }
+        }
         last_close = Some(out.len());
         out.push_str("~~");
     }
@@ -469,7 +500,210 @@ fn cell(id: (&'static str, usize), text: &str, tint: Option<Hsla>, html: bool) -
 }
 #[cfg(test)]
 mod tests {
-    use super::fit_strikes;
+    use super::{fit_strikes, plain_paragraph, scroll_page};
+    use gpui_kit as gpui;
+    use gpui_kit::{
+        AppContext, Context, IntoElement, ListAlignment, ListState, Render, Styled, TestAppContext,
+        VisualTestContext, Window, div, list, point, px, size,
+    };
+
+    struct PageTestView(ListState, fn(usize) -> f32);
+
+    impl Render for PageTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let row_height = self.1;
+            list(self.0.clone(), move |ix, _, _| {
+                div().h(px(row_height(ix))).w_full().into_any_element()
+            })
+            .size_full()
+        }
+    }
+
+    fn draw_list(cx: &mut VisualTestContext, state: &ListState, height: f32) {
+        draw_rows(cx, state, height, |_| 20.);
+    }
+
+    fn draw_rows(
+        cx: &mut VisualTestContext,
+        state: &ListState,
+        height: f32,
+        row_height: fn(usize) -> f32,
+    ) {
+        cx.draw(
+            point(px(0.), px(0.)),
+            size(px(100.), px(height)),
+            |_, cx| {
+                cx.new(|_| PageTestView(state.clone(), row_height))
+                    .into_any_element()
+            },
+        );
+    }
+
+    #[gpui::test]
+    fn paging_scrolls_the_rich_list_in_both_directions(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state =
+            ListState::new(100, ListAlignment::Top, px(0.)).with_uniform_item_height(px(20.));
+        draw_list(cx, &state, 200.);
+
+        scroll_page(&state, true);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 8);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(10.));
+
+        scroll_page(&state, true);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 17);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+
+        scroll_page(&state, false);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 8);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(10.));
+    }
+
+    #[gpui::test]
+    fn rich_paging_uses_current_height_and_clamps_at_the_edges(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state =
+            ListState::new(100, ListAlignment::Top, px(0.)).with_uniform_item_height(px(20.));
+        draw_list(cx, &state, 200.);
+        scroll_page(&state, false);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+
+        draw_list(cx, &state, 400.);
+        scroll_page(&state, true);
+        draw_list(cx, &state, 400.);
+        assert_eq!(state.logical_scroll_top().item_ix, 17);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+
+        state.scroll_to_end();
+        draw_list(cx, &state, 400.);
+        let bottom = state.logical_scroll_top();
+        scroll_page(&state, true);
+        draw_list(cx, &state, 400.);
+        assert_eq!(state.logical_scroll_top().item_ix, bottom.item_ix);
+        assert_eq!(
+            state.logical_scroll_top().offset_in_item,
+            bottom.offset_in_item
+        );
+    }
+
+    #[gpui::test]
+    fn rich_paging_moves_within_a_block_taller_than_the_viewport(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(1, ListAlignment::Top, px(0.));
+        let draw = |cx: &mut VisualTestContext| {
+            draw_rows(cx, &state, 200., |_| 1_000.);
+        };
+        draw(cx);
+        scroll_page(&state, true);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(170.));
+        scroll_page(&state, false);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn rich_paging_handles_lazy_variable_height_rows(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(20, ListAlignment::Top, px(0.));
+        let draw = |cx: &mut VisualTestContext| {
+            draw_rows(cx, &state, 200., |ix| if ix % 2 == 0 { 60. } else { 100. });
+        };
+        draw(cx);
+        scroll_page(&state, true);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 2);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(10.));
+        scroll_page(&state, false);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn rich_paging_does_not_move_empty_or_short_lists(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        for count in [0, 1, 5] {
+            let state = ListState::new(count, ListAlignment::Top, px(0.));
+            draw_list(cx, &state, 200.);
+            scroll_page(&state, true);
+            draw_list(cx, &state, 200.);
+            assert_eq!(state.logical_scroll_top().item_ix, 0);
+            assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+            scroll_page(&state, false);
+            draw_list(cx, &state, 200.);
+            assert_eq!(state.logical_scroll_top().item_ix, 0);
+            assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+        }
+    }
+
+    #[test]
+    fn rich_paging_before_layout_is_a_noop() {
+        let state =
+            ListState::new(100, ListAlignment::Top, px(0.)).with_uniform_item_height(px(20.));
+        scroll_page(&state, true);
+        scroll_page(&state, false);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+    }
+
+    #[test]
+    fn hard_breaks_keep_the_markdown_word_mark_path() {
+        for text in [
+            "alpha  \nbeta",
+            "alpha   \nbeta",
+            "alpha\\\nbeta",
+            "alpha  \r\nbeta",
+            "alpha\\\r\nbeta",
+        ] {
+            assert!(!plain_paragraph(text), "{text:?}");
+        }
+        for text in ["alpha\nbeta", "alpha \nbeta", "alpha    "] {
+            assert!(plain_paragraph(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn markdown_word_marks_preserve_the_hard_break() {
+        for new in ["alpha  \nbeta", "bravo  \nbeta", "bravo\\\nbeta"] {
+            assert!(!plain_paragraph(new));
+            let (_, marked_new) =
+                diffz_core::rich::mark_words("alpha\nbeta", new, ["~~", "~~"], ["", ""]);
+            assert_eq!(marked_new, new);
+        }
+    }
+
+    #[test]
+    fn removed_word_marks_keep_break_syntax_and_word_marks() {
+        for (old, new, expected_old) in [
+            ("alpha\\\nbeta", "alpha\nbeta", "~~alpha~~\\\nbeta"),
+            ("alpha\\\\\nbeta", "alpha\nbeta", "~~alpha~~\\\\\nbeta"),
+            ("alpha\\\\\\\nbeta", "alpha\nbeta", "~~alpha~~\\\\\\\nbeta"),
+            ("alpha\\\nbeta", "bravo\\\nbeta", "~~alpha~~\\\nbeta"),
+            ("alpha  \nbeta", "bravo\nbeta", "~~alpha~~  \nbeta"),
+            ("alpha\\\r\nbeta", "alpha\r\nbeta", "~~alpha~~\\\r\nbeta"),
+            ("\\\nbeta", "\nbeta", "\\\nbeta"),
+        ] {
+            let (marked_old, marked_new) =
+                diffz_core::rich::mark_words(old, new, ["~~", "~~"], ["", ""]);
+            assert_eq!(fit_strikes(&marked_old), expected_old, "old={old:?}");
+            assert_eq!(marked_new, new, "new={new:?}");
+        }
+
+        // Adding a break does not alter the unmarked new source.
+        let (old, new) =
+            diffz_core::rich::mark_words("alpha\nbeta", "alpha\\\nbeta", ["~~", "~~"], ["", ""]);
+        assert_eq!(fit_strikes(&old), "alpha\nbeta");
+        assert_eq!(new, "alpha\\\nbeta");
+    }
+
     #[test]
     fn strikes_are_widened_to_whitespace_and_multiline_ones_are_dropped() {
         assert_eq!(fit_strikes("a ~~b~~ c"), "a ~~b~~ c");

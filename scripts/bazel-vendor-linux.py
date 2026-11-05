@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Refresh the vendored Linux target after changing Cargo's locked dependency graph."""
+import argparse
+import difflib
 import json
 from pathlib import Path
 import subprocess
+import sys
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--check", action="store_true", help="fail if the checked-in target differs from Cargo metadata")
+args = parser.parse_args()
 
 root = Path(__file__).resolve().parent.parent
 metadata = json.loads(subprocess.check_output([
@@ -54,4 +61,13 @@ def vendor_linux():
 output += '        rustc_env = ' + repr({"CARGO_MANIFEST_DIR": "vendor/gpui-pre-linux", "CARGO_PKG_VERSION": package["version"]}) + ',\n'
 output += '        deps = [\n' + ''.join(f'            {label!r},\n' for label in sorted(deps)) + '        ],\n'
 output += f'        aliases = {aliases!r},\n        crate_features = {sorted(node["features"])!r},\n    )\n'
-(root / "bazel/vendor_linux.bzl").write_text(output)
+target = root / "bazel/vendor_linux.bzl"
+if args.check:
+    current = target.read_text()
+    if current != output:
+        sys.stderr.writelines(difflib.unified_diff(
+            current.splitlines(keepends=True), output.splitlines(keepends=True),
+            fromfile=str(target), tofile="Cargo metadata output"))
+        sys.exit("Generated Linux Bazel dependencies are stale; run python3 scripts/bazel-vendor-linux.py")
+else:
+    target.write_text(output)

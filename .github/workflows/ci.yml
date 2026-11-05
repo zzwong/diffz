@@ -53,6 +53,8 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Run core checks
         run: bash scripts/check.sh core
+      - name: Check generated Linux Bazel dependencies
+        run: python3 scripts/bazel-vendor-linux.py --check
       - name: Check real Cranelift generator reproducibility
         run: python3 scripts/verify-cranelift-generators.py --output "$RUNNER_TEMP/cranelift-generators"
       # cargo-deny-action builds a Docker image and rustup-installs the pinned

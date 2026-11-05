@@ -33,6 +33,7 @@ With the pinned Cargo toolchain and locked dependencies available:
 
 ```sh
 python3 scripts/bazel-vendor-linux.py
+python3 scripts/bazel-vendor-linux.py --check
 python3 scripts/tests/test_bazel_vendor_boundary.py -v
 bash scripts/bazel-trial.sh build //:diffz --nobuild
 ```

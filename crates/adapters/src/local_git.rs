@@ -349,6 +349,12 @@ impl LocalGit {
                             .collect(),
                     });
                 }
+            } else {
+                // Binary rows are absent, so retain a digest for capture and snapshot identity.
+                f.metadata.push(format!(
+                    "untracked binary content digest: {}",
+                    digest(&[b"untracked-binary-v1", &bytes])
+                ));
             }
             patch.files.push(f);
         }
