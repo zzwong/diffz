@@ -426,8 +426,10 @@ fn orphan_and_duplicate_eof_markers_remain_malformed() {
     for hunk in [
         b"@@ -1 +1 @@\n\\ No newline at end of file\n-old\n+new\n".as_slice(),
         b"@@ -0,0 +0,0 @@\n\\ No newline at end of file\n".as_slice(),
-        b"@@ -1 +1 @@\n-old\r\n\\ No newline at end of file\n\\ No newline at end of file\n+new\n".as_slice(),
-        b"@@ -0,0 +1 @@\n+new\r\n\\ No newline at end of file\n\\ No newline at end of file\n".as_slice(),
+        b"@@ -1 +1 @@\n-old\r\n\\ No newline at end of file\n\\ No newline at end of file\n+new\n"
+            .as_slice(),
+        b"@@ -0,0 +1 @@\n+new\r\n\\ No newline at end of file\n\\ No newline at end of file\n"
+            .as_slice(),
     ] {
         assert!(matches!(
             parse_patch(&full_patch(hunk), ParseLimits::default()),

@@ -604,4 +604,3 @@ pub fn parse_patch(bytes: &[u8], limits: ParseLimits) -> Result<PatchReport, Pat
     }
     Ok(PatchReport { files })
 }
-
