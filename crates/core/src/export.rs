@@ -26,10 +26,14 @@ impl ContextExport {
         if text.len() > 1024 * 1024 || notes.iter().map(String::len).sum::<usize>() > 1024 * 1024 {
             return Err("selected context is larger than 1 MiB".into());
         }
-        let path = snapshot
+        let file = snapshot
             .file(&selection.start.file)
-            .ok_or("selected source file is missing")?
-            .path();
+            .ok_or("selected source file is missing")?;
+        let path = match selection.start.side {
+            Side::Left => file.old_path.as_ref(),
+            Side::Right => file.new_path.as_ref(),
+        }
+        .ok_or("selected source side has no file path")?;
         Ok(Self {
             schema_version: 1,
             snapshot: snapshot.id.clone(),
