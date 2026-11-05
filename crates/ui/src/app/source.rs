@@ -544,7 +544,11 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
     }
 }
 /// Keep the mode used to load the step's file list, especially when its first base diverges.
-fn release_step_refs(refs: &CompareRefs, releases: &[Release], index: usize) -> Option<CompareRefs> {
+fn release_step_refs(
+    refs: &CompareRefs,
+    releases: &[Release],
+    index: usize,
+) -> Option<CompareRefs> {
     let release = releases.get(index)?;
     Some(CompareRefs {
         base: index
