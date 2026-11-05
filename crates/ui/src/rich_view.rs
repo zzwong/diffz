@@ -488,12 +488,8 @@ mod tests {
     fn markdown_word_marks_preserve_the_hard_break() {
         for new in ["alpha  \nbeta", "bravo  \nbeta", "bravo\\\nbeta"] {
             assert!(!plain_paragraph(new));
-            let (_, marked_new) = diffz_core::rich::mark_words(
-                "alpha\nbeta",
-                new,
-                ["~~", "~~"],
-                ["", ""],
-            );
+            let (_, marked_new) =
+                diffz_core::rich::mark_words("alpha\nbeta", new, ["~~", "~~"], ["", ""]);
             assert_eq!(marked_new, new);
         }
     }
