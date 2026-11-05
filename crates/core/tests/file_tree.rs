@@ -129,7 +129,9 @@ fn colliding_display_names_keep_each_file_in_stable_order() {
         let tree = FileTree::new(entries);
         let rows = tree.rows(&HashSet::new(), "same");
         assert_eq!(
-            rows.iter().filter_map(|r| r.file.clone()).collect::<Vec<_>>(),
+            rows.iter()
+                .filter_map(|r| r.file.clone())
+                .collect::<Vec<_>>(),
             vec![FileId("a".into()), FileId("b".into())]
         );
         assert!(rows.iter().all(|r| r.path == "same.txt"));
