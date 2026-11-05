@@ -365,7 +365,9 @@ impl Viewport {
 
 #[cfg(test)]
 mod selection_navigation_tests {
-    use super::*;
+    use super::{Motion, Viewport};
+    use diffz_core::domain::{Side, Snapshot, SourcePoint, SourceSelection};
+    use std::sync::Arc;
 
     const PATCH: &[u8] = concat!(
         "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n",
