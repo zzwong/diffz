@@ -37,4 +37,3 @@ Switch to source mode and confirm rich paging did not move the source position;
 PageUp and PageDown should still scroll the source when it is visible. Switch
 back to rich mode and confirm its position is retained. Repeat with the find
 input focused and with a modal panel open: page keys must not scroll the diff.
-
