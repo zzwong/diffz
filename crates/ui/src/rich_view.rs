@@ -588,9 +588,7 @@ mod tests {
         let cx = cx.add_empty_window();
         let state = ListState::new(20, ListAlignment::Top, px(0.));
         let draw = |cx: &mut VisualTestContext| {
-            draw_rows(cx, &state, 200., |ix| {
-                if ix % 2 == 0 { 60. } else { 100. }
-            });
+            draw_rows(cx, &state, 200., |ix| if ix % 2 == 0 { 60. } else { 100. });
         };
         draw(cx);
         scroll_page(&state, true);
