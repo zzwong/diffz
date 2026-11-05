@@ -152,7 +152,10 @@ fn binary_revisions_keep_drafts_and_view_state_separate() {
     assert!(second.drafts.is_empty());
     assert!(second.view.preferences.viewed.is_empty());
     let resumed = services
-        .open(OpenRequest::Resume(first.snapshot.id), Cancellation::default())
+        .open(
+            OpenRequest::Resume(first.snapshot.id),
+            Cancellation::default(),
+        )
         .unwrap();
     assert_eq!(resumed.drafts.len(), 1);
     assert_eq!(resumed.drafts[0].body, "Review of the old binary");
@@ -208,6 +211,10 @@ fn binary_changes_between_captures_are_rejected() {
     let error = LocalGit::new(program)
         .snapshot(repo.path(), LocalMode::WorkingTree, Cancellation::default())
         .unwrap_err();
-    assert!(error.to_string().contains("local source changed during capture"));
+    assert!(
+        error
+            .to_string()
+            .contains("local source changed during capture")
+    );
     assert_eq!(std::fs::read_to_string(count).unwrap(), "6");
 }
