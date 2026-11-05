@@ -481,22 +481,35 @@ mod tests {
         VisualTestContext, Window, div, list, point, px, size,
     };
 
-    struct PageTestView(ListState);
+    struct PageTestView(ListState, fn(usize) -> f32);
 
     impl Render for PageTestView {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            list(self.0.clone(), |_, _, _| {
-                div().h(px(20.)).w_full().into_any_element()
+            let row_height = self.1;
+            list(self.0.clone(), move |ix, _, _| {
+                div().h(px(row_height(ix))).w_full().into_any_element()
             })
             .size_full()
         }
     }
 
     fn draw_list(cx: &mut VisualTestContext, state: &ListState, height: f32) {
+        draw_rows(cx, state, height, |_| 20.);
+    }
+
+    fn draw_rows(
+        cx: &mut VisualTestContext,
+        state: &ListState,
+        height: f32,
+        row_height: fn(usize) -> f32,
+    ) {
         cx.draw(
             point(px(0.), px(0.)),
             size(px(100.), px(height)),
-            |_, cx| cx.new(|_| PageTestView(state.clone())).into_any_element(),
+            |_, cx| {
+                cx.new(|_| PageTestView(state.clone(), row_height))
+                    .into_any_element()
+            },
         );
     }
 
@@ -557,13 +570,7 @@ mod tests {
         let cx = cx.add_empty_window();
         let state = ListState::new(1, ListAlignment::Top, px(0.));
         let draw = |cx: &mut VisualTestContext| {
-            cx.draw(point(px(0.), px(0.)), size(px(100.), px(200.)), |_, _| {
-                list(state.clone(), |_, _, _| {
-                    div().h(px(1_000.)).w_full().into_any_element()
-                })
-                .size_full()
-                .into_any_element()
-            });
+            draw_rows(cx, &state, 200., |_| 1_000.);
         };
         draw(cx);
         scroll_page(&state, true);
@@ -581,15 +588,8 @@ mod tests {
         let cx = cx.add_empty_window();
         let state = ListState::new(20, ListAlignment::Top, px(0.));
         let draw = |cx: &mut VisualTestContext| {
-            cx.draw(point(px(0.), px(0.)), size(px(100.), px(200.)), |_, _| {
-                list(state.clone(), |ix, _, _| {
-                    div()
-                        .h(px(if ix % 2 == 0 { 60. } else { 100. }))
-                        .w_full()
-                        .into_any_element()
-                })
-                .size_full()
-                .into_any_element()
+            draw_rows(cx, &state, 200., |ix| {
+                if ix % 2 == 0 { 60. } else { 100. }
             });
         };
         draw(cx);
