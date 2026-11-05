@@ -285,6 +285,11 @@ fn pull_bar((edge, progress): (i8, f32), skin: &Skin) -> AnyElement {
 /// A block carrying no Markdown syntax, so rendering it as an HTML paragraph is safe.
 fn plain_paragraph(text: &str) -> bool {
     !text.contains(['`', '[', '*', '_', '<', '>', '|', '!'])
+        // The HTML word-mark path collapses newlines, unlike Markdown hard breaks.
+        && !text.contains("  \n")
+        && !text.contains("\\\n")
+        && !text.contains("  \r\n")
+        && !text.contains("\\\r\n")
         && text.lines().all(|l| {
             let t = l.trim_start();
             !(t.starts_with('#')
@@ -320,11 +325,13 @@ fn to_html(marked: &str, added_color: &str) -> String {
 /// Make the `~~` marks parseable. A span crossing a line is dropped (Markdown
 /// strikethrough stops at list items), and each marker moves outward to the
 /// closest whitespace so it never lands in a code span or on an emphasis delimiter.
-/// Widening spans that meet are merged.
+/// Widening spans that meet are merged. A terminal backslash run stays next to
+/// the newline, since a closing marker there would change the Markdown break.
 fn fit_strikes(marked: &str) -> String {
     let mut out = String::with_capacity(marked.len());
     // Offset in `out` right before the last `~~` that closed, when one exists.
     let mut last_close: Option<usize> = None;
+    let mut last_open: Option<usize> = None;
     let mut rest = marked;
     while let Some(open) = rest.find("~~") {
         out.push_str(&rest[..open]);
@@ -358,6 +365,7 @@ fn fit_strikes(marked: &str) -> String {
             out.push_str(&tail);
         } else {
             out.insert_str(start, "~~");
+            last_open = Some(start);
         }
         out.push_str(inner);
         // Push the closing marker ahead to whitespace.
@@ -367,6 +375,24 @@ fn fit_strikes(marked: &str) -> String {
             .map_or(rest.len(), |(i, _)| i);
         out.push_str(&rest[..extra]);
         rest = &rest[extra..];
+        if rest.starts_with('\n') || rest.starts_with("\r\n") {
+            let slash_start = out.trim_end_matches('\\').len();
+            if slash_start < out.len() {
+                let slashes = out[slash_start..].to_owned();
+                out.truncate(slash_start);
+                if last_open.is_some_and(|start| out.len() == start + 2) {
+                    // A backslash-only change has no text left to strike.
+                    out.truncate(last_open.unwrap_or(0));
+                    last_open = None;
+                    last_close = None;
+                } else {
+                    last_close = Some(out.len());
+                    out.push_str("~~");
+                }
+                out.push_str(&slashes);
+                continue;
+            }
+        }
         last_close = Some(out.len());
         out.push_str("~~");
     }
@@ -474,7 +500,7 @@ fn cell(id: (&'static str, usize), text: &str, tint: Option<Hsla>, html: bool) -
 }
 #[cfg(test)]
 mod tests {
-    use super::{fit_strikes, scroll_page};
+    use super::{fit_strikes, plain_paragraph, scroll_page};
     use gpui_kit as gpui;
     use gpui_kit::{
         AppContext, Context, IntoElement, ListAlignment, ListState, Render, Styled, TestAppContext,
@@ -626,6 +652,56 @@ mod tests {
         scroll_page(&state, false);
         assert_eq!(state.logical_scroll_top().item_ix, 0);
         assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+    }
+
+    #[test]
+    fn hard_breaks_keep_the_markdown_word_mark_path() {
+        for text in [
+            "alpha  \nbeta",
+            "alpha   \nbeta",
+            "alpha\\\nbeta",
+            "alpha  \r\nbeta",
+            "alpha\\\r\nbeta",
+        ] {
+            assert!(!plain_paragraph(text), "{text:?}");
+        }
+        for text in ["alpha\nbeta", "alpha \nbeta", "alpha    "] {
+            assert!(plain_paragraph(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn markdown_word_marks_preserve_the_hard_break() {
+        for new in ["alpha  \nbeta", "bravo  \nbeta", "bravo\\\nbeta"] {
+            assert!(!plain_paragraph(new));
+            let (_, marked_new) =
+                diffz_core::rich::mark_words("alpha\nbeta", new, ["~~", "~~"], ["", ""]);
+            assert_eq!(marked_new, new);
+        }
+    }
+
+    #[test]
+    fn removed_word_marks_keep_break_syntax_and_word_marks() {
+        for (old, new, expected_old) in [
+            ("alpha\\\nbeta", "alpha\nbeta", "~~alpha~~\\\nbeta"),
+            ("alpha\\\\\nbeta", "alpha\nbeta", "~~alpha~~\\\\\nbeta"),
+            ("alpha\\\\\\\nbeta", "alpha\nbeta", "~~alpha~~\\\\\\\nbeta"),
+            ("alpha\\\nbeta", "bravo\\\nbeta", "~~alpha~~\\\nbeta"),
+            ("alpha  \nbeta", "bravo\nbeta", "~~alpha~~  \nbeta"),
+            ("alpha\\\r\nbeta", "alpha\r\nbeta", "~~alpha~~\\\r\nbeta"),
+            ("\\\nbeta", "\nbeta", "\\\nbeta"),
+        ] {
+            let (marked_old, marked_new) =
+                diffz_core::rich::mark_words(old, new, ["~~", "~~"], ["", ""]);
+            assert_eq!(fit_strikes(&marked_old), expected_old, "old={old:?}");
+            assert_eq!(marked_new, new, "new={new:?}");
+        }
+
+        // Adding a break does not alter the unmarked new source.
+        let (old, new) =
+            diffz_core::rich::mark_words("alpha\nbeta", "alpha\\\nbeta", ["~~", "~~"], ["", ""]);
+        assert_eq!(fit_strikes(&old), "alpha\nbeta");
+        assert_eq!(new, "alpha\\\nbeta");
     }
 
     #[test]
