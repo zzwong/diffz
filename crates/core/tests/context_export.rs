@@ -133,8 +133,8 @@ fn selected_side_without_a_path_is_rejected() {
             Side::Right => patch.files[0].new_path = None,
         }
         let snapshot = Snapshot::new("missing side path".into(), patch, None, vec![]);
-        let error = ContextExport::selected(&snapshot, selection(&snapshot, side), vec![])
-            .unwrap_err();
+        let error =
+            ContextExport::selected(&snapshot, selection(&snapshot, side), vec![]).unwrap_err();
         assert_eq!(error, "selected source side has no file path");
     }
 }
