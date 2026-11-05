@@ -69,7 +69,8 @@ impl Viewport {
                     at -= 1;
                     column = cells[at].1.len();
                 } else {
-                    column = cells[at].1
+                    column = cells[at]
+                        .1
                         .grapheme_indices(true)
                         .map(|(i, _)| i)
                         .take_while(|i| *i < column)
@@ -82,7 +83,8 @@ impl Viewport {
                     at += 1;
                     column = 0;
                 } else {
-                    column = cells[at].1
+                    column = cells[at]
+                        .1
                         .grapheme_indices(true)
                         .map(|(i, _)| i)
                         .find(|i| *i > column)
