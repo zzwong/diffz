@@ -1,4 +1,5 @@
 use super::*;
+use diffz_core::review_details::Release;
 
 impl Workbench {
     pub fn open(&mut self, request: OpenRequest, refresh: bool, cx: &mut Context<Self>) {
@@ -236,20 +237,14 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
     pub fn open_release_step(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(a) = &self.active else { return };
         let Some(t) = &a.snapshot.remote else { return };
-        let (Some(refs), Some(release)) = (&t.compare, a.snapshot.overview.releases.get(index))
-        else {
+        let Some(refs) = &t.compare else {
             return;
         };
-        let base = index
-            .checked_sub(1)
-            .and_then(|i| a.snapshot.overview.releases[i].tag.clone())
-            .unwrap_or_else(|| refs.base.clone());
+        let Some(compare) = release_step_refs(refs, &a.snapshot.overview.releases, index) else {
+            return;
+        };
         let step = RemoteTarget {
-            compare: Some(CompareRefs {
-                base,
-                head: release.name(&refs.head).to_owned(),
-                direct: false,
-            }),
+            compare: Some(compare),
             ..t.clone()
         };
         let Some(provider) = self.services.provider(&t.provider) else {
@@ -548,6 +543,18 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         }
     }
 }
+/// Keep the mode used to load the step's file list, especially when its first base diverges.
+fn release_step_refs(refs: &CompareRefs, releases: &[Release], index: usize) -> Option<CompareRefs> {
+    let release = releases.get(index)?;
+    Some(CompareRefs {
+        base: index
+            .checked_sub(1)
+            .and_then(|i| releases[i].tag.clone())
+            .unwrap_or_else(|| refs.base.clone()),
+        head: release.name(&refs.head).to_owned(),
+        direct: refs.direct,
+    })
+}
 /// Whether the composer holds text that `saved`, the body of the draft it edits, does not.
 fn composing(text: &str, saved: Option<&str>) -> bool {
     !text.trim().is_empty() && saved != Some(text)
@@ -574,8 +581,90 @@ fn mode_after_detection(chosen: &SourceMode, found: Option<&OpenRequest>) -> Sou
 }
 #[cfg(test)]
 mod tests {
-    use super::{SourceMode, composing, handoff_blocker, mode_after_detection};
-    use diffz_core::{domain::ProviderId, provider::OpenRequest};
+    use super::{SourceMode, composing, handoff_blocker, mode_after_detection, release_step_refs};
+    use diffz_core::{
+        domain::{CompareRefs, ProviderId},
+        provider::OpenRequest,
+        review_details::Release,
+    };
+
+    fn releases() -> Vec<Release> {
+        [Some("v1"), Some("v2"), None]
+            .into_iter()
+            .enumerate()
+            .map(|(i, tag)| Release {
+                tag: tag.map(str::to_owned),
+                commit: format!("{i:040x}"),
+                date: None,
+                commits: 1,
+                files: vec![],
+                notes: None,
+                url: None,
+                shas: vec![],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn release_step_preserves_direct_mode_for_the_first_later_and_untagged_steps() {
+        let refs = CompareRefs {
+            base: "target".into(),
+            head: "feature".into(),
+            direct: true,
+        };
+        for (index, base, head) in [(0, "target", "v1"), (1, "v1", "v2"), (2, "v2", "feature")] {
+            assert_eq!(
+                release_step_refs(&refs, &releases(), index),
+                Some(CompareRefs {
+                    base: base.into(),
+                    head: head.into(),
+                    direct: true,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn release_step_preserves_merge_base_mode() {
+        let refs = CompareRefs {
+            base: "target".into(),
+            head: "feature".into(),
+            direct: false,
+        };
+        for (index, base, head) in [(0, "target", "v1"), (1, "v1", "v2"), (2, "v2", "feature")] {
+            assert_eq!(
+                release_step_refs(&refs, &releases(), index),
+                Some(CompareRefs {
+                    base: base.into(),
+                    head: head.into(),
+                    direct: false,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn release_step_preserves_original_ref_names() {
+        let refs = CompareRefs {
+            base: "release/stable".into(),
+            head: "feature/topic".into(),
+            direct: true,
+        };
+        let tail = vec![releases().pop().unwrap()];
+        assert_eq!(release_step_refs(&refs, &tail, 0), Some(refs));
+    }
+
+    #[test]
+    fn release_step_rejects_missing_indexes() {
+        let refs = CompareRefs {
+            base: "target".into(),
+            head: "feature".into(),
+            direct: true,
+        };
+        assert!(release_step_refs(&refs, &[], 0).is_none());
+        assert!(release_step_refs(&refs, &releases(), 3).is_none());
+        assert!(release_step_refs(&refs, &releases(), usize::MAX).is_none());
+    }
 
     #[test]
     fn unsaved_comments_block_a_handoff() {
