@@ -22,12 +22,14 @@ import tempfile
 import time
 import tomllib
 
-VERSION = "0.135.8"
 CRATES = ("cranelift-srcgen", "cranelift-assembler-x64-meta",
           "cranelift-assembler-x64", "cranelift-isle")
+# These releases have identical build.rs files, so they share the same patches.
 SOURCE_BLOBS = {
-    "cranelift-assembler-x64": "7309fe57e0eae2b42f08877df0ff41c09f89f5ca",
-    "cranelift-isle": "ceb30591af97166b2a897b6bc72ecb097df075ad",
+    version: {
+        "cranelift-assembler-x64": "7309fe57e0eae2b42f08877df0ff41c09f89f5ca",
+        "cranelift-isle": "ceb30591af97166b2a897b6bc72ecb097df075ad",
+    } for version in ("0.135.8", "0.137.1")
 }
 GROUPS = (("pass", "run_pass"), ("fail", "run_fail"),
           ("link", "run_link"), ("run", "run_run"),
@@ -53,25 +55,44 @@ def git_blob(data: bytes) -> str:
     return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
 
 
-def locked_crates(lock: dict) -> dict[str, dict]:
+def locked_crates(lock: dict) -> dict[str, dict[str, dict]]:
+    """Require a supported, complete set for every resolved generator version."""
     result = {}
-    for name in CRATES:
-        matches = [p for p in lock["package"] if p["name"] == name]
-        require(len(matches) == 1, f"expected one locked package: {name}")
-        p = matches[0]
-        require(p["version"] == VERSION, f"requalify {name} patches for {p['version']}")
+    for p in lock["package"]:
+        name = p["name"]
+        if name not in CRATES:
+            continue
+        version = p["version"]
+        require(version in SOURCE_BLOBS, f"requalify unsupported {name} {version}")
+        packages = result.setdefault(version, {})
+        require(name not in packages, f"duplicate locked package: {name} {version}")
         require(p.get("source") == "registry+https://github.com/rust-lang/crates.io-index",
-                f"unexpected source for {name}")
+                f"unexpected source for {name} {version}")
         require(bool(re.fullmatch(r"[a-f0-9]{64}", p.get("checksum", ""))),
-                f"missing or invalid locked archive checksum: {name}")
-        result[name] = p
-    return result
+                f"missing or invalid locked archive checksum: {name} {version}")
+        packages[name] = p
+    require(bool(result), "no locked generator packages")
+    for version, packages in result.items():
+        require(set(packages) == set(CRATES), f"incomplete generator packages for {version}")
+    return dict(sorted(result.items()))
 
 
-def unpack_verified(archive: Path, destination: Path, name: str, checksum: str) -> Path:
+def verify_annotations(module: str, versions: dict) -> None:
+    """Ensure every verified generator is patched in the actual Bazel graph."""
+    annotations = [line for line in module.splitlines() if line.startswith("crate.annotation(")]
+    for version in versions:
+        for name in SOURCE_BLOBS[version]:
+            prefix = f'crate.annotation(crate = "{name}", version = "={version}",'
+            patch = f'"//bazel:{name}-deterministic.patch"'
+            matches = [line for line in annotations if line.startswith(prefix)]
+            require(len(matches) == 1 and patch in matches[0] and 'patch_args = ["-p1"]' in matches[0],
+                    f"missing or invalid Bazel patch annotation: {name} {version}")
+
+
+def unpack_verified(archive: Path, destination: Path, name: str, version: str, checksum: str) -> Path:
     """Verify archive identity, then copy only regular files into owned scratch."""
     require(sha256(archive.read_bytes()) == checksum, f"archive checksum mismatch: {archive}")
-    prefix = f"{name}-{VERSION}"
+    prefix = f"{name}-{version}"
     with tarfile.open(archive, "r:gz") as tar:
         files = []
         names = set()
@@ -114,7 +135,7 @@ def test_records(data: bytes) -> list[tuple[str, str, str]]:
 class Experiment:
     def __init__(self, repo: Path, output: Path, rustc: str):
         self.repo, self.output, self.rustc = repo, output, rustc
-        self.report = {"schema_version": 1, "completed": False, "commands": [], "checks": {}}
+        self.report = {"schema_version": 2, "completed": False, "commands": [], "checks": {}}
 
     def run(self, label: str, args: list[str], cwd: Path, extra: dict | None = None,
             expect_success: bool = True) -> subprocess.CompletedProcess:
@@ -145,25 +166,38 @@ class Experiment:
 
     def verify(self, cargo_home: Path, scratch: Path) -> None:
         lock_bytes = (self.repo / "Cargo.lock").read_bytes()
-        packages = locked_crates(tomllib.loads(lock_bytes.decode()))
+        versions = locked_crates(tomllib.loads(lock_bytes.decode()))
+        verify_annotations((self.repo / "MODULE.bazel").read_text(), versions)
         channel = tomllib.loads((self.repo / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
-        version = self.run("rustc-version", [self.rustc, "-vV"], self.repo).stdout.decode()
-        require(version.startswith(f"rustc {channel} "), "use the repository's pinned stable rustc")
-        self.report.update({"rustc": version, "cargo_lock_sha256": sha256(lock_bytes),
+        rustc_version = self.run("rustc-version", [self.rustc, "-vV"], self.repo).stdout.decode()
+        require(rustc_version.startswith(f"rustc {channel} "), "use the repository's pinned stable rustc")
+        self.report.update({"rustc": rustc_version, "cargo_lock_sha256": sha256(lock_bytes),
             "revision": self.run("revision", ["git", "rev-parse", "HEAD"], self.repo).stdout.decode().strip(),
-            "archives": {name: p["checksum"] for name, p in packages.items()}})
+            "versions": {}})
+        for version, packages in versions.items():
+            out = self.output / version
+            out.mkdir()
+            work = scratch / version
+            work.mkdir()
+            experiment = Experiment(self.repo, out, self.rustc)
+            self.report["versions"][version] = experiment.report
+            experiment.verify_version(cargo_home, work, version, packages)
+            experiment.report["completed"] = True
+
+    def verify_version(self, cargo_home: Path, scratch: Path, version: str, packages: dict) -> None:
+        self.report["archives"] = {name: p["checksum"] for name, p in packages.items()}
         sources = {}
         for name, p in packages.items():
-            matches = sorted((cargo_home / "registry/cache").glob(f"*/{name}-{VERSION}.crate"))
-            require(bool(matches), f"cached {name}-{VERSION}.crate missing; run ordinary core checks first")
+            matches = sorted((cargo_home / "registry/cache").glob(f"*/{name}-{version}.crate"))
+            require(bool(matches), f"cached {name}-{version}.crate missing; run ordinary core checks first")
             archives = [a for a in matches if sha256(a.read_bytes()) == p["checksum"]]
             require(bool(archives), f"no checksum-valid cached archive for {name}")
-            sources[name] = unpack_verified(archives[0], scratch / "sources", name, p["checksum"])
-        for name, expected in SOURCE_BLOBS.items():
+            sources[name] = unpack_verified(archives[0], scratch / "sources", name, version, p["checksum"])
+        for name, expected in SOURCE_BLOBS[version].items():
             require(git_blob((sources[name] / "build.rs").read_bytes()) == expected,
                     f"review changed upstream build.rs before patching {name}")
         patched = {}
-        for name in SOURCE_BLOBS:
+        for name in SOURCE_BLOBS[version]:
             patched[name] = scratch / f"patched-{name}"
             shutil.copytree(sources[name], patched[name])
             patch = self.repo / "bazel" / f"{name}-deterministic.patch"
