@@ -103,6 +103,8 @@ impl LocalGit {
             "--src-prefix=a/",
             "--dst-prefix=b/",
             "--find-renames",
+            // Other formats omit gitlink headers or expand a different repository's files.
+            "--submodule=short",
         ]
         .into_iter()
         .map(Into::into)

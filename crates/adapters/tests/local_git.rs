@@ -2,7 +2,10 @@ use diffz_adapters::{
     local_git::{LocalGit, LocalMode},
     process::resolve_program,
 };
-use diffz_core::{patch::RowKind, provider::Cancellation};
+use diffz_core::{
+    patch::{ContentKind, RowKind},
+    provider::Cancellation,
+};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -206,4 +209,150 @@ fn symlinked_git_that_points_into_the_repository_is_rejected() {
         err.to_string()
             .contains("cannot live inside the repository")
     );
+}
+
+fn head_oid(repo: &Path) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "HEAD"])
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    String::from_utf8(output.stdout).unwrap().trim().into()
+}
+
+fn assert_submodule_format_survives_config(
+    mode: LocalMode,
+    program: PathBuf,
+    enable_format: impl FnOnce(&Path),
+) {
+    let d = tempfile::tempdir().unwrap();
+    let submodule = d.path().join("a-submodule");
+    std::fs::create_dir(&submodule).unwrap();
+    for root in [d.path(), submodule.as_path()] {
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.email", "test@example.invalid"]);
+        git(root, &["config", "user.name", "Test"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+    }
+    std::fs::write(submodule.join("data.txt"), "old\n").unwrap();
+    git(&submodule, &["add", "data.txt"]);
+    git(&submodule, &["commit", "-m", "submodule base"]);
+    let old_oid = head_oid(&submodule);
+    std::fs::write(d.path().join("z.txt"), "old\n").unwrap();
+    git(d.path(), &["add", "z.txt"]);
+    git(
+        d.path(),
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{old_oid},a-submodule"),
+        ],
+    );
+    git(d.path(), &["commit", "-m", "base"]);
+
+    std::fs::write(submodule.join("data.txt"), "new\n").unwrap();
+    git(&submodule, &["commit", "-am", "submodule change"]);
+    let new_oid = head_oid(&submodule);
+    std::fs::write(d.path().join("z.txt"), "new\n").unwrap();
+    match &mode {
+        LocalMode::Compare { .. } => {
+            git(d.path(), &["add", "a-submodule", "z.txt"]);
+            git(d.path(), &["commit", "-m", "change"]);
+        }
+        LocalMode::Staged => git(d.path(), &["add", "a-submodule", "z.txt"]),
+        LocalMode::WorkingTree => {}
+    }
+
+    let g = LocalGit::new(program);
+    git(d.path(), &["config", "diff.submodule", "short"]);
+    let control = g
+        .snapshot(d.path(), mode.clone(), Cancellation::default())
+        .unwrap();
+    assert_eq!(control.patch.files.len(), 2);
+    let gitlink = control
+        .patch
+        .files
+        .iter()
+        .find(|file| file.path().bytes() == b"a-submodule")
+        .unwrap();
+    assert_eq!(gitlink.content, ContentKind::Submodule);
+    assert_eq!(gitlink.old_mode.as_deref(), Some("160000"));
+    assert_eq!(gitlink.new_mode.as_deref(), Some("160000"));
+    assert_eq!(gitlink.old_oid.as_deref(), Some(old_oid.as_str()));
+    assert_eq!(gitlink.new_oid.as_deref(), Some(new_oid.as_str()));
+    assert!(
+        control
+            .patch
+            .files
+            .iter()
+            .any(|file| file.path().bytes() == b"z.txt")
+    );
+
+    enable_format(d.path());
+    // Include the submodule and superproject config, index, refs, objects, and worktree.
+    let before = repository_files(d.path());
+    let snapshot = g.snapshot(d.path(), mode, Cancellation::default());
+    assert_eq!(repository_files(d.path()), before);
+    assert_eq!(
+        serde_json::to_vec(&snapshot.unwrap().patch).unwrap(),
+        serde_json::to_vec(&control.patch).unwrap(),
+    );
+}
+
+#[test]
+fn configured_submodule_formats_preserve_gitlink_changes() {
+    for format in ["log", "diff"] {
+        for mode in [
+            LocalMode::Compare {
+                base: "HEAD~1".into(),
+                head: "HEAD".into(),
+            },
+            LocalMode::Staged,
+            LocalMode::WorkingTree,
+        ] {
+            assert_submodule_format_survives_config(
+                mode,
+                resolve_program("git").unwrap(),
+                |repo| git(repo, &["config", "diff.submodule", format]),
+            );
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn global_submodule_formats_preserve_gitlink_changes() {
+    for format in ["log", "diff"] {
+        let bin = tempfile::tempdir().unwrap();
+        let config = bin.path().join("gitconfig");
+        let settings = format!("[diff]\n\tsubmodule = {format}\n");
+        std::fs::write(&config, &settings).unwrap();
+        let program = bin.path().join("git");
+        let quote = |path: &Path| format!("'{}'", path.to_str().unwrap().replace('\'', "'\\''"));
+        fake_cli::write_executable(
+            &program,
+            &format!(
+                "#!/bin/sh\nexport GIT_CONFIG_NOSYSTEM=1\nexport GIT_CONFIG_GLOBAL={}\nexec {} \"$@\"\n",
+                quote(&config),
+                quote(&resolve_program("git").unwrap()),
+            ),
+        );
+        for mode in [
+            LocalMode::Compare {
+                base: "HEAD~1".into(),
+                head: "HEAD".into(),
+            },
+            LocalMode::Staged,
+            LocalMode::WorkingTree,
+        ] {
+            assert_submodule_format_survives_config(mode, program.clone(), |repo| {
+                git(repo, &["config", "--unset", "diff.submodule"]);
+            });
+        }
+        assert_eq!(std::fs::read_to_string(config).unwrap(), settings);
+    }
 }
