@@ -280,6 +280,9 @@ fn pull_bar((edge, progress): (i8, f32), skin: &Skin) -> AnyElement {
 /// A block carrying no Markdown syntax, so rendering it as an HTML paragraph is safe.
 fn plain_paragraph(text: &str) -> bool {
     !text.contains(['`', '[', '*', '_', '<', '>', '|', '!'])
+        // The HTML word-mark path collapses newlines, unlike Markdown hard breaks.
+        && !text.contains("  \n")
+        && !text.contains("\\\n")
         && text.lines().all(|l| {
             let t = l.trim_start();
             !(t.starts_with('#')
@@ -469,7 +472,32 @@ fn cell(id: (&'static str, usize), text: &str, tint: Option<Hsla>, html: bool) -
 }
 #[cfg(test)]
 mod tests {
-    use super::fit_strikes;
+    use super::{fit_strikes, plain_paragraph};
+
+    #[test]
+    fn hard_breaks_keep_the_markdown_word_mark_path() {
+        for text in ["alpha  \nbeta", "alpha   \nbeta", "alpha\\\nbeta"] {
+            assert!(!plain_paragraph(text), "{text:?}");
+        }
+        for text in ["alpha\nbeta", "alpha \nbeta", "alpha    "] {
+            assert!(plain_paragraph(text), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn markdown_word_marks_preserve_the_hard_break() {
+        for new in ["alpha  \nbeta", "bravo  \nbeta", "bravo\\\nbeta"] {
+            assert!(!plain_paragraph(new));
+            let (_, marked_new) = diffz_core::rich::mark_words(
+                "alpha\nbeta",
+                new,
+                ["~~", "~~"],
+                ["", ""],
+            );
+            assert_eq!(marked_new, new);
+        }
+    }
+
     #[test]
     fn strikes_are_widened_to_whitespace_and_multiline_ones_are_dropped() {
         assert_eq!(fit_strikes("a ~~b~~ c"), "a ~~b~~ c");
