@@ -212,6 +212,14 @@ impl Workbench {
             return;
         }
         if self.diff_focus.is_focused(window) {
+            if self.rich_active() && matches!(key, "pageup" | "pagedown") {
+                if let Some(cache) = &self.rich_cache {
+                    crate::rich_view::scroll_page(&cache.list, key == "pagedown");
+                }
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
             let document = mods.platform || mods.control;
             let motion = match key {
                 "up" => Some(Motion::Up),
@@ -246,3 +254,4 @@ impl Workbench {
         }
     }
 }
+

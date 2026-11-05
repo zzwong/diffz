@@ -203,6 +203,11 @@ impl Workbench {
             .into_any_element()
     }
 }
+/// Page the visible prose list, leaving the source view's saved position alone.
+pub(crate) fn scroll_page(list: &ListState, forward: bool) {
+    let height = list.viewport_bounds().size.height;
+    list.scroll_by(height * if forward { 0.85 } else { -0.85 });
+}
 /// Thumb top and height for the list's own scroll metrics, or none while the content
 /// fits. The list measures item heights lazily, so the travel it reports can shift as
 /// rows come into view.
@@ -469,7 +474,157 @@ fn cell(id: (&'static str, usize), text: &str, tint: Option<Hsla>, html: bool) -
 }
 #[cfg(test)]
 mod tests {
-    use super::fit_strikes;
+    use super::{fit_strikes, scroll_page};
+    use gpui_kit as gpui;
+    use gpui_kit::{
+        AppContext, Context, IntoElement, ListAlignment, ListState, Render, Styled,
+        TestAppContext, VisualTestContext, Window, div, list, point, px, size,
+    };
+
+    struct PageTestView(ListState);
+
+    impl Render for PageTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            list(self.0.clone(), |_, _, _| {
+                div().h(px(20.)).w_full().into_any_element()
+            })
+            .size_full()
+        }
+    }
+
+    fn draw_list(cx: &mut VisualTestContext, state: &ListState, height: f32) {
+        cx.draw(point(px(0.), px(0.)), size(px(100.), px(height)), |_, cx| {
+            cx.new(|_| PageTestView(state.clone())).into_any_element()
+        });
+    }
+
+    #[gpui::test]
+    fn paging_scrolls_the_rich_list_in_both_directions(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(100, ListAlignment::Top, px(0.))
+            .with_uniform_item_height(px(20.));
+        draw_list(cx, &state, 200.);
+
+        scroll_page(&state, true);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 8);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(10.));
+
+        scroll_page(&state, true);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 17);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+
+        scroll_page(&state, false);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 8);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(10.));
+    }
+
+    #[gpui::test]
+    fn rich_paging_uses_current_height_and_clamps_at_the_edges(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(100, ListAlignment::Top, px(0.))
+            .with_uniform_item_height(px(20.));
+        draw_list(cx, &state, 200.);
+        scroll_page(&state, false);
+        draw_list(cx, &state, 200.);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+
+        draw_list(cx, &state, 400.);
+        scroll_page(&state, true);
+        draw_list(cx, &state, 400.);
+        assert_eq!(state.logical_scroll_top().item_ix, 17);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+
+        state.scroll_to_end();
+        draw_list(cx, &state, 400.);
+        let bottom = state.logical_scroll_top();
+        scroll_page(&state, true);
+        draw_list(cx, &state, 400.);
+        assert_eq!(state.logical_scroll_top().item_ix, bottom.item_ix);
+        assert_eq!(state.logical_scroll_top().offset_in_item, bottom.offset_in_item);
+    }
+
+    #[gpui::test]
+    fn rich_paging_moves_within_a_block_taller_than_the_viewport(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(1, ListAlignment::Top, px(0.));
+        let draw = |cx: &mut VisualTestContext| {
+            cx.draw(point(px(0.), px(0.)), size(px(100.), px(200.)), |_, _| {
+                list(state.clone(), |_, _, _| {
+                    div().h(px(1_000.)).w_full().into_any_element()
+                })
+                .size_full()
+                .into_any_element()
+            });
+        };
+        draw(cx);
+        scroll_page(&state, true);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(170.));
+        scroll_page(&state, false);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn rich_paging_handles_lazy_variable_height_rows(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(20, ListAlignment::Top, px(0.));
+        let draw = |cx: &mut VisualTestContext| {
+            cx.draw(point(px(0.), px(0.)), size(px(100.), px(200.)), |_, _| {
+                list(state.clone(), |ix, _, _| {
+                    div()
+                        .h(px(if ix % 2 == 0 { 60. } else { 100. }))
+                        .w_full()
+                        .into_any_element()
+                })
+                .size_full()
+                .into_any_element()
+            });
+        };
+        draw(cx);
+        scroll_page(&state, true);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 2);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(10.));
+        scroll_page(&state, false);
+        draw(cx);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+    }
+
+    #[gpui::test]
+    fn rich_paging_does_not_move_empty_or_short_lists(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        for count in [0, 1, 5] {
+            let state = ListState::new(count, ListAlignment::Top, px(0.));
+            draw_list(cx, &state, 200.);
+            scroll_page(&state, true);
+            draw_list(cx, &state, 200.);
+            assert_eq!(state.logical_scroll_top().item_ix, 0);
+            assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+            scroll_page(&state, false);
+            draw_list(cx, &state, 200.);
+            assert_eq!(state.logical_scroll_top().item_ix, 0);
+            assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+        }
+    }
+
+    #[test]
+    fn rich_paging_before_layout_is_a_noop() {
+        let state = ListState::new(100, ListAlignment::Top, px(0.))
+            .with_uniform_item_height(px(20.));
+        scroll_page(&state, true);
+        scroll_page(&state, false);
+        assert_eq!(state.logical_scroll_top().item_ix, 0);
+        assert_eq!(state.logical_scroll_top().offset_in_item, px(0.));
+    }
+
     #[test]
     fn strikes_are_widened_to_whitespace_and_multiline_ones_are_dropped() {
         assert_eq!(fit_strikes("a ~~b~~ c"), "a ~~b~~ c");
@@ -485,3 +640,4 @@ mod tests {
         assert_eq!(fit_strikes("~~foo~~-~~bar~~ end"), "~~foo-bar~~ end");
     }
 }
+
