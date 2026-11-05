@@ -38,7 +38,7 @@ def metadata(*, proc_macro: bool = False) -> dict:
 
 
 class GeneratorTests(unittest.TestCase):
-    def invoke(self, payload: dict, existing: str = "sentinel\n") -> tuple[subprocess.CompletedProcess, str]:
+    def invoke(self, payload: dict, existing: str = "sentinel\n", *, check: bool = False) -> tuple[subprocess.CompletedProcess, str]:
         with tempfile.TemporaryDirectory(prefix="diffz-linux-boundary-") as temporary:
             root = Path(temporary)
             (root / "scripts").mkdir()
@@ -58,7 +58,7 @@ class GeneratorTests(unittest.TestCase):
             target = root / "bazel/vendor_linux.bzl"
             target.write_text(existing)
             process = subprocess.run(
-                [sys.executable, str(root / "scripts/bazel-vendor-linux.py")],
+                [sys.executable, str(root / "scripts/bazel-vendor-linux.py")] + (["--check"] if check else []),
                 cwd=root, env={**os.environ, "PATH": str(root / "bin") + os.pathsep + os.environ.get("PATH", "")},
                 capture_output=True, text=True, timeout=10,
             )
@@ -81,6 +81,20 @@ class GeneratorTests(unittest.TestCase):
         self.assertNotIn('crates__inactive', output)
         self.assertNotIn('crates__test-only', output)
         self.assertIn('rustc_flags = ["-Cdebuginfo=1"]', output)
+
+    def test_check_detects_changed_resolved_dependency_without_writing(self):
+        result, generated = self.invoke(metadata())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result, output = self.invoke(metadata(), generated, check=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(output, generated)
+        changed = metadata()
+        changed["packages"][1]["version"] = "1.2.4"
+        result, output = self.invoke(changed, generated, check=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("crates__x11-dep-1.2.3", result.stderr)
+        self.assertIn("crates__x11-dep-1.2.4", result.stderr)
+        self.assertEqual(output, generated)
 
     def test_unsupported_new_proc_macro_fails_without_overwriting_output(self):
         result, output = self.invoke(metadata(proc_macro=True))

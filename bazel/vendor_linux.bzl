@@ -28,7 +28,7 @@ def vendor_linux():
             '@@rules_rust++crate+crates__gpui-pre-http-client-0.3.9//:http_client',
             '@@rules_rust++crate+crates__gpui-pre-util-0.3.9//:gpui_util',
             '@@rules_rust++crate+crates__gpui-pre-wgpu-0.3.9//:gpui_wgpu',
-            '@@rules_rust++crate+crates__libc-0.2.189//:libc',
+            '@@rules_rust++crate+crates__libc-0.2.191//:libc',
             '@@rules_rust++crate+crates__log-0.4.34//:log',
             '@@rules_rust++crate+crates__notify-rust-4.18.0//:notify_rust',
             '@@rules_rust++crate+crates__oo7-0.6.0//:oo7',
