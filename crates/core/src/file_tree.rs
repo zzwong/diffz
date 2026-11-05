@@ -16,7 +16,8 @@ pub struct TreeRow {
 #[derive(Default, Debug)]
 struct Directory {
     dirs: BTreeMap<String, Directory>,
-    files: BTreeMap<String, (FileId, String)>,
+    // Display names can collide for distinct Git paths; keep file identity in the key.
+    files: BTreeMap<(String, FileId), String>,
 }
 #[derive(Default, Debug)]
 pub struct FileTree {
@@ -49,7 +50,7 @@ impl FileTree {
             let mut dir = &mut root;
             while let Some(part) = parts.next() {
                 if parts.peek().is_none() {
-                    dir.files.insert(part.into(), (id.clone(), path.clone()));
+                    dir.files.insert((part.into(), id.clone()), path.clone());
                     break;
                 }
                 dir = dir.dirs.entry(part.into()).or_default();
@@ -94,7 +95,7 @@ fn flatten(
             node = child;
         }
         if node.dirs.is_empty() && node.files.len() == 1 {
-            let (name, (id, file_path)) = node.files.first_key_value().unwrap();
+            let ((name, id), file_path) = node.files.first_key_value().unwrap();
             rows.push(TreeRow {
                 path: file_path.clone(),
                 label: name.clone(),
@@ -120,7 +121,7 @@ fn flatten(
             flatten(node, &path, depth + 1, collapsed, filtering, old, rows);
         }
     }
-    for (name, (id, path)) in &dir.files {
+    for ((name, id), path) in &dir.files {
         rows.push(TreeRow {
             path: path.clone(),
             label: name.clone(),
