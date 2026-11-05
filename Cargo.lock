@@ -1648,10 +1648,12 @@ name = "diffz-ui"
 version = "0.4.0"
 dependencies = [
  "anyhow",
+ "diffz-adapters",
  "diffz-core",
  "gpui-kit",
  "serde_json",
  "smol",
+ "tempfile",
  "unicode-bidi",
  "unicode-linebreak",
  "unicode-segmentation",

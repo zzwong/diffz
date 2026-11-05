@@ -25,6 +25,8 @@ unicode-linebreak = { workspace = true }
 unicode-bidi = "=0.3.18"
 
 [dev-dependencies]
+diffz-adapters = { workspace = true }
+tempfile = { workspace = true }
 gpui-kit = { workspace = true, features = ["test-support"] }
 
 [features]
