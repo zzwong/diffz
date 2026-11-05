@@ -25,3 +25,16 @@ For GitLab publication, use a disposable merge request with writes explicitly
 enabled. Publish a multi-line comment and request changes, then refresh the MR
 in both GitLab and Diffz. Confirm the range and reviewer state match. Do not use
 the local fake-`glab` tests as evidence of remote API compatibility.
+
+## Rich-view keyboard paging
+
+Open fixture F01 and enable rich prose mode. With the diff focused, press
+PageDown twice and PageUp once. Confirm the visible prose moves by about 85%
+of the current viewport each time. Resize the window and repeat. At either end,
+repeated paging must stay in the same file without overscrolling.
+
+Switch to source mode and confirm rich paging did not move the source position;
+PageUp and PageDown should still scroll the source when it is visible. Switch
+back to rich mode and confirm its position is retained. Repeat with the find
+input focused and with a modal panel open: page keys must not scroll the diff.
+
