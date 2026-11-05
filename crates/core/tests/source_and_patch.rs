@@ -297,7 +297,8 @@ fn full_patch(hunk: &[u8]) -> Vec<u8> {
 
 #[test]
 fn terminal_cr_patch_rows_match_source_bytes() {
-    let cases: &[(&str, &[u8], &[u8], &[u8])] = &[
+    type PatchCase<'a> = (&'a str, &'a [u8], &'a [u8], &'a [u8]);
+    let cases: &[PatchCase<'_>] = &[
         (
             "added",
             b"@@ -0,0 +1 @@\n+new\r\n\\ No newline at end of file\n",
