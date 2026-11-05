@@ -1,0 +1,28 @@
+diff --git "a/line\nname.txt" "b/line\nname.txt"
+new file mode 100644
+index 0000000000000000000000000000000000000000..366f17ff507eeda97ee143e1ae7ef7933e52f89b
+--- /dev/null
++++ "b/line\nname.txt"
+@@ -0,0 +1 @@
++file 1
+diff --git "a/line\\nname.txt" "b/line\\nname.txt"
+new file mode 100644
+index 0000000000000000000000000000000000000000..fac580e980837fda4244a08ee543e0e0aa16f2e2
+--- /dev/null
++++ "b/line\\nname.txt"
+@@ -0,0 +1 @@
++file 2
+diff --git "a/raw\\xff.txt" "b/raw\\xff.txt"
+new file mode 100644
+index 0000000000000000000000000000000000000000..4b24a15d33f9a589c13e034f9d5ee615f2400c76
+--- /dev/null
++++ "b/raw\\xff.txt"
+@@ -0,0 +1 @@
++file 4
+diff --git "a/raw\377.txt" "b/raw\377.txt"
+new file mode 100644
+index 0000000000000000000000000000000000000000..dc43ed8669d01ce53843e2fc282718ebe5d81232
+--- /dev/null
++++ "b/raw\377.txt"
+@@ -0,0 +1 @@
++file 3
