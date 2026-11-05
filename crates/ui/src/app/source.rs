@@ -240,7 +240,9 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         let Some(refs) = &t.compare else {
             return;
         };
-        let Some(compare) = release_step_refs(refs, &a.snapshot.overview.releases, index) else {
+        let Some(compare) =
+            release_step_refs(&t.provider, refs, &a.snapshot.overview.releases, index)
+        else {
             return;
         };
         let step = RemoteTarget {
@@ -543,8 +545,9 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         }
     }
 }
-/// Keep the mode used to load the step's file list, especially when its first base diverges.
+/// Match the provider mode used to load the step's file list.
 fn release_step_refs(
+    provider: &ProviderId,
     refs: &CompareRefs,
     releases: &[Release],
     index: usize,
@@ -556,7 +559,9 @@ fn release_step_refs(
             .and_then(|i| releases[i].tag.clone())
             .unwrap_or_else(|| refs.base.clone()),
         head: release.name(&refs.head).to_owned(),
-        direct: refs.direct,
+        // GitHub computes every release step from its merge base, even when the parent is
+        // direct. A first-parent release may precede a merge of the parent compare base.
+        direct: *provider == ProviderId::GITLAB && refs.direct,
     })
 }
 /// Whether the composer holds text that `saved`, the body of the draft it edits, does not.
@@ -618,7 +623,7 @@ mod tests {
         };
         for (index, base, head) in [(0, "target", "v1"), (1, "v1", "v2"), (2, "v2", "feature")] {
             assert_eq!(
-                release_step_refs(&refs, &releases(), index),
+                release_step_refs(&ProviderId::GITLAB, &refs, &releases(), index),
                 Some(CompareRefs {
                     base: base.into(),
                     head: head.into(),
@@ -637,7 +642,7 @@ mod tests {
         };
         for (index, base, head) in [(0, "target", "v1"), (1, "v1", "v2"), (2, "v2", "feature")] {
             assert_eq!(
-                release_step_refs(&refs, &releases(), index),
+                release_step_refs(&ProviderId::GITLAB, &refs, &releases(), index),
                 Some(CompareRefs {
                     base: base.into(),
                     head: head.into(),
@@ -648,6 +653,98 @@ mod tests {
     }
 
     #[test]
+    fn github_direct_parent_uses_merge_base_for_every_release_step() {
+        let refs = CompareRefs {
+            base: "target".into(),
+            head: "feature".into(),
+            direct: true,
+        };
+        for (index, base, head) in [(0, "target", "v1"), (1, "v1", "v2"), (2, "v2", "feature")] {
+            assert_eq!(
+                release_step_refs(&ProviderId::GITHUB, &refs, &releases(), index),
+                Some(CompareRefs {
+                    base: base.into(),
+                    head: head.into(),
+                    direct: false,
+                })
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn github_direct_parent_opens_first_step_using_its_merge_base() {
+        use diffz_adapters::github::{GithubReader, GithubRules, GithubTarget};
+        use diffz_core::provider::{Cancellation, ReviewRules};
+        use std::{
+            io::Write,
+            process::{Command, Stdio},
+        };
+
+        // The fixture is A -> v1 -> merge, with base merged as merge's second parent.
+        // base is an ancestor of merge, but is not an ancestor of v1.
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("fake-gh");
+        // Write in a child process so parallel tests cannot inherit a write fd for this script.
+        let mut writer = Command::new("/bin/sh")
+            .args(["-c", r#"cat > "$1" && chmod 700 "$1""#, "sh"])
+            .arg(&program)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        writer
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(include_str!("testdata/release_step_github.py").as_bytes())
+            .unwrap();
+        assert!(writer.wait().unwrap().success());
+        let reader = GithubReader::new(program);
+        let GithubTarget::Compare(parent) =
+            GithubTarget::parse("https://github.com/example/project/compare/base..head").unwrap()
+        else {
+            panic!("expected compare");
+        };
+        let parent = reader.compare(&parent, Cancellation::default()).unwrap();
+        let target = parent.remote.as_ref().unwrap();
+        let (releases, _) = reader.releases(target, Cancellation::default()).unwrap();
+        assert_eq!(releases[0].tag.as_deref(), Some("v1"));
+        assert_eq!(releases[0].files[0].path, "feature.txt");
+        let compare = release_step_refs(
+            &target.provider,
+            target.compare.as_ref().unwrap(),
+            &releases,
+            0,
+        )
+        .unwrap();
+        let mut step = target.clone();
+        step.compare = Some(compare);
+        let OpenRequest::Remote { address, .. } = (&GithubRules as &dyn ReviewRules).reopen(&step)
+        else {
+            panic!("expected remote request");
+        };
+        assert_eq!(
+            address,
+            "https://github.com/example/project/compare/base...v1"
+        );
+        let GithubTarget::Compare(parsed) = GithubTarget::parse(&address).unwrap() else {
+            panic!("expected compare");
+        };
+        let opened = reader.compare(&parsed, Cancellation::default()).unwrap();
+        assert_eq!(opened.remote.unwrap().comparison_base, "a".repeat(40));
+        assert_eq!(opened.patch.files.len(), releases[0].files.len());
+        assert_eq!(opened.patch.files[0].path().utf8().unwrap(), "feature.txt");
+
+        // The former unconditional direct mode rejects this otherwise valid parent step.
+        let mut direct = parsed;
+        direct.refs.direct = true;
+        let error = reader
+            .compare(&direct, Cancellation::default())
+            .unwrap_err();
+        assert!(error.to_string().contains("use BASE...HEAD"));
+    }
+
+    #[test]
     fn release_step_preserves_original_ref_names() {
         let refs = CompareRefs {
             base: "release/stable".into(),
@@ -655,7 +752,10 @@ mod tests {
             direct: true,
         };
         let tail = vec![releases().pop().unwrap()];
-        assert_eq!(release_step_refs(&refs, &tail, 0), Some(refs));
+        assert_eq!(
+            release_step_refs(&ProviderId::GITLAB, &refs, &tail, 0),
+            Some(refs)
+        );
     }
 
     #[test]
@@ -665,9 +765,9 @@ mod tests {
             head: "feature".into(),
             direct: true,
         };
-        assert!(release_step_refs(&refs, &[], 0).is_none());
-        assert!(release_step_refs(&refs, &releases(), 3).is_none());
-        assert!(release_step_refs(&refs, &releases(), usize::MAX).is_none());
+        assert!(release_step_refs(&ProviderId::GITLAB, &refs, &[], 0).is_none());
+        assert!(release_step_refs(&ProviderId::GITLAB, &refs, &releases(), 3).is_none());
+        assert!(release_step_refs(&ProviderId::GITLAB, &refs, &releases(), usize::MAX).is_none());
     }
 
     #[test]
