@@ -257,6 +257,22 @@ fn bad(line: usize, msg: impl Into<String>) -> PatchError {
         message: msg.into(),
     }
 }
+/// Git adds an LF before the EOF marker, even when the source ends in a bare CR.
+/// Move that CR back into the text before discarding the synthetic line ending.
+fn mark_no_final_newline(row: &mut PatchRow, line: usize) -> Result<(), PatchError> {
+    match row.ending {
+        LineEnding::None => return Err(bad(line, "duplicate EOF marker")),
+        LineEnding::CrLf => {
+            let mut text = String::with_capacity(row.text.len() + 1);
+            text.push_str(&row.text);
+            text.push('\r');
+            row.text = text.into();
+        }
+        LineEnding::Lf => {}
+    }
+    row.ending = LineEnding::None;
+    Ok(())
+}
 fn utf8(v: &[u8], line: usize) -> Result<&str, PatchError> {
     std::str::from_utf8(v).map_err(|_| {
         bad(
@@ -426,10 +442,7 @@ pub fn parse_patch(bytes: &[u8], limits: ParseLimits) -> Result<PatchReport, Pat
                             .rows
                             .last_mut()
                             .ok_or_else(|| bad(i, "orphan EOF marker"))?;
-                        if last.ending == LineEnding::None {
-                            return Err(bad(i, "duplicate EOF marker"));
-                        }
-                        last.ending = LineEnding::None;
+                        mark_no_final_newline(last, i)?;
                         i += 1;
                         continue;
                     }
@@ -487,10 +500,11 @@ pub fn parse_patch(bytes: &[u8], limits: ParseLimits) -> Result<PatchReport, Pat
                     i += 1;
                 }
                 if i < lines.len() && lines[i] == b"\\ No newline at end of file" {
-                    h.rows
+                    let last = h
+                        .rows
                         .last_mut()
-                        .ok_or_else(|| bad(i, "orphan EOF marker"))?
-                        .ending = LineEnding::None;
+                        .ok_or_else(|| bad(i, "orphan EOF marker"))?;
+                    mark_no_final_newline(last, i)?;
                     i += 1;
                 }
                 f.hunks.push(h);
@@ -590,3 +604,4 @@ pub fn parse_patch(bytes: &[u8], limits: ParseLimits) -> Result<PatchReport, Pat
     }
     Ok(PatchReport { files })
 }
+

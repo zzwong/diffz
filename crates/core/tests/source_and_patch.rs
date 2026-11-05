@@ -1,4 +1,6 @@
-use diffz_core::domain::{LineEnding, RepoPath, Side, SourceDocument};
+use diffz_core::domain::{
+    LineEnding, RepoPath, Side, Snapshot, SourceDocument, SourcePoint, SourceSelection,
+};
 use diffz_core::inline::word_diff;
 use diffz_core::patch::{ChangeKind, ContentKind, ParseLimits, PatchError, parse_patch};
 
@@ -283,4 +285,153 @@ fn stored_snapshots_keep_their_identity_across_path_encodings() {
         restored.patch.files[0].new_path,
         legacy.patch.files[0].new_path
     );
+}
+
+fn full_patch(hunk: &[u8]) -> Vec<u8> {
+    [
+        b"diff --git a/source.txt b/source.txt\n--- a/source.txt\n+++ b/source.txt\n".as_slice(),
+        hunk,
+    ]
+    .concat()
+}
+
+#[test]
+fn terminal_cr_patch_rows_match_source_bytes() {
+    let cases: &[(&str, &[u8], &[u8], &[u8])] = &[
+        (
+            "added",
+            b"@@ -0,0 +1 @@\n+new\r\n\\ No newline at end of file\n",
+            b"",
+            b"new\r",
+        ),
+        (
+            "removed",
+            b"@@ -1 +0,0 @@\n-old\r\n\\ No newline at end of file\n",
+            b"old\r",
+            b"",
+        ),
+        (
+            "both marker paths",
+            b"@@ -1 +1 @@\n-old\r\n\\ No newline at end of file\n+new\r\n\\ No newline at end of file\n",
+            b"old\r",
+            b"new\r",
+        ),
+        (
+            "context",
+            b"@@ -1,2 +1,2 @@\n-old\n+new\n tail\r\n\\ No newline at end of file\n",
+            b"old\ntail\r",
+            b"new\ntail\r",
+        ),
+        (
+            "only added CR",
+            b"@@ -1 +1 @@\n-same\n\\ No newline at end of file\n+same\r\n\\ No newline at end of file\n",
+            b"same",
+            b"same\r",
+        ),
+        (
+            "only removed CR",
+            b"@@ -1 +1 @@\n-same\r\n\\ No newline at end of file\n+same\n\\ No newline at end of file\n",
+            b"same\r",
+            b"same",
+        ),
+        (
+            "CR only",
+            b"@@ -0,0 +1 @@\n+\r\n\\ No newline at end of file\n",
+            b"",
+            b"\r",
+        ),
+        (
+            "multiple CRs",
+            b"@@ -1 +1 @@\n-old\r\r\n\\ No newline at end of file\n+new\r\r\n\\ No newline at end of file\n",
+            b"old\r\r",
+            b"new\r\r",
+        ),
+        (
+            "CRLF control",
+            b"@@ -1 +1 @@\n-old\r\n+new\r\n",
+            b"old\r\n",
+            b"new\r\n",
+        ),
+        (
+            "unterminated control",
+            b"@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n",
+            b"old",
+            b"new",
+        ),
+    ];
+    for &(name, hunk, before, after) in cases {
+        let parsed = parse_patch(&full_patch(hunk), ParseLimits::default()).unwrap();
+        let file = &parsed.files[0];
+        for (side, expected) in [(Side::Left, before), (Side::Right, after)] {
+            let original = SourceDocument::from_utf8(expected.to_vec()).unwrap();
+            let mut reconstructed = Vec::new();
+            let rows: Vec<_> = file.hunks[0]
+                .rows
+                .iter()
+                .filter(|r| r.number(side).is_some())
+                .collect();
+            assert_eq!(rows.len(), original.lines().len(), "{name}: {side:?}");
+            for row in rows {
+                let line = row.number(side).unwrap();
+                assert_eq!(
+                    row.text.as_ref(),
+                    original.line_text(line).unwrap(),
+                    "{name}: {side:?} line {line}"
+                );
+                assert_eq!(
+                    row.ending,
+                    original.lines()[line as usize - 1].ending,
+                    "{name}: {side:?}"
+                );
+                reconstructed.extend_from_slice(row.text.as_bytes());
+                reconstructed.extend_from_slice(row.ending.bytes());
+            }
+            assert_eq!(reconstructed, expected, "{name}: {side:?}");
+        }
+    }
+}
+
+#[test]
+fn copy_selection_keeps_terminal_cr() {
+    let patch = parse_patch(
+        &full_patch(b"@@ -1 +1 @@\n-old\r\n\\ No newline at end of file\n+new\r\n\\ No newline at end of file\n"),
+        ParseLimits::default(),
+    )
+    .unwrap();
+    let snapshot = Snapshot::new("terminal CR".into(), patch, None, vec![]);
+    let file = &snapshot.patch.files[0];
+    for (side, expected) in [(Side::Left, b"old\r"), (Side::Right, b"new\r")] {
+        let row = file.line(side, 1).unwrap();
+        assert_eq!(row.ending, LineEnding::None);
+        let point = |byte_column| SourcePoint {
+            snapshot: snapshot.id.clone(),
+            file: file.id.clone(),
+            side,
+            line: 1,
+            byte_column,
+        };
+        let selection = SourceSelection {
+            start: point(0),
+            end: point(row.text.len()),
+        };
+        assert_eq!(
+            snapshot.copy_selection(&selection).unwrap().as_bytes(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn orphan_and_duplicate_eof_markers_remain_malformed() {
+    for hunk in [
+        b"@@ -1 +1 @@\n\\ No newline at end of file\n-old\n+new\n".as_slice(),
+        b"@@ -0,0 +0,0 @@\n\\ No newline at end of file\n".as_slice(),
+        b"@@ -1 +1 @@\n-old\r\n\\ No newline at end of file\n\\ No newline at end of file\n+new\n".as_slice(),
+        b"@@ -0,0 +1 @@\n+new\r\n\\ No newline at end of file\n\\ No newline at end of file\n".as_slice(),
+    ] {
+        assert!(matches!(
+            parse_patch(&full_patch(hunk), ParseLimits::default()),
+            Err(PatchError::Malformed { .. })
+        ));
+    }
 }
