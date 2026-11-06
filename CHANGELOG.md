@@ -7,6 +7,18 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Open Entire Trail Changes from a URL, `--trail`, or the Open panel, using
+  an authenticated Entire CLI and `curl`. Entire-hosted repositories, GitHub
+  mirrors, and older `entire.io` links are recognized. A project Trail opens
+  directly when it has one accessible Change; ambiguous or incomplete results
+  ask for a specific Change URL. The saved overview includes gate and CI check
+  results, with stale or missing evidence marked unavailable or pending, plus
+  bounded session summaries without retaining prompts or fetching transcripts.
+  Reviews are read-only, with local drafts and exports. See [Entire setup and
+  scope](docs/entire.md).
+
 ### Changed
 
 - Upgrade the patched GPUI stack to 0.3.9 and GPUI Kit to 0.7.3, preserving

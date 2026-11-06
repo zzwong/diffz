@@ -1,6 +1,8 @@
 //! Application service wiring. Provider access, storage, and publication meet here.
 use crate::{
-    Result, fixtures,
+    Result,
+    entire::{EntireProvider, EntireReader, TrailAddress},
+    fixtures,
     github::{GithubProvider, GithubReader, GithubTarget},
     gitlab::{GitlabProvider, GitlabReader, GitlabTarget},
     local_git::{LocalGit, LocalMode},
@@ -75,14 +77,22 @@ impl Services {
             .glab
             .clone()
             .map(|p| Arc::new(GitlabReader::new(p)));
+        let entire = resolve_program("entire")
+            .ok()
+            .map(|p| Arc::new(EntireReader::new(p)));
         services.register(Arc::new(GithubProvider::new(gh)), writes);
         services.register(Arc::new(GitlabProvider::new(glab)), gitlab_writes);
+        services.register(Arc::new(EntireProvider::new(entire)), false);
         Ok(services)
     }
     /// Adds a provider; one registered later for the same id takes the place of the first.
     pub fn register(&mut self, provider: Arc<dyn ReviewProvider>, writes: bool) {
         let rules = provider.rules();
-        if writes && let Ok(remote) = provider.remote() {
+        self.outboxes.remove(&rules.id());
+        if writes
+            && rules.read_only_reason().is_none()
+            && let Ok(remote) = provider.remote()
+        {
             self.outboxes
                 .insert(rules.id(), Outbox::new(self.store.clone(), rules, remote));
         }
@@ -316,8 +326,11 @@ impl WorkbenchServices for Services {
         Ok(p)
     }
     fn publish(&self, p: PreparedReview) -> std::result::Result<OutboxEntry, ServiceError> {
+        let rules = self.provider_for(&p.target.provider)?.rules();
+        if let Some(reason) = rules.read_only_reason() {
+            return Err(reason.into());
+        }
         let Some(outbox) = self.outboxes.get(&p.target.provider) else {
-            let rules = self.provider_for(&p.target.provider)?.rules();
             return Err(format!(
                 "{} publication is disabled; restart with {} to confirm a review",
                 rules.name(),
@@ -367,8 +380,10 @@ impl WorkbenchServices for Services {
         }
         let (program, tokens) = if *provider == ProviderId::GITHUB {
             (&self.gh, GITHUB_TOKENS)
-        } else {
+        } else if *provider == ProviderId::GITLAB {
             (&self.glab, GITLAB_TOKENS)
+        } else {
+            return Some(host);
         };
         let signed_in = program
             .as_ref()
@@ -435,18 +450,22 @@ const GITHUB_TOKENS: &[&str] = &[
     "GITHUB_ENTERPRISE_TOKEN",
 ];
 const GITLAB_TOKENS: &[&str] = &["GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"];
-/// The host an address names, which `gh` or `glab` would be asked to contact.
+/// The web host an address names, interpreted by that provider's CLI transport.
 fn remote_host(provider: &ProviderId, address: &str) -> Option<String> {
     if *provider == ProviderId::GITHUB {
         match GithubTarget::parse(address).ok()? {
             GithubTarget::Pr(a) => Some(a.host),
             GithubTarget::Compare(a) => Some(a.host),
         }
-    } else {
+    } else if *provider == ProviderId::GITLAB {
         match GitlabTarget::parse(address).ok()? {
             GitlabTarget::Mr(a) => Some(a.host),
             GitlabTarget::Compare(a) => Some(a.host),
         }
+    } else if *provider == ProviderId::ENTIRE {
+        Some(TrailAddress::parse(address).ok()?.host)
+    } else {
+        None
     }
 }
 /// A provider's own public host, which an address may name without the user having signed in.
@@ -455,6 +474,8 @@ fn public_host(provider: &ProviderId, host: &str) -> bool {
         "github.com"
     } else if *provider == ProviderId::GITLAB {
         "gitlab.com"
+    } else if *provider == ProviderId::ENTIRE {
+        return host.eq_ignore_ascii_case("entire.com") || host.eq_ignore_ascii_case("entire.io");
     } else {
         return false;
     };
@@ -485,12 +506,23 @@ pub fn detect_source(input: &str) -> Option<Detected> {
             label: "Patch file".into(),
         });
     }
-    let (provider, label) = match (GithubTarget::parse(input), GitlabTarget::parse(input)) {
-        (Ok(GithubTarget::Pr(_)), _) => (ProviderId::GITHUB, "GitHub pull request"),
-        (Ok(GithubTarget::Compare(_)), _) => (ProviderId::GITHUB, "GitHub compare"),
-        (_, Ok(GitlabTarget::Mr(_))) => (ProviderId::GITLAB, "GitLab merge request"),
-        (_, Ok(GitlabTarget::Compare(_))) => (ProviderId::GITLAB, "GitLab compare"),
-        _ => return None,
+    // Entire has its own URL routes. An unsupported Entire URL must not fall through to
+    // another provider's permissive self-hosted URL parser and contact the wrong API.
+    let entire_url = url::Url::parse(input).is_ok_and(|u| {
+        u.host_str()
+            .is_some_and(|host| public_host(&ProviderId::ENTIRE, host))
+    });
+    let (provider, label) = if entire_url {
+        TrailAddress::parse(input).ok()?;
+        (ProviderId::ENTIRE, "Entire Trail")
+    } else {
+        match (GithubTarget::parse(input), GitlabTarget::parse(input)) {
+            (Ok(GithubTarget::Pr(_)), _) => (ProviderId::GITHUB, "GitHub pull request"),
+            (Ok(GithubTarget::Compare(_)), _) => (ProviderId::GITHUB, "GitHub compare"),
+            (_, Ok(GitlabTarget::Mr(_))) => (ProviderId::GITLAB, "GitLab merge request"),
+            (_, Ok(GitlabTarget::Compare(_))) => (ProviderId::GITLAB, "GitLab compare"),
+            _ => return None,
+        }
     };
     Some(Detected {
         request: OpenRequest::Remote {
@@ -642,6 +674,26 @@ mod tests {
                 ProviderId::GITLAB,
                 "GitLab compare",
             ),
+            (
+                "https://entire.com/et/project/-/trails/12",
+                ProviderId::ENTIRE,
+                "Entire Trail",
+            ),
+            (
+                "https://entire.com/et/project/-/trails/12/changes/repo/4",
+                ProviderId::ENTIRE,
+                "Entire Trail",
+            ),
+            (
+                "https://entire.com/gh/owner/repo/trails/12/topic",
+                ProviderId::ENTIRE,
+                "Entire Trail",
+            ),
+            (
+                "https://entire.io/et/project/repo/trails/4",
+                ProviderId::ENTIRE,
+                "Entire Trail",
+            ),
         ] {
             let detected = super::detect_source(&format!("  {address}\n")).expect(address);
             assert_eq!(
@@ -678,6 +730,12 @@ mod tests {
             "   ",
             "owner/repo#1\nowner/repo#2",
             "https://example.com/",
+            "https://entire.com/owner/repo/pull/1",
+            "https://entire.com/owner/repo/compare/main...feature",
+            "https://entire.io/group/repo/-/merge_requests/1",
+            "https://entire.io/group/repo/-/compare/main...feature",
+            "https://entire.com/et/project/-/trails/0",
+            "https://entire.com.evil.example/et/project/-/trails/1",
         ] {
             assert!(super::detect_source(text).is_none(), "{text:?}");
         }
@@ -703,11 +761,18 @@ mod tests {
             (ProviderId::GITHUB, "github.com", true),
             (ProviderId::GITHUB, "GitHub.com", true),
             (ProviderId::GITLAB, "gitlab.com", true),
+            (ProviderId::ENTIRE, "entire.com", true),
+            (ProviderId::ENTIRE, "Entire.COM", true),
+            (ProviderId::ENTIRE, "entire.io", true),
             (ProviderId::GITHUB, "gitlab.com", false),
             (ProviderId::GITLAB, "github.com", false),
             (ProviderId::GITHUB, "github.example.com", false),
             (ProviderId::GITHUB, "github.com.evil.example", false),
             (ProviderId::GITLAB, "gitlab.example.com", false),
+            (ProviderId::ENTIRE, "entire.com.evil.example", false),
+            (ProviderId::ENTIRE, "api.entire.io", false),
+            (ProviderId::GITHUB, "entire.com", false),
+            (ProviderId::ENTIRE, "github.com", false),
         ] {
             assert_eq!(super::public_host(&provider, host), public, "{host}");
         }
@@ -723,6 +788,47 @@ mod tests {
                 "https://gitlab.com/group/project/-/merge_requests/7"
             ),
         );
+        assert_eq!(
+            super::remote_host(
+                &ProviderId::ENTIRE,
+                "https://entire.com/et/project/-/trails/12"
+            )
+            .as_deref(),
+            Some("entire.com")
+        );
+        assert!(
+            super::remote_host(
+                &ProviderId::new("Unknown"),
+                "https://gitlab.com/group/project/-/merge_requests/7"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn entire_is_registered_read_only_even_when_its_cli_is_missing() {
+        use super::*;
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut services = Services::new(directory.path(), false).unwrap();
+        let rules = services.provider(&ProviderId::ENTIRE).unwrap();
+        assert!(rules.read_only_reason().is_some());
+        assert!(!services.writes_enabled_for(&ProviderId::ENTIRE));
+        // Pin the missing-helper case without mutating PATH in a parallel test process.
+        services.register(Arc::new(EntireProvider::new(None)), true);
+        assert!(!services.writes_enabled_for(&ProviderId::ENTIRE));
+        let request = OpenRequest::Remote {
+            provider: ProviderId::ENTIRE,
+            address: "https://entire.com/et/project/-/trails/12".into(),
+        };
+        assert!(services.unconfirmed_host(&request).is_none());
+        let error = services.open(request, Cancellation::default()).unwrap_err();
+        let message = error.message.to_ascii_lowercase();
+        assert!(
+            message.contains("install") && message.contains("entire"),
+            "{message}"
+        );
+        assert!(services.recent().unwrap().is_empty());
     }
 
     #[test]
@@ -864,6 +970,7 @@ mod tests {
                         head: "v3".into(),
                         direct: false,
                     }),
+                    entire: None,
                 };
                 Ok(Snapshot::with_origin(
                     "o/r  v1...v3".into(),

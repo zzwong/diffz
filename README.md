@@ -1,8 +1,9 @@
 # diffz
 
 diffz is a desktop tool that reads and reviews diffs, whether that is a GitHub
-pull request, a GitLab merge request, a patch file, or changes inside a local
-Git repository. The implementation is Rust, on top of [GPUI](https://www.gpui.rs).
+pull request, a GitLab merge request, an Entire Change, a patch file, or changes
+inside a local Git repository. The implementation is Rust, on top of
+[GPUI](https://www.gpui.rs).
 
 ![diffz showing a pull request from rust-lang/cargo](docs/screenshot.png)
 
@@ -11,6 +12,10 @@ Git repository. The implementation is Rust, on top of [GPUI](https://www.gpui.rs
 - GitHub pull requests open via `gh`; GitLab merge requests via `glab`. It also
   reads unified diff files, the staged or unstaged state of a repository, and
   any pair of Git revisions.
+- Changes within Entire Trails open through `entire` and `curl`, using your
+  Entire login. Entire-hosted repositories and GitHub mirrors are supported;
+  captured gates, CI checks, and brief session summaries accompany the diff.
+  Drafts stay local. See [Entire support and setup](docs/entire.md).
 - Nothing truncates long lines. Text measurement goes through the platform's
   native text system; wrapped Markdown files and minified ones select and
   scroll the way you expect.
@@ -64,7 +69,9 @@ open /Applications/Diffz.app
 ```
 
 Install and authenticate `gh` for GitHub reviews or `glab` for GitLab reviews.
-Patch files and local Git comparisons do not require either provider CLI.
+Entire reviews use `entire login` and require `curl`; see
+[Entire setup](docs/entire.md#setup). Patch files and local Git comparisons do
+not require a forge CLI.
 
 ### Build from source
 
@@ -76,7 +83,8 @@ You need a Rust toolchain installed through [rustup](https://rustup.rs); it
 reads the pinned version from `rust-toolchain.toml` on its own. You also need
 CMake, which builds the WebAssembly runtime for extension grammars, or build with
 `--no-default-features --features desktop,syntax` to leave extension grammars out.
-Install `gh` or `glab` too if you plan to look at pull requests or merge requests.
+Install `gh` or `glab` too if you plan to look at pull requests or merge requests,
+or `entire` and `curl` for Entire Changes.
 
 ```sh
 git clone https://github.com/zzwong/diffz
@@ -101,10 +109,12 @@ not Developer ID signed or notarized.
 ```sh
 diffz owner/repo#123                   # GitHub pull request (or a full URL)
 diffz group/project!123                # GitLab merge request (or a full URL)
+diffz https://entire.com/et/acme/-/trails/42/changes/widget/7  # Entire Change (read-only)
 diffz https://github.com/owner/repo/compare/v1.0...v2.0  # GitHub or GitLab compare (read-only)
 diffz change.patch                     # unified diff file
 diffz --pr owner/repo#123              # the same, naming the source explicitly
 diffz --mr group/project!123
+diffz --trail https://entire.com/gh/acme/-/trails/42/changes/widget/7
 diffz --patch change.patch
 diffz --compare https://gitlab.com/group/project/-/compare/v1.0...v2.0
 diffz --git /repo --base main          # main..HEAD in a local repository
@@ -114,8 +124,9 @@ diffz --resume <snapshot id>           # reopen a saved review
 ```
 
 A lone argument opens the patch file at that path if there is one, and is
-otherwise read as a pull or merge request address. With no argument, diffz
-shows the Open panel, which lists recent reviews; `--fixture F01` opens the
+otherwise read as a pull request, merge request, compare, or Entire Trail
+address. With no argument, diffz shows the Open panel, which lists recent
+reviews; `--fixture F01` opens the
 bundled sample. The Open field recognizes the same addresses and patch files
 as you type or paste them and selects the matching tab, and `Ctrl+V` (`Cmd+V`
 on macOS) outside a text field opens an address on the clipboard.
@@ -147,9 +158,23 @@ with `error`. The exit status is 0 exactly when `status` is not `error`.
 The complete option list is `diffz --help`; `diffz --doctor` reports which
 external tools the machine has.
 
-diffz treats repositories as read-only. It never checks out, stages, or writes
-to them, and it makes no network calls of its own; GitHub and GitLab traffic
-runs through the `gh` and `glab` you have already authenticated.
+diffz treats repository contents as read-only. It never checks out, stages, or
+writes to them. Network requests run through external tools: `gh` and `glab`
+for GitHub and GitLab, and `entire` and `curl` using your existing Entire login.
+Entire reviews are read-only, including when GitHub or GitLab publishing is
+enabled; local drafts and exports remain available.
+
+### Entire Trails
+
+An Entire Trail can contain Changes from several repositories. Paste a Change
+URL ending in `/changes/REPO/NUMBER` into the Open panel, pass it as a lone
+argument, or use `--trail`. A project Trail URL opens directly when it identifies
+one accessible Change; if the choice is ambiguous or incomplete, diffz asks for
+a specific Change URL. Both `/et/` repositories and `/gh/` GitHub mirrors are
+recognized, including older `entire.io` links.
+
+[docs/entire.md](docs/entire.md) covers setup, URL forms, authentication and
+regional routing, current limitations, and the remaining integration work.
 
 ### Comparing two refs
 
@@ -248,7 +273,7 @@ Four crates make up the workspace:
 | Crate | Contents |
 | --- | --- |
 | `diffz-core` | Patch parsing, snapshot handling, layout contracts, theme palettes, syntax highlighting, and the state behind comments and reviews. No UI dependencies. |
-| `diffz-adapters` | SQLite storage, a bounded subprocess runner, and adapters for Git, for GitHub (`gh`), and for GitLab (`glab`). |
+| `diffz-adapters` | SQLite storage, a bounded subprocess runner, and adapters for Git, GitHub (`gh`), GitLab (`glab`), and Entire (`entire` and `curl`). |
 | `diffz-ui` | The desktop GPUI application: the reader, the file tree, panels, the rich view, theming. |
 | `diffz` | The CLI entry point, with services wired together. |
 

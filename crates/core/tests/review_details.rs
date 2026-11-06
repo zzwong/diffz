@@ -294,6 +294,7 @@ fn file_thread_from_an_older_head_is_outdated() {
             merged: false,
             pending_review: false,
             compare: None,
+            entire: None,
         }),
         vec![],
     );

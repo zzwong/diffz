@@ -51,10 +51,19 @@ pub trait ReviewRules: Send + Sync {
     fn address_hint(&self) -> &str;
     fn address_help(&self) -> &str;
     fn write_flag(&self) -> &str;
+    /// Why publication is unavailable for this provider, independent of launch flags.
+    /// Local drafts and exports remain available for read-only sources.
+    fn read_only_reason(&self) -> Option<&str> {
+        None
+    }
     fn preview_note(&self) -> Option<&str> {
         None
     }
     fn reopen_address(&self, target: &RemoteTarget) -> String;
+    /// Why an immutable browser link cannot be built for a source line.
+    fn source_link_unavailable_reason(&self) -> Option<&str> {
+        None
+    }
     fn line_url(&self, target: &RemoteTarget, path: &str, revision: &str, line: u32) -> String;
     fn supports(&self, _verdict: Verdict) -> bool {
         true

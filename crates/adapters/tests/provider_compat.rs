@@ -36,6 +36,7 @@ fn target(provider: ProviderId) -> RemoteTarget {
         merged: false,
         pending_review: false,
         compare: None,
+        entire: None,
     }
 }
 

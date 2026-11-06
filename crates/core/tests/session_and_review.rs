@@ -4,7 +4,10 @@ use diffz_core::review::*;
 use diffz_core::session::*;
 use serde_json::value::RawValue;
 
-struct Plain;
+#[derive(Default)]
+struct Plain {
+    read_only: bool,
+}
 impl diffz_core::provider::ReviewRules for Plain {
     fn id(&self) -> ProviderId {
         ProviderId::GITHUB
@@ -26,6 +29,9 @@ impl diffz_core::provider::ReviewRules for Plain {
     }
     fn write_flag(&self) -> &str {
         ""
+    }
+    fn read_only_reason(&self) -> Option<&str> {
+        self.read_only.then_some("This provider is read-only")
     }
     fn reopen_address(&self, _: &RemoteTarget) -> String {
         String::new()
@@ -64,6 +70,7 @@ fn snapshot() -> Snapshot {
             merged: false,
             pending_review: false,
             compare: None,
+            entire: None,
         }),
         vec![],
     )
@@ -117,7 +124,7 @@ fn imported_patch_cannot_publish() {
     s.remote = None;
     assert!(
         PreparedReview::prepare(
-            &Plain,
+            &Plain::default(),
             OperationId("x".into()),
             &s,
             vec![],
@@ -128,12 +135,40 @@ fn imported_patch_cannot_publish() {
     );
 }
 #[test]
+fn read_only_provider_cannot_prepare_any_verdict() {
+    let s = snapshot();
+    for verdict in [Verdict::Comment, Verdict::Approve, Verdict::RequestChanges] {
+        let error = PreparedReview::prepare(
+            &Plain { read_only: true },
+            OperationId("read-only".into()),
+            &s,
+            vec![draft(&s)],
+            verdict,
+            "A local review".into(),
+        )
+        .unwrap_err();
+        assert_eq!(error.0, "This provider is read-only");
+    }
+    // The same complete snapshot and draft can still be prepared by a writable provider.
+    assert!(
+        PreparedReview::prepare(
+            &Plain::default(),
+            OperationId("writable".into()),
+            &s,
+            vec![draft(&s)],
+            Verdict::Comment,
+            "A review".into(),
+        )
+        .is_ok()
+    );
+}
+#[test]
 fn existing_pending_review_blocks_new_submission() {
     let mut s = snapshot();
     s.remote.as_mut().unwrap().pending_review = true;
     assert!(
         PreparedReview::prepare(
-            &Plain,
+            &Plain::default(),
             OperationId("x".into()),
             &s,
             vec![],
@@ -150,7 +185,7 @@ fn comments_must_belong_to_frozen_snapshot() {
     d.snapshot = SnapshotId("other".into());
     assert!(
         PreparedReview::prepare(
-            &Plain,
+            &Plain::default(),
             OperationId("x".into()),
             &s,
             vec![d],
@@ -194,7 +229,7 @@ fn file_level_draft_round_trips_and_validates() {
 
     // A file-level draft passes despite line 0 not being an actual source line.
     let p = PreparedReview::prepare(
-        &Plain,
+        &Plain::default(),
         OperationId("fl".into()),
         &s,
         vec![back],

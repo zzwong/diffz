@@ -26,6 +26,7 @@ fn snapshot(i: usize) -> Snapshot {
         merged: false,
         pending_review: false,
         compare: None,
+        entire: None,
     };
     Snapshot::with_origin(
         format!("s{i}"),
