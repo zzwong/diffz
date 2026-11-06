@@ -1,6 +1,7 @@
 //! Wiring for processes and explicit command-line input. Nothing writes remotely during startup.
 use anyhow::{Context, Result, bail};
 use diffz_adapters::{
+    entire::TrailAddress,
     github::GithubTarget,
     gitlab::GitlabTarget,
     process::{read_bounded, resolve_program},
@@ -21,16 +22,18 @@ use std::{
 #[cfg(all(target_os = "linux", feature = "desktop"))]
 mod code_font;
 
-const HELP: &str = r#"diffz: review diffs and pull requests on your desktop
+const HELP: &str = r#"diffz: review diffs and hosted changes on your desktop
 
 Usage:
   diffz owner/repo#123
   diffz group/project!123
   diffz https://github.com/owner/repo/pull/123
   diffz https://github.com/owner/repo/compare/v1.0...v2.0
+  diffz https://entire.com/et/project/-/trails/123
   diffz /path/to/change.patch
   diffz --pr owner/repo#123
   diffz --mr group/project!123
+  diffz --trail https://entire.com/et/project/-/trails/123
   diffz --compare https://github.com/owner/repo/compare/v1.0...v2.0
   diffz --patch /path/to/change.patch
   diffz --git /repo --base main --head HEAD
@@ -41,6 +44,7 @@ Usage:
 Options:
   --pr OWNER/REPO#N         Open a pull request on GitHub, fetched by the installed gh
   --mr URL                  Open a merge request on GitLab, fetched by the installed glab
+  --trail URL               Open an Entire Trail, read-only, using the installed entire and curl
   --compare URL             Open a GitHub or GitLab compare of two refs, read-only, fetched by gh or glab
   --patch FILE              Show a unified diff file
   --git REPO                Diff --base (default main) against --head (default HEAD)
@@ -63,7 +67,7 @@ Options:
   --help                    Show this help
 
 A lone argument opens the patch file at that path when one exists; otherwise it is a
-pull or merge request address, in any form --pr or --mr accepts.
+pull request, merge request, Trail, or compare URL.
 
 diffz returns at once. A window already running on the same state directory takes the
 request and comes to the front; otherwise a new window starts in the background. The
@@ -72,7 +76,8 @@ and --probe never hand off or detach.
 
 Run with no arguments and diffz shows the Open panel. Repositories are only read:
 diffz will not check out, stage, or alter anything in them. All network access
-happens inside gh or glab; writes additionally need an --allow-*-writes flag.
+happens inside gh, glab, entire, or curl. GitHub and GitLab writes additionally need
+an --allow-*-writes flag. Entire Trails are read-only; local drafts can be exported.
 "#;
 #[derive(Debug)]
 struct Options {
@@ -164,6 +169,17 @@ fn parse_with_detect(
                     address: text_argument(next()?, flag)?,
                 },
             )?,
+            "--trail" => {
+                let address = text_argument(next()?, flag)?;
+                TrailAddress::parse(&address)?;
+                set_source(
+                    &mut source,
+                    OpenRequest::Remote {
+                        provider: ProviderId::ENTIRE,
+                        address,
+                    },
+                )?;
+            }
             "--compare" => {
                 set_source(&mut source, compare_request(text_argument(next()?, flag)?)?)?
             }
@@ -237,14 +253,27 @@ fn detect(path: PathBuf) -> Result<OpenRequest> {
     bail!(
         "{:?} is neither a file nor a review address; pass a patch file, owner/repo#N or a \
          GitHub pull request URL, group/project!N or a GitLab merge request URL, or a GitHub \
-         or GitLab compare URL",
+         or GitLab compare URL, or an Entire Trail URL",
         path
     )
 }
 /// Each provider's own parser decides whether a URL is a compare of its own.
 fn compare_request(address: String) -> Result<OpenRequest> {
+    if TrailAddress::parse(&address).is_ok() {
+        bail!("{address:?} is an Entire Trail; use --trail")
+    }
     let (github, gitlab) = (GithubTarget::parse(&address), GitlabTarget::parse(&address));
     let provider = match (github, gitlab) {
+        (Ok(GithubTarget::Compare(a)), _)
+            if matches!(a.host.as_str(), "entire.com" | "entire.io") =>
+        {
+            bail!("Entire compare URLs are not supported; use --trail with an Entire Trail URL")
+        }
+        (_, Ok(GitlabTarget::Compare(a)))
+            if matches!(a.host.as_str(), "entire.com" | "entire.io") =>
+        {
+            bail!("Entire compare URLs are not supported; use --trail with an Entire Trail URL")
+        }
         (Ok(GithubTarget::Compare(_)), _) => ProviderId::GITHUB,
         (_, Ok(GitlabTarget::Compare(_))) => ProviderId::GITLAB,
         (Ok(_), _) | (_, Ok(_)) => {
@@ -337,7 +366,9 @@ fn launch_args(
         Some(OpenRequest::Fixture(id)) => args.extend(["--fixture".into(), id.into()]),
         Some(OpenRequest::Patch(path)) => args.extend(["--patch".into(), path.into()]),
         Some(OpenRequest::Remote { provider, address }) => {
-            let flag = if compare_request(address.clone()).is_ok() {
+            let flag = if *provider == ProviderId::ENTIRE {
+                "--trail"
+            } else if compare_request(address.clone()).is_ok() {
                 "--compare"
             } else if *provider == ProviderId::GITHUB {
                 "--pr"
@@ -618,7 +649,7 @@ fn run(activation_token: Option<String>) -> Result<()> {
             std::env::consts::ARCH,
             cfg!(feature = "desktop")
         );
-        for tool in ["git", "gh", "cargo", "rustc"] {
+        for tool in ["git", "gh", "glab", "entire", "curl", "cargo", "rustc"] {
             report.push_str(&format!(
                 "{tool}: {}\n",
                 resolve_program(tool)
@@ -891,6 +922,7 @@ mod tests {
             "--fixture",
             "--pr",
             "--mr",
+            "--trail",
             "--compare",
             "--resume",
             "--base",
@@ -965,6 +997,7 @@ mod tests {
             "--head",
             "--state-dir",
             "--mr",
+            "--trail",
             "--compare",
             "--font",
             "--theme",
@@ -1290,6 +1323,14 @@ mod tests {
                 "https://gitlab.com/group/sub/project/-/compare/v1.0...v2.0",
                 ProviderId::GITLAB,
             ),
+            (
+                "https://entire.com/et/project/-/trails/123",
+                ProviderId::ENTIRE,
+            ),
+            (
+                "https://entire.io/gh/owner/repo/trails/123/topic",
+                ProviderId::ENTIRE,
+            ),
         ] {
             let options = parse([OsString::from(address)]).unwrap();
             assert_eq!(
@@ -1311,6 +1352,7 @@ mod tests {
             "{error}"
         );
         assert!(error.contains("owner/repo#N") && error.contains("group/project!N"));
+        assert!(error.contains("Entire Trail URL"));
     }
     #[test]
     fn positional_address_conflicts_with_other_sources() {
@@ -1365,6 +1407,66 @@ mod tests {
         );
         let args = launch_args(&options, Path::new("/state"), None).unwrap();
         assert_eq!(args.len(), 3);
+    }
+    #[test]
+    fn entire_trails_survive_explicit_positional_and_background_launches() {
+        for address in [
+            "https://entire.com/et/project/-/trails/12",
+            "https://entire.com/et/project/-/trails/12/changes/repo/4",
+            "https://entire.io/gh/owner/repo/trails/4/topic",
+        ] {
+            let positional = parse([address.into(), "--inspect".into()]).unwrap();
+            let explicit = parse_pure(["--trail", address, "--json"].map(OsString::from)).unwrap();
+            let expected = Some(OpenRequest::Remote {
+                provider: ProviderId::ENTIRE,
+                address: address.into(),
+            });
+            assert_eq!(positional.request, expected);
+            assert_eq!(explicit.request, expected);
+            assert!(positional.inspect && explicit.json);
+            assert!(!explicit.writes && !explicit.gitlab_writes);
+
+            let args =
+                launch_args(&explicit, Path::new("/state"), explicit.request.as_ref()).unwrap();
+            assert_eq!(args[3..], ["--trail", address].map(OsString::from));
+            let relaunched = parse_pure(args).unwrap();
+            assert_eq!(relaunched.request, expected);
+            assert!(relaunched.foreground);
+            assert!(!relaunched.writes && !relaunched.gitlab_writes);
+
+            let mut output = Vec::new();
+            report(&mut output, Ok("launched"), explicit.request.as_ref()).unwrap();
+            let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+            let serialized = serde_json::to_value(explicit.request.as_ref().unwrap()).unwrap();
+            assert_eq!(report["source"], serialized);
+        }
+    }
+    #[test]
+    fn entire_trail_flag_rejects_other_sources_and_has_no_write_permission_flag() {
+        for address in [
+            "12",
+            "project/repo#12",
+            "https://github.com/owner/repo/pull/12",
+            "https://entire.com/et/project/-/trails/0",
+            "https://entire.com.evil.example/et/project/-/trails/12",
+        ] {
+            assert!(
+                parse_pure(["--trail", address].map(OsString::from)).is_err(),
+                "{address}"
+            );
+        }
+        assert!(parse_pure(["--allow-entire-writes".into()]).is_err());
+        let error = parse_pure(
+            [
+                "--trail",
+                "https://entire.com/et/project/-/trails/12",
+                "--fixture",
+                "F01",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "pass a single source per launch");
     }
     #[cfg(target_os = "macos")]
     #[test]
@@ -1458,6 +1560,9 @@ mod tests {
         for url in [
             "https://github.com/o/r/pull/1",
             "https://gitlab.com/g/p/-/merge_requests/1",
+            "https://entire.com/et/project/-/trails/12",
+            "https://entire.com/owner/repo/compare/main...feature",
+            "https://entire.io/group/repo/-/compare/main...feature",
             "o/r#1",
             "https://example.com/",
         ] {

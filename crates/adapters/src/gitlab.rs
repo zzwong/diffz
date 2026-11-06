@@ -411,6 +411,7 @@ impl GitlabReader {
             merged: false,
             pending_review: false,
             compare: Some(a.refs.clone()),
+            entire: None,
         };
         let label = a.refs.label();
         let mut s = Snapshot::with_origin(
@@ -917,6 +918,7 @@ fn target(a: &MrAddress, m: &Value, user: &Value) -> Result<RemoteTarget> {
         merged: m["state"] == "merged",
         pending_review: false,
         compare: None,
+        entire: None,
     };
     for sha in [&t.head, &t.target_tip, &t.comparison_base] {
         if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {

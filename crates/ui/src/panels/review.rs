@@ -29,6 +29,29 @@ impl Workbench {
             .as_ref()
             .and_then(|a| a.snapshot.remote.as_ref())
             .and_then(|t| self.services.provider(&t.provider));
+        if let Some(reason) = provider
+            .as_ref()
+            .and_then(|p| p.read_only_reason().map(str::to_owned))
+        {
+            card = card.child(reason);
+            if let Some((rules, target)) = provider.as_ref().zip(
+                self.active
+                    .as_ref()
+                    .and_then(|active| active.snapshot.remote.as_ref()),
+            ) {
+                let address = rules.reopen_address(target);
+                if address.starts_with("https://") {
+                    card = card.child(
+                        Button::new("open-read-only-provider")
+                            .small()
+                            .cursor_pointer()
+                            .label(format!("Open in {}", rules.name()))
+                            .on_click(move |_, _, cx| cx.open_url(&address)),
+                    );
+                }
+            }
+            return card;
+        }
         if let Some(note) = provider
             .as_ref()
             .and_then(|p| p.preview_note().map(str::to_owned))

@@ -87,6 +87,72 @@ fn repository_files(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     files
 }
 
+#[test]
+fn entire_remotes_review_all_local_modes_without_touching_repository_state() {
+    for forge in ["et", "gh"] {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        git(root, &["init", "-b", "main"]);
+        git(root, &["config", "user.email", "test@example.invalid"]);
+        git(root, &["config", "user.name", "Test"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+        git(root, &["config", "protocol.entire.allow", "never"]);
+        git(
+            root,
+            &[
+                "remote",
+                "add",
+                "origin",
+                &format!("entire://aws-eu-central-1.entire.io/{forge}/example/repo"),
+            ],
+        );
+        std::fs::write(root.join("doc.md"), "base\n").unwrap();
+        git(root, &["add", "doc.md"]);
+        git(root, &["commit", "-m", "base"]);
+        git(root, &["checkout", "-b", "entire/native/change"]);
+        std::fs::write(root.join("doc.md"), "committed\n").unwrap();
+        git(root, &["commit", "-am", "change"]);
+        std::fs::write(root.join("doc.md"), "staged\n").unwrap();
+        git(root, &["add", "doc.md"]);
+        std::fs::write(root.join("doc.md"), "unstaged\n").unwrap();
+        std::fs::write(root.join("new.txt"), "untracked\n").unwrap();
+
+        // The custom transport is explicitly disabled: local review must work even without
+        // Entire installed or signed in, and must not fetch an Entire-only branch.
+        let before = repository_files(root);
+        let reader = LocalGit::new(resolve_program("git").unwrap());
+        for (mode, expected) in [
+            (
+                LocalMode::Compare {
+                    base: "main".into(),
+                    head: "HEAD".into(),
+                },
+                "committed",
+            ),
+            (LocalMode::Staged, "staged"),
+            (LocalMode::WorkingTree, "unstaged"),
+        ] {
+            let snapshot = reader
+                .snapshot(root, mode, Cancellation::default())
+                .unwrap();
+            assert!(snapshot.remote.is_none());
+            let file = snapshot
+                .patch
+                .files
+                .iter()
+                .find(|file| file.display_path() == "doc.md")
+                .unwrap();
+            assert!(
+                file.hunks
+                    .iter()
+                    .flat_map(|h| &h.rows)
+                    .any(|row| { row.kind == RowKind::Added && row.text.as_ref() == expected })
+            );
+            assert_eq!(repository_files(root), before, "{forge}: {expected}");
+        }
+    }
+}
+
 fn assert_blank_context_survives_config(
     mode: LocalMode,
     program: PathBuf,

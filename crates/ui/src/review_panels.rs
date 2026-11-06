@@ -529,7 +529,7 @@ impl Workbench {
                 _ => {
                     let overview = &active.snapshot.overview;
                     body=body.child(div().text_size(px(11.)).text_color(skin.muted).whitespace_normal().child(if overview.captured_at.is_some(){"This revision includes the saved status. Reload directly for current status."}else{"The saved review did not capture the checks; reload it from the provider to bring them in."}));
-                    for kind in ["Workflow", "Check", "Status", "Pipeline", "Job"] {
+                    for kind in ["Gate", "Workflow", "Check", "Status", "Pipeline", "Job"] {
                         let checks: Vec<_> =
                             overview.checks.iter().filter(|c| c.kind == kind).collect();
                         if checks.is_empty() {

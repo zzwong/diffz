@@ -154,6 +154,7 @@ fn old_stored_remote_targets_load_as_not_merged_and_keep_their_bytes() {
         merged: false,
         pending_review: false,
         compare: None,
+        entire: None,
     };
     let old = serde_json::to_string(&t).unwrap();
     assert!(!old.contains("merged"), "an unset flag is not stored");

@@ -353,6 +353,7 @@ pub struct ProviderId(Cow<'static, str>);
 impl ProviderId {
     pub const GITHUB: ProviderId = ProviderId(Cow::Borrowed("GitHub"));
     pub const GITLAB: ProviderId = ProviderId(Cow::Borrowed("GitLab"));
+    pub const ENTIRE: ProviderId = ProviderId(Cow::Borrowed("Entire"));
     pub fn new(id: impl Into<String>) -> Self {
         Self(Cow::Owned(id.into()))
     }
@@ -416,6 +417,23 @@ pub struct RemoteTarget {
     /// Set for a compare, which has no PR number (`pr` is 0) and is read-only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compare: Option<CompareRefs>,
+    /// Entire uses opaque repository and Change IDs. These must never be coerced into
+    /// the numeric GitHub/GitLab identity fields. Missing in all older snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entire: Option<EntireTarget>,
+}
+/// The exact repository placement and Change captured from Entire's directory and API.
+/// No credentials are stored here; `api_origin` is revalidated before every source read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntireTarget {
+    pub forge: String,
+    pub repository_id: String,
+    pub placement_id: String,
+    pub change_id: String,
+    pub api_origin: String,
+    pub address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_trail_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThreadComment {
@@ -500,7 +518,16 @@ impl Snapshot {
             || ProviderId::GITHUB.identity_tag(),
             |r| r.provider.identity_tag(),
         );
-        SnapshotId(digest(&[&tag, &bytes]))
+        // Preserve all pre-Entire snapshot IDs and review fingerprints byte for byte.
+        // Entire's opaque identities are independently bound, even if a stored origin
+        // or a numeric placeholder is reused or edited.
+        if let Some(r) = remote.filter(|r| r.provider == ProviderId::ENTIRE) {
+            let entire = serde_json::to_vec(&r.entire)
+                .expect("serializing only string source identity data");
+            SnapshotId(digest(&[&tag, &bytes, &entire]))
+        } else {
+            SnapshotId(digest(&[&tag, &bytes]))
+        }
     }
     pub fn verify_identity(&self) -> bool {
         self.id == Self::identity(&self.patch, self.remote.as_ref(), &self.origin)

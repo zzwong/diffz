@@ -75,6 +75,9 @@ impl PreparedReview {
         if rules.id() != target.provider {
             return Err(fail("this review belongs to another provider"));
         }
+        if let Some(reason) = rules.read_only_reason() {
+            return Err(fail(reason));
+        }
         if target.compare.is_some() {
             return Err(fail(
                 "a compare is read-only; reviews can only be sent on a pull or merge request",

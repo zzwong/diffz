@@ -31,6 +31,9 @@ pub fn source_link(
             t.provider
         )
     })?;
+    if let Some(reason) = rules.source_link_unavailable_reason() {
+        return Err(reason.into());
+    }
     let file = snapshot
         .file(&point.file)
         .ok_or("File is not in this review")?;
@@ -111,6 +114,7 @@ mod link_tests {
             merged: false,
             pending_review: false,
             compare: None,
+            entire: None,
         };
         let patch = parse_patch(
             b"diff --git a/a.rs b/b.rs\n--- a/a.rs\n+++ b/b.rs\n@@ -1 +1 @@\n-old\n+new\n",

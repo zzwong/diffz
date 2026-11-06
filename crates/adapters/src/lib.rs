@@ -1,4 +1,7 @@
 //! Side-effect boundaries. Native widgets never receive credentials, SQL or process handles.
+pub mod entire;
+mod entire_context;
+mod entire_sessions;
 pub mod error;
 pub mod export;
 pub mod fixtures;

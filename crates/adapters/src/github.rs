@@ -846,6 +846,7 @@ impl GithubReader {
             merged: false,
             pending_review: false,
             compare: Some(a.refs.clone()),
+            entire: None,
         };
         let label = a.refs.label();
         let mut s = Snapshot::with_origin(
@@ -1247,6 +1248,7 @@ fn target(
         merged: is_merged(m),
         pending_review: false,
         compare: None,
+        entire: None,
     })
 }
 /// REST reports a merged pull request as `closed` with `merged` set.

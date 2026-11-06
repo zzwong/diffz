@@ -130,7 +130,7 @@ impl Workbench {
                 );
                 if self.recent.is_empty() {
                     card = card.child(
-                        "There are no recent reviews. Open a PR, merge request, or local diff first.",
+                        "There are no recent reviews. Open a pull request, merge request, Trail, or local diff first.",
                     );
                 }
                 for (ix, recent) in self.recent.iter().enumerate() {
@@ -272,7 +272,7 @@ impl Workbench {
                 }
             }
             Panel::Open => {
-                let mut modes = div().h_flex().gap_2();
+                let mut modes = div().h_flex().flex_wrap().gap_2();
                 let providers = self.services.providers();
                 let remote_modes = providers.iter().map(|p| {
                     (

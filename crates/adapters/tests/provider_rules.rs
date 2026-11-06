@@ -25,6 +25,7 @@ fn remote(provider: ProviderId, host: &str, owner: &str, name: &str, pr: u64) ->
         merged: false,
         pending_review: false,
         compare: None,
+        entire: None,
     }
 }
 
@@ -105,6 +106,7 @@ fn snapshot() -> Snapshot {
             merged: false,
             pending_review: false,
             compare: None,
+            entire: None,
         }),
         vec![],
     )
