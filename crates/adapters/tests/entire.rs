@@ -856,3 +856,135 @@ fn service_auto_opens_complete_single_change_and_rejects_stale_selection() {
     assert!(choices.open(0, Cancellation::default()).is_err());
     assert_eq!(services.recent().unwrap().len(), 1);
 }
+
+#[test]
+#[cfg(unix)]
+fn discussion_lists_preserve_identity_pagination_and_unanchored_finding_context() {
+    let (dir, reader) = fixture("normal");
+    let snapshot = capture(&reader, CHANGE).unwrap();
+    let target = snapshot.remote.as_ref().unwrap();
+    let list = reader.discussions(target, Cancellation::default()).unwrap();
+    assert!(!list.has_more);
+    assert_eq!(list.items.len(), 2);
+    assert_eq!(list.event_cursors, ["5", "6"]);
+    assert_eq!(list.items[0].id, "discussion_1");
+    assert_eq!(list.items[0].etag.as_deref(), Some("summary-etag"));
+    assert_eq!(list.items[0].last_message_author.as_deref(), Some("agent"));
+    assert_eq!(
+        list.items[0].last_message_at.as_deref(),
+        Some("2026-11-08T00:01:00Z")
+    );
+    assert_eq!(list.items[0].participants[0].login, "alice");
+    assert_eq!(list.items[0].participants[0].identity["kind"], "user");
+    assert_eq!(
+        list.items[0].participants[0].actor_account_id.as_deref(),
+        Some("account_1")
+    );
+    assert_eq!(list.items[1].kind, "review_comment");
+    assert!(list.items[1].resolved);
+    assert_eq!(
+        list.items[1].review_comment_id.as_deref(),
+        Some("finding_2")
+    );
+    assert_eq!(
+        list.items[1].review_comment["code_version_id"],
+        "version_old"
+    );
+    let detail = reader
+        .discussion(target, "discussion_1", Cancellation::default())
+        .unwrap();
+    assert_eq!(detail.messages[0].id, "message_1");
+    assert_eq!(detail.messages[0].etag.as_deref(), Some("message-etag"));
+    assert_eq!(detail.messages[0].replies[0].id, "reply_1");
+    assert_eq!(detail.messages[0].replies[0].identity["kind"], "agent");
+    assert_eq!(detail.messages[0].replies[0].body, "");
+    let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+    assert!(!calls.contains("include_messages"));
+    for scenario in [
+        "discussion-denied",
+        "discussion-malformed",
+        "discussion-overflow",
+        "discussion-bad-cursor",
+        "discussion-cross",
+        "discussion-duplicate",
+        "discussion-loop",
+        "discussion-moving",
+        "account-switch",
+        "foreign-placement",
+    ] {
+        std::fs::write(dir.path().join("scenario"), scenario).unwrap();
+        assert!(
+            reader.discussions(target, Cancellation::default()).is_err(),
+            "{scenario}"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn discussion_limits_empty_results_and_lazy_detail_errors_are_explicit() {
+    let (dir, reader) = fixture("normal");
+    let snapshot = capture(&reader, CHANGE).unwrap();
+    let target = snapshot.remote.as_ref().unwrap();
+    for scenario in [
+        "discussion-duplicate-message",
+        "discussion-missing-body",
+        "discussion-large-body",
+        "discussion-too-many-messages",
+        "discussion-wrong-id",
+    ] {
+        std::fs::write(dir.path().join("scenario"), scenario).unwrap();
+        assert!(
+            reader
+                .discussion(target, "discussion_1", Cancellation::default())
+                .is_err(),
+            "{scenario}"
+        );
+    }
+    std::fs::write(dir.path().join("scenario"), "discussion-cap").unwrap();
+    let limited = reader.discussions(target, Cancellation::default()).unwrap();
+    assert_eq!(limited.items.len(), 10);
+    assert!(limited.has_more);
+    std::fs::write(dir.path().join("scenario"), "discussion-empty").unwrap();
+    let empty = reader.discussions(target, Cancellation::default()).unwrap();
+    assert!(empty.items.is_empty());
+    assert!(!empty.has_more);
+    let cancelled = Cancellation::default();
+    cancelled.cancel();
+    assert!(reader.discussions(target, cancelled).is_err());
+    assert!(
+        reader
+            .discussion(target, "../bad", Cancellation::default())
+            .is_err()
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn discussion_raw_byte_limits_reject_padding_escapes_and_aggregate_pages() {
+    let (dir, reader) = fixture("normal");
+    let snapshot = capture(&reader, CHANGE).unwrap();
+    let target = snapshot.remote.as_ref().unwrap();
+    for scenario in [
+        "discussion-byte-padding",
+        "discussion-byte-escapes",
+        "discussion-byte-cumulative",
+    ] {
+        std::fs::write(dir.path().join("scenario"), scenario).unwrap();
+        let error = reader
+            .discussions(target, Cancellation::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("output limit"), "{scenario}: {error}");
+    }
+    std::fs::write(
+        dir.path().join("scenario"),
+        "discussion-detail-byte-padding",
+    )
+    .unwrap();
+    let error = reader
+        .discussion(target, "discussion_1", Cancellation::default())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("output limit"), "{error}");
+}

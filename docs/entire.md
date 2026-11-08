@@ -338,3 +338,29 @@ URL; saved snapshots and later refreshes still refer to one selected Change.
 The picker renders at most 50 rows per page and bounds remote display labels.
 This advances the selection portion of #178, not its remaining discussion,
 finding and review-history work. Live qualification remains #182.
+
+### Discussion reader foundation
+
+`EntireReader::discussions` reads repository discussion summaries at the saved
+Change's verified processing placement. It follows only `next_cursor` (never
+`event_cursor`), at most ten 100-item pages and 8 MiB of raw CLI response bytes. The process
+stdout cap applies before JSON parsing, with each page using the remaining
+aggregate budget; whitespace and JSON escapes count too. `has_more` reports
+an exhausted local page budget; even a finished traversal remains access-filtered
+and is not a transactional view. Malformed responses, repeated IDs/cursors and
+endpoint errors are explicit failures, not empty or complete conversation states.
+
+`EntireReader::discussion` lazily reads one thread, preserving opaque message and
+reply IDs, authors, contributor/participant identities, last-message metadata,
+summary/message etags, timestamps, empty bodies, resolution
+state and original finding metadata. IDs are not converted to GitHub's numeric
+comment IDs. Findings remain unanchored: original provider locations are not proof
+of a matching file/line in the current diff. Unknown kinds/identity metadata are
+retained rather than misclassified as human approval. Both operations verify the
+account and Change identity/base/head around reads; a changed snapshot is rejected.
+Discussion content may still change independently of the source revision.
+
+This adapter API is not yet wired into the service/UI or persisted snapshots.
+Project-wide discussions, standalone finding traversal, approval history, verified
+inline anchors and native interaction qualification remain separate work. Contract
+fixtures use the published regional OpenAPI shapes, not live authenticated data.
