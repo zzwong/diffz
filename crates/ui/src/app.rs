@@ -919,3 +919,6 @@ mod performance_tests {
         assert!(!decorations.contains_key(&(Side::Right, 2)));
     }
 }
+
+#[cfg(test)]
+mod rich_ownership_test;
