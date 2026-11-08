@@ -210,6 +210,8 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
             view: opened.view,
             view_ack: ack,
         });
+        // Rich items own copied prose independently of the replaced snapshot.
+        self.rich_cache = None;
         self.viewport = None;
         self.selected_draft = None;
         self.line_context = None;
@@ -328,6 +330,15 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         let Some(file) = a.snapshot.file(&id) else {
             return;
         };
+        // Keep same-file list state, but do not retain copied prose after
+        // leaving that file (including a switch to a non-rich view).
+        if self
+            .rich_cache
+            .as_ref()
+            .is_some_and(|cache| cache.snapshot != a.snapshot.id || cache.file != id)
+        {
+            self.rich_cache = None;
+        }
         let wrap = self
             .settings
             .wrap
