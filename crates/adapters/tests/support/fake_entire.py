@@ -159,11 +159,20 @@ if path == "/api/v1/" + FORGE + "/acme/trails/42":
         die("project identity was not bound")
     change = {"id": CHANGE, "repositoryId": REPO, "repository": "widget", "number": 7,
               "branch": "feature/work", "base": "main", "status": "open"}
-    changes = [change]
+    count = nth("project-detail")
+    if SCENARIO == "choice-replaced" and count > 1:
+        change["id"] = "different_change"
+    if SCENARIO == "choice-placement-switch" and count > 1:
+        change["repositoryId"] = DECOY
+    changes = [] if SCENARIO == "choice-removed" and count > 1 else [change]
+    if SCENARIO == "choice-final-duplicate" and count > 2:
+        changes.append(dict(change, repository="other", number=9))
     if SCENARIO == "multiple":
         changes.append(dict(change, id="01JKKKKKKKKKKKKKKKKKKKKKKK", repository="other", number=9))
     trail = {"id": TRAIL, "projectId": PROJECT, "number": 42, "title": "Project intent",
              "body": "Intent", "changes": changes}
+    if SCENARIO == "choice-project-switch" and count > 1:
+        trail["id"] = DECOY
     if SCENARIO != "omitted-partial-flag":
         trail["isPossiblyPartial"] = SCENARIO == "partial"
     if SCENARIO == "malformed-partial-flag":

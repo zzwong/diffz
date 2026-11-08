@@ -631,3 +631,126 @@ fn entire_opaque_ids_are_stored_and_bound_to_snapshot_identity() {
         diffz_core::source_link::source_link(&snapshot, &point, Some(&EntireRules)).unwrap_err();
     assert!(err.contains("immutable source links"));
 }
+
+#[test]
+#[cfg(unix)]
+fn entire_typed_discovery_does_not_fetch_a_diff_and_opens_an_explicit_choice() {
+    for scenario in ["multiple", "partial"] {
+        let (dir, reader) = fixture(scenario);
+        let choices = reader
+            .choices(
+                &TrailAddress::parse(PROJECT).unwrap(),
+                Cancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(choices.title(), "Project intent");
+        assert_eq!(choices.possibly_partial(), scenario == "partial");
+        assert_eq!(choices.changes()[0].number(), 7);
+        let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+        assert!(!calls.contains("/diff?"));
+        assert!(!calls.contains("/compare?"));
+        assert!(!calls.contains("/sessions?"));
+        let snapshot = reader
+            .snapshot_choice(&choices, 0, Cancellation::default())
+            .unwrap();
+        let entire = snapshot.remote.as_ref().unwrap().entire.as_ref().unwrap();
+        assert_eq!(entire.change_id, "01JEEEEEEEEEEEEEEEEEEEEEEE");
+        assert_eq!(entire.address, CHANGE);
+        assert!(snapshot.verify_identity());
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn entire_choice_replacement_or_removal_fails_before_fetching_diff() {
+    for scenario in [
+        "choice-replaced",
+        "choice-removed",
+        "choice-project-switch",
+        "choice-placement-switch",
+    ] {
+        let (dir, reader) = fixture(scenario);
+        let choices = reader
+            .choices(
+                &TrailAddress::parse(PROJECT).unwrap(),
+                Cancellation::default(),
+            )
+            .unwrap();
+        assert!(
+            reader
+                .snapshot_choice(&choices, 0, Cancellation::default())
+                .is_err()
+        );
+        let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+        assert!(!calls.contains("/diff?"));
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn entire_choice_rejects_account_switch_and_invalid_index() {
+    let (dir, reader) = fixture("normal");
+    let choices = reader
+        .choices(
+            &TrailAddress::parse(PROJECT).unwrap(),
+            Cancellation::default(),
+        )
+        .unwrap();
+    let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+    assert!(
+        reader
+            .snapshot_choice(&choices, usize::MAX, Cancellation::default())
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap(),
+        calls
+    );
+    std::fs::write(dir.path().join("scenario"), "account-switch").unwrap();
+    assert!(
+        reader
+            .snapshot_choice(&choices, 0, Cancellation::default())
+            .unwrap_err()
+            .to_string()
+            .contains("account changed")
+    );
+    assert!(
+        !std::fs::read_to_string(dir.path().join("calls.jsonl"))
+            .unwrap()
+            .contains("/diff?")
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn entire_choice_rechecks_duplicate_identity_at_capture_end() {
+    let (_dir, reader) = fixture("choice-final-duplicate");
+    let choices = reader
+        .choices(
+            &TrailAddress::parse(PROJECT).unwrap(),
+            Cancellation::default(),
+        )
+        .unwrap();
+    assert!(
+        reader
+            .snapshot_choice(&choices, 0, Cancellation::default())
+            .unwrap_err()
+            .to_string()
+            .contains("duplicate")
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn entire_discovery_rejects_explicit_urls_without_running_cli() {
+    let (dir, reader) = fixture("normal");
+    assert!(
+        reader
+            .choices(
+                &TrailAddress::parse(CHANGE).unwrap(),
+                Cancellation::default()
+            )
+            .is_err()
+    );
+    assert!(!dir.path().join("calls.jsonl").exists());
+}
