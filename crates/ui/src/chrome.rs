@@ -612,7 +612,7 @@ impl Workbench {
                     .tooltip("Local submission history")
                     .on_click(cx.listener(|a, _, w, c| {
                         a.return_focus = w.focused(c);
-                        a.panel = Panel::Outbox;
+                        a.set_panel(Panel::Outbox);
                         a.panel_focus.focus(w, c);
                         a.refresh_outbox(c);
                         c.notify();

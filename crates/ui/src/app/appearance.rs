@@ -12,7 +12,7 @@ use std::{
 impl Workbench {
     pub(crate) fn show_themes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.return_focus = window.focused(cx);
-        self.panel = Panel::Themes;
+        self.set_panel(Panel::Themes);
         self.panel_focus.focus(window, cx);
         self.themes = self
             .registry

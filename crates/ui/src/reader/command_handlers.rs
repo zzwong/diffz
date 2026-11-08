@@ -13,7 +13,7 @@ impl Workbench {
             Command::Recent => self.show_recents(window, cx),
             Command::Themes => self.show_themes(window, cx),
             Command::Open => {
-                self.panel = Panel::Open;
+                self.set_panel(Panel::Open);
                 self.open_input.read(cx).focus_handle(cx).focus(window, cx);
             }
             Command::PasteOpen => {
@@ -56,7 +56,7 @@ impl Workbench {
                 cx.notify();
             }
             Command::Palette => {
-                self.panel = Panel::Palette;
+                self.set_panel(Panel::Palette);
                 self.palette_index = 0;
                 self.palette_scroll.scroll_to_item(0);
                 self.palette_input
@@ -146,7 +146,7 @@ impl Workbench {
             Command::Comment => self.new_draft(window, cx),
             Command::CommentFile => self.new_draft_file(window, cx),
             Command::Preview => {
-                self.panel = Panel::Preview;
+                self.set_panel(Panel::Preview);
                 self.summary_input
                     .read(cx)
                     .focus_handle(cx)
@@ -199,14 +199,14 @@ impl Workbench {
                 if self.panel == Panel::Keys {
                     self.command(Command::Cancel, window, cx);
                 } else {
-                    self.panel = Panel::Keys;
+                    self.set_panel(Panel::Keys);
                     self.panel_focus.focus(window, cx);
                 }
             }
             Command::Export => self.begin_export(cx),
             Command::Cancel => {
                 if self.panel != Panel::None {
-                    self.panel = Panel::None;
+                    self.set_panel(Panel::None);
                     self.line_context = None;
                     self.selected_draft = None;
                     self.thread_root = None;

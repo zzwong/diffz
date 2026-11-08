@@ -8,7 +8,7 @@ use crate::{
     local_git::{LocalGit, LocalMode},
     outbox::Outbox,
     process::{ProcessRequest, Runner, read_bounded, resolve_program},
-    provider::ReviewProvider,
+    provider::{ProviderOpen, ReviewChoices, ReviewProvider},
     store::Store,
 };
 use diffz_core::{
@@ -34,7 +34,7 @@ pub struct Services {
     git: Option<LocalGit>,
     ids: AtomicU64,
     nonce: String,
-    reads: (Mutex<usize>, Condvar),
+    reads: Arc<(Mutex<usize>, Condvar)>,
     gh: Option<PathBuf>,
     glab: Option<PathBuf>,
 }
@@ -68,7 +68,7 @@ impl Services {
             git: resolve_program("git").ok().map(LocalGit::new),
             ids: AtomicU64::new(1),
             nonce,
-            reads: (Mutex::new(0), Condvar::new()),
+            reads: Arc::new((Mutex::new(0), Condvar::new())),
             gh: resolve_program("gh").ok(),
             glab: resolve_program("glab").ok(),
         };
@@ -106,20 +106,25 @@ impl Services {
             .ok_or_else(|| format!("No review provider named {id} is available").into())
     }
     fn permit(&self, cancel: &Cancellation) -> Result<Permit<'_>> {
-        let mut count = self.reads.0.lock().map_err(|_| "read gate poisoned")?;
+        Self::read_permit(&self.reads, cancel)
+    }
+    fn read_permit<'a>(
+        reads: &'a (Mutex<usize>, Condvar),
+        cancel: &Cancellation,
+    ) -> Result<Permit<'a>> {
+        let mut count = reads.0.lock().map_err(|_| "read gate poisoned")?;
         while *count >= 4 {
             if cancel.cancelled() {
                 return Err("read cancelled before execution".into());
             }
-            count = self
-                .reads
+            count = reads
                 .1
                 .wait_timeout(count, std::time::Duration::from_millis(50))
                 .map_err(|_| "read gate poisoned")?
                 .0;
         }
         *count += 1;
-        Ok(Permit(&self.reads))
+        Ok(Permit(reads))
     }
     fn load(&self, request: OpenRequest, cancel: Cancellation) -> Result<Opened> {
         let _permit = self.permit(&cancel)?;
@@ -156,7 +161,34 @@ impl Services {
                 )
             }
             OpenRequest::Remote { provider, address } => {
-                self.provider_for(&provider)?.open(&address, cancel)?
+                match self
+                    .provider_for(&provider)?
+                    .open_or_select(&address, cancel)?
+                {
+                    ProviderOpen::Snapshot(snapshot) => *snapshot,
+                    ProviderOpen::Choices(choices) => {
+                        let links = choices
+                            .entries()
+                            .iter()
+                            .take(10)
+                            .filter_map(|entry| match &entry.request {
+                                OpenRequest::Remote { address, .. } => Some(address.as_str()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ; ");
+                        return Err(crate::AdapterError::Choices {
+                            message: format!(
+                                "Select a readable Change in this Trail. Membership may be incomplete. Explicit Change URLs: {links}"
+                            ),
+                            choices: Arc::new(StoredChoices {
+                                choices,
+                                store: self.store.clone(),
+                                reads: self.reads.clone(),
+                            }),
+                        });
+                    }
+                }
             }
             OpenRequest::LocalGit { root, base, head } => self
                 .git
@@ -183,6 +215,49 @@ impl Services {
         })
     }
 }
+struct StoredChoices {
+    choices: Arc<dyn ReviewChoices>,
+    store: Arc<Store>,
+    reads: Arc<(Mutex<usize>, Condvar)>,
+}
+impl std::fmt::Debug for StoredChoices {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StoredChoices")
+    }
+}
+impl SourceChoices for StoredChoices {
+    fn title(&self) -> &str {
+        self.choices.title()
+    }
+    fn possibly_partial(&self) -> bool {
+        self.choices.possibly_partial()
+    }
+    fn entries(&self) -> &[SourceChoice] {
+        self.choices.entries()
+    }
+    fn open(
+        &self,
+        index: usize,
+        cancel: Cancellation,
+    ) -> std::result::Result<Opened, ServiceError> {
+        let _permit = Services::read_permit(&self.reads, &cancel)?;
+        if cancel.cancelled() {
+            return Err("Source selection cancelled".into());
+        }
+        let snapshot = self.choices.open(index, cancel.clone())?;
+        if cancel.cancelled() {
+            return Err("Source selection cancelled".into());
+        }
+        self.store.put_snapshot(&snapshot)?;
+        self.store.show_recent(&snapshot.id)?;
+        Ok(Opened {
+            drafts: self.store.drafts(&snapshot.id)?,
+            view: self.store.view(&snapshot.id)?,
+            snapshot,
+        })
+    }
+}
+
 impl WorkbenchServices for Services {
     fn source_lines(
         &self,

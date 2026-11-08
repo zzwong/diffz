@@ -90,7 +90,7 @@ impl Workbench {
         self.line_context = Some(selection);
         self.thread_root = None;
         self.return_focus = window.focused(cx);
-        self.panel = Panel::Line;
+        self.set_panel(Panel::Line);
         self.reset_comment_editor();
         self.composer.draft_input.update(cx, |input, cx| {
             input.set_value(existing.map_or_else(String::new, |d| d.body), window, cx)
@@ -129,7 +129,7 @@ impl Workbench {
         self.thread_root = None;
         self.selected_draft = Some(id);
         self.return_focus = window.focused(cx);
-        self.panel = Panel::Line;
+        self.set_panel(Panel::Line);
         self.reset_comment_editor();
         self.composer
             .draft_input
@@ -370,7 +370,7 @@ impl Workbench {
                         );
                         app.mark_confirmed_drafts_published(&entry);
                         app.prepared = None;
-                        app.panel = Panel::Outbox;
+                        app.set_panel(Panel::Outbox);
                     }
                     Err(e) => app.status = e.message,
                 }

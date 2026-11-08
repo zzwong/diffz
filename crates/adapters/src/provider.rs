@@ -1,7 +1,7 @@
 use crate::Result;
 use diffz_core::{
     domain::{RemoteTarget, Snapshot},
-    provider::{Cancellation, ReviewRules},
+    provider::{Cancellation, ReviewRules, SourceChoice},
     review::PreparedReview,
     review_details::Release,
 };
@@ -11,6 +11,11 @@ use std::sync::Arc;
 pub trait ReviewProvider: Send + Sync {
     fn rules(&self) -> Arc<dyn ReviewRules>;
     fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot>;
+    fn open_or_select(&self, address: &str, cancel: Cancellation) -> Result<ProviderOpen> {
+        self.open(address, cancel)
+            .map(Box::new)
+            .map(ProviderOpen::Snapshot)
+    }
     /// Whether `open` would take this address. Only parses; nothing runs.
     fn accepts(&self, address: &str) -> bool;
     fn source(&self, target: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>>;
@@ -52,4 +57,16 @@ pub trait ReviewRemote: Send + Sync {
     fn reviews(&self, t: &RemoteTarget) -> Result<Vec<Value>>;
     fn comments(&self, t: &RemoteTarget, id: u64) -> Result<Vec<Value>>;
     fn send(&self, p: &PreparedReview) -> SendOutcome;
+}
+
+/// A selectable source is transient; persisted reviews still hold one Snapshot.
+pub enum ProviderOpen {
+    Snapshot(Box<Snapshot>),
+    Choices(Arc<dyn ReviewChoices>),
+}
+pub trait ReviewChoices: std::fmt::Debug + Send + Sync {
+    fn title(&self) -> &str;
+    fn possibly_partial(&self) -> bool;
+    fn entries(&self) -> &[SourceChoice];
+    fn open(&self, index: usize, cancel: Cancellation) -> Result<Snapshot>;
 }
