@@ -1,5 +1,6 @@
 mod activation;
 mod appearance;
+mod discussions;
 mod profile;
 mod review_flow;
 mod source;
@@ -153,6 +154,7 @@ pub(crate) struct Workbench {
     pub overview_hovered: bool,
     pub overview_focus: FocusHandle,
     pub overview_tab: usize,
+    pub discussions: discussions::DiscussionRead,
     pub comment_page: usize,
     /// The compare release whose files the tree is narrowed to; `None` shows every file.
     pub release_filter: Option<usize>,
@@ -424,6 +426,7 @@ impl Workbench {
             overview_hovered: false,
             overview_focus: cx.focus_handle(),
             overview_tab: 0,
+            discussions: Default::default(),
             comment_page: 0,
             release_filter: None,
             release_notes: Default::default(),

@@ -30,6 +30,9 @@ impl Workbench {
                     "right" => a.overview_tab = (a.overview_tab + 1) % 4,
                     _ => return,
                 }
+                if a.overview_tab != 1 {
+                    a.discussions.cancel_pending();
+                }
                 c.stop_propagation();
                 c.notify();
             }))
@@ -72,6 +75,9 @@ impl Workbench {
                     })
                     .on_click(cx.listener(move |a, _, _, c| {
                         a.overview_tab = i;
+                        if i != 1 {
+                            a.discussions.cancel_pending();
+                        }
                         c.notify();
                     })),
             );
@@ -136,6 +142,14 @@ impl Workbench {
                                 .whitespace_normal()
                                 .child(notice),
                         );
+                    }
+                    if active
+                        .snapshot
+                        .remote
+                        .as_ref()
+                        .is_some_and(|t| t.provider == ProviderId::ENTIRE)
+                    {
+                        body = body.child(self.discussion_summaries(cx));
                     }
                     let mut roots = BTreeMap::new();
                     for c in &active.snapshot.comments {

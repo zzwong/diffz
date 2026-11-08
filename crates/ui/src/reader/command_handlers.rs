@@ -82,6 +82,7 @@ impl Workbench {
                     self.overview_focus.focus(window, cx);
                 }
                 if !self.inspector_visible {
+                    self.discussions.cancel_pending();
                     self.diff_focus.focus(window, cx);
                 }
                 self.schedule_view_save(cx);
@@ -214,6 +215,7 @@ impl Workbench {
                     && (self.overview_hovered || self.overview_focus.contains_focused(window, cx))
                 {
                     self.inspector_visible = false;
+                    self.discussions.cancel_pending();
                     self.overview_hovered = false;
                 } else if self.find_visible {
                     self.find_visible = false;

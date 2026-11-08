@@ -98,6 +98,7 @@ impl Workbench {
         }
         #[cfg(all(target_os = "linux", target_env = "gnu"))]
         self.cancel_allocator_trim();
+        self.discussions.reset();
         self.open_cancel.cancel();
         self.source_choices = None;
         self.source_choice_index = 0;
@@ -192,6 +193,7 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         cx.notify();
     }
     pub fn install(&mut self, opened: Opened, cx: &mut Context<Self>) {
+        self.discussions.reset();
         let mut opened = opened;
         let blame = std::mem::take(&mut opened.snapshot.overview.blame);
         let replacing = self.active.is_some();
