@@ -988,3 +988,116 @@ fn discussion_raw_byte_limits_reject_padding_escapes_and_aggregate_pages() {
         .to_string();
     assert!(error.contains("output limit"), "{error}");
 }
+
+#[test]
+#[cfg(unix)]
+fn discussion_service_dispatch_is_lazy_nonpersisting_and_preserves_shared_metadata() {
+    use diffz_adapters::service::Services;
+    use diffz_core::provider::WorkbenchServices;
+    use std::sync::Arc;
+    let (dir, reader) = fixture("normal");
+    let target = capture(&reader, CHANGE).unwrap().remote.unwrap();
+    let mut services = Services::new(&dir.path().join("service-state"), false).unwrap();
+    services.register(Arc::new(EntireProvider::new(Some(Arc::new(reader)))), false);
+    let list = services
+        .discussions(&target, Cancellation::default())
+        .unwrap();
+    let json = serde_json::to_value(&list).unwrap();
+    let shared: diffz_core::discussion::DiscussionList =
+        serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(serde_json::to_value(shared).unwrap(), json);
+    assert_eq!(list.items[0].id, "discussion_1");
+    let detail = services
+        .discussion(&target, "discussion_1", Cancellation::default())
+        .unwrap();
+    assert_eq!(detail.messages[0].replies[0].id, "reply_1");
+    let json = serde_json::to_value(&detail).unwrap();
+    let shared: diffz_core::discussion::DiscussionDetail =
+        serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(serde_json::to_value(shared).unwrap(), json);
+    assert!(
+        services.recent().unwrap().is_empty(),
+        "metadata reads never store a snapshot"
+    );
+    let before = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+    let cancel = Cancellation::default();
+    cancel.cancel();
+    assert!(services.discussions(&target, cancel.clone()).is_err());
+    assert!(
+        services
+            .discussion(&target, "discussion_1", cancel)
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap(),
+        before
+    );
+    std::fs::write(dir.path().join("scenario"), "discussion-denied").unwrap();
+    assert!(
+        services
+            .discussions(&target, Cancellation::default())
+            .is_err()
+    );
+    std::fs::write(dir.path().join("scenario"), "discussion-empty").unwrap();
+    assert!(
+        services
+            .discussions(&target, Cancellation::default())
+            .unwrap()
+            .items
+            .is_empty()
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn discussion_service_rejects_success_returned_after_cancellation() {
+    use diffz_adapters::{provider::ReviewRemote, service::Services};
+    use diffz_core::provider::WorkbenchServices;
+    use std::sync::Arc;
+    struct Cancelling;
+    impl ReviewProvider for Cancelling {
+        fn rules(&self) -> Arc<dyn ReviewRules> {
+            Arc::new(EntireRules)
+        }
+        fn accepts(&self, _: &str) -> bool {
+            false
+        }
+        fn open(&self, _: &str, _: Cancellation) -> diffz_adapters::Result<Snapshot> {
+            panic!("unexpected open")
+        }
+        fn source(&self, _: &RemoteTarget, _: &str, _: &str) -> diffz_adapters::Result<Vec<u8>> {
+            panic!("unexpected source")
+        }
+        fn remote(&self) -> diffz_adapters::Result<Arc<dyn ReviewRemote>> {
+            panic!("unexpected writes")
+        }
+        fn discussions(
+            &self,
+            _: &RemoteTarget,
+            cancel: Cancellation,
+        ) -> diffz_adapters::Result<diffz_core::discussion::DiscussionList> {
+            cancel.cancel();
+            Ok(diffz_core::discussion::DiscussionList {
+                items: vec![],
+                has_more: false,
+                event_cursors: vec![],
+            })
+        }
+    }
+    let (dir, reader) = fixture("normal");
+    let target = capture(&reader, CHANGE).unwrap().remote.unwrap();
+    let mut services = Services::new(&dir.path().join("service-state"), false).unwrap();
+    services.register(Arc::new(Cancelling), false);
+    assert!(
+        services
+            .discussions(&target, Cancellation::default())
+            .is_err()
+    );
+    // Default unsupported detail must remain an error, not an empty result.
+    assert!(
+        services
+            .discussion(&target, "discussion_1", Cancellation::default())
+            .is_err()
+    );
+    assert!(services.recent().unwrap().is_empty());
+}
