@@ -259,6 +259,48 @@ impl SourceChoices for StoredChoices {
 }
 
 impl WorkbenchServices for Services {
+    fn discussions(
+        &self,
+        target: &RemoteTarget,
+        cancel: Cancellation,
+    ) -> std::result::Result<diffz_core::discussion::DiscussionList, ServiceError> {
+        let _permit = self
+            .permit(&cancel)
+            .map_err(|e| ServiceError::from(e.to_string()))?;
+        if cancel.cancelled() {
+            return Err("Discussion read cancelled".into());
+        }
+        let result = self
+            .provider_for(&target.provider)
+            .and_then(|p| p.discussions(target, cancel.clone()))
+            .map_err(|e| ServiceError::from(e.to_string()))?;
+        if cancel.cancelled() {
+            return Err("Discussion read cancelled".into());
+        }
+        Ok(result)
+    }
+    fn discussion(
+        &self,
+        target: &RemoteTarget,
+        id: &str,
+        cancel: Cancellation,
+    ) -> std::result::Result<diffz_core::discussion::DiscussionDetail, ServiceError> {
+        let _permit = self
+            .permit(&cancel)
+            .map_err(|e| ServiceError::from(e.to_string()))?;
+        if cancel.cancelled() {
+            return Err("Discussion read cancelled".into());
+        }
+        let result = self
+            .provider_for(&target.provider)
+            .and_then(|p| p.discussion(target, id, cancel.clone()))
+            .map_err(|e| ServiceError::from(e.to_string()))?;
+        if cancel.cancelled() {
+            return Err("Discussion read cancelled".into());
+        }
+        Ok(result)
+    }
+
     fn source_lines(
         &self,
         target: &RemoteTarget,

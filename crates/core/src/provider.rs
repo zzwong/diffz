@@ -157,6 +157,24 @@ impl From<&str> for ServiceError {
 }
 /// Call synchronous implementations from a bounded worker, never during GPUI update or render.
 pub trait WorkbenchServices: Send + Sync {
+    /// Lazy read only; caller must bind results to its current session generation.
+    /// Unsupported/error is not an empty successful history. Never persists data.
+    fn discussions(
+        &self,
+        _target: &RemoteTarget,
+        _cancel: Cancellation,
+    ) -> Result<crate::discussion::DiscussionList, ServiceError> {
+        Err("This provider cannot read discussions".into())
+    }
+    fn discussion(
+        &self,
+        _target: &RemoteTarget,
+        _id: &str,
+        _cancel: Cancellation,
+    ) -> Result<crate::discussion::DiscussionDetail, ServiceError> {
+        Err("This provider cannot read discussion detail".into())
+    }
+
     fn open(&self, request: OpenRequest, cancel: Cancellation) -> Result<Opened, ServiceError>;
     fn source_lines(
         &self,

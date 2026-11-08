@@ -9,6 +9,22 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub trait ReviewProvider: Send + Sync {
+    fn discussions(
+        &self,
+        _target: &RemoteTarget,
+        _cancel: Cancellation,
+    ) -> Result<diffz_core::discussion::DiscussionList> {
+        Err("This provider cannot read discussions".into())
+    }
+    fn discussion(
+        &self,
+        _target: &RemoteTarget,
+        _id: &str,
+        _cancel: Cancellation,
+    ) -> Result<diffz_core::discussion::DiscussionDetail> {
+        Err("This provider cannot read discussion detail".into())
+    }
+
     fn rules(&self) -> Arc<dyn ReviewRules>;
     fn open(&self, address: &str, cancel: Cancellation) -> Result<Snapshot>;
     fn open_or_select(&self, address: &str, cancel: Cancellation) -> Result<ProviderOpen> {

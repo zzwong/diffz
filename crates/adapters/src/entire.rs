@@ -1412,6 +1412,22 @@ impl EntireProvider {
     }
 }
 impl ReviewProvider for EntireProvider {
+    fn discussions(
+        &self,
+        target: &RemoteTarget,
+        cancel: Cancellation,
+    ) -> Result<diffz_core::discussion::DiscussionList> {
+        self.reader()?.discussions(target, cancel)
+    }
+    fn discussion(
+        &self,
+        target: &RemoteTarget,
+        id: &str,
+        cancel: Cancellation,
+    ) -> Result<diffz_core::discussion::DiscussionDetail> {
+        self.reader()?.discussion(target, id, cancel)
+    }
+
     fn rules(&self) -> Arc<dyn ReviewRules> {
         Arc::new(EntireRules)
     }

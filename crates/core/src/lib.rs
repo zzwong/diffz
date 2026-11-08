@@ -29,3 +29,5 @@ pub mod scroll;
 
 pub mod source_link;
 pub mod timefmt;
+
+pub mod discussion;
