@@ -313,3 +313,22 @@ the intended contract, not a claim of authenticated runtime verification.
 | CLI output and routing behavior | [v0.12.2 `api_cmd.go`](https://github.com/entireio/cli/blob/v0.12.2/cmd/entire/cli/api_cmd.go) |
 | Session metadata and coverage | [Sessions in a repository](https://docs.entire.com/api-reference/sessions/sessions/sessions-in-a-repository) |
 | Checkpoint storage and privacy | [Session storage](https://docs.entire.com/guides/checkpoints/checkpoint-storage), [separate checkpoint repository](https://docs.entire.com/guides/checkpoints/store-checkpoints-in-another-repo) |
+
+### Typed Change discovery (adapter API)
+
+`EntireReader::choices` reads a bare project Trail into `TrailChoices` without
+loading a diff. It exposes readable repository/Change labels and the explicit
+partial-access marker. Empty or partially visible membership is not evidence
+that the Trail has no other Changes. Duplicate identities and malformed rows
+are rejected rather than silently omitted.
+
+`EntireReader::snapshot_choice` opens one index from that immutable result. It
+rechecks the account, project identity/routing, selected Change ID and repository
+placement before diff capture and retains the normal end-of-capture identity
+checks. Callers must pass the typed result, not reconstruct a choice solely from
+its display URL. An account change or replaced/removed choice requires fresh
+discovery. These APIs do not publish reviews or retain authentication tokens.
+
+This is the adapter foundation for #178. The desktop Open panel and CLI still
+use the existing opening behavior; a selectable multi-Change UI is not yet wired
+through the provider and service interfaces. Live qualification remains #182.

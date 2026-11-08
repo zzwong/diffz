@@ -18,6 +18,9 @@ use serde::Deserialize;
 use serde_json::{Value, value::RawValue};
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 
+mod selection;
+pub use selection::{ChangeChoice, TrailChoices};
+
 const READ_ONLY: &str = "Entire Trails are read-only in Diffz. Local drafts and exports remain available; publish reviews in Entire.";
 const SOURCE_LINK_UNAVAILABLE: &str =
     "Entire immutable source links are not available yet; open the Trail in your browser.";
@@ -437,7 +440,7 @@ struct Repository {
     origin: String,
     name: String,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ProjectTrail {
     origin: String,
     project_id: String,
@@ -647,11 +650,96 @@ impl EntireReader {
         }
     }
 
+    /// Discover readable Changes without fetching diffs or installing a snapshot.
+    /// Only bare project Trail addresses need discovery. Explicit repository
+    /// URLs retain their repository-only permission path through `snapshot`.
+    pub fn choices(&self, a: &TrailAddress, cancel: Cancellation) -> Result<TrailChoices> {
+        let TrailSelection::Project {
+            number,
+            change: None,
+        } = a.selection
+        else {
+            return Err("Change discovery requires a bare Entire project Trail URL".into());
+        };
+        let login = self.login(cancel.clone())?;
+        let account = self.account(&login, cancel.clone())?;
+        let (project, detail) = self.project(&login, a, number, cancel.clone())?;
+        let choices = TrailChoices::read(a.clone(), account.clone(), project, &detail)?;
+        let still = self.login(cancel.clone())?;
+        if self.account(&still, cancel.clone())? != account {
+            return Err("The Entire account changed during Change discovery".into());
+        }
+        if cancel.cancelled() {
+            return Err("Entire Change discovery was cancelled".into());
+        }
+        Ok(choices)
+    }
+
+    /// Open the exact discovery-time choice, not a reconstructed URL. Account,
+    /// project, Change and placement identity are checked before diff reads and
+    /// again by the normal immutable snapshot capture path.
+    pub fn snapshot_choice(
+        &self,
+        choices: &TrailChoices,
+        index: usize,
+        cancel: Cancellation,
+    ) -> Result<Snapshot> {
+        let choice = choices.choice(index)?;
+        let login = self.login(cancel.clone())?;
+        let account = self.account(&login, cancel.clone())?;
+        if account != choices.account {
+            return Err(
+                "The Entire account changed since Change discovery; reopen the Trail".into(),
+            );
+        }
+        let a = &choices.address;
+        let (project, detail) = self.project(&login, a, choices.project.number, cancel.clone())?;
+        if project != choices.project {
+            return Err("Entire project identity or routing changed since Change discovery; reopen the Trail".into());
+        }
+        // Parse every row to reject duplicate IDs/keys before selecting one.
+        let current = TrailChoices::read(a.clone(), account.clone(), project.clone(), &detail)?;
+        let wanted = choice.key();
+        let found = current
+            .changes()
+            .iter()
+            .find(|c| c.key() == wanted)
+            .ok_or("The selected Entire Change is no longer readable; reopen the Trail")?;
+        if found != choice {
+            return Err("The selected Entire Change identity changed; reopen the Trail".into());
+        }
+        let selected = Selected {
+            repo: wanted.0.clone(),
+            number: wanted.1,
+            change_id: Some(choice.id.clone()),
+            placement: Some(choice.placement.clone()),
+            parent_number: Some(project.number),
+            project: Some(project),
+        };
+        let mut explicit = a.clone();
+        explicit.selection = TrailSelection::Project {
+            number: choices.project.number,
+            change: Some(wanted),
+        };
+        self.snapshot_selected(&explicit, &login, account, selected, cancel)
+    }
+
     pub fn snapshot(&self, a: &TrailAddress, cancel: Cancellation) -> Result<Snapshot> {
         let login = self.login(cancel.clone())?;
         let account = self.account(&login, cancel.clone())?;
         let selected = self.select(&login, a, cancel.clone())?;
-        let repository = self.repository(&login, a, &selected.repo, cancel.clone())?;
+        self.snapshot_selected(a, &login, account, selected, cancel)
+    }
+
+    fn snapshot_selected(
+        &self,
+        a: &TrailAddress,
+        login: &Login,
+        account: String,
+        selected: Selected,
+        cancel: Cancellation,
+    ) -> Result<Snapshot> {
+        let repository = self.repository(login, a, &selected.repo, cancel.clone())?;
         if selected
             .placement
             .as_ref()
@@ -664,7 +752,7 @@ impl EntireReader {
             repository.placement, selected.number
         );
         for _ in 0..3 {
-            let before = self.json(&login, Some(&repository.origin), &endpoint, cancel.clone())?;
+            let before = self.json(login, Some(&repository.origin), &endpoint, cancel.clone())?;
             let pins = Pins::read(&before, &selected, a)?;
             let compare_endpoint = query(
                 &format!("/api/v1/git/repos/{}/compare", repository.placement),
@@ -675,7 +763,7 @@ impl EntireReader {
                 ],
             );
             let compare = self.json(
-                &login,
+                login,
                 Some(&repository.origin),
                 &compare_endpoint,
                 cancel.clone(),
@@ -689,7 +777,7 @@ impl EntireReader {
                 &[("base", &pins.merge_base), ("head", &pins.head)],
             );
             let raw = self.request(
-                &login,
+                login,
                 Some(&repository.origin),
                 &diff_endpoint,
                 cancel.clone(),
@@ -699,7 +787,7 @@ impl EntireReader {
                 return Err("Entire returned an empty diff for an incomplete or nonempty comparison; no snapshot was installed".into());
             }
             let sessions = self.json(
-                &login,
+                login,
                 Some(&repository.origin),
                 &query(
                     &format!("/api/v1/repos/{}/sessions", repository.placement),
@@ -716,16 +804,16 @@ impl EntireReader {
             if cancel.cancelled() {
                 return Err("Entire capture was cancelled".into());
             }
-            let after = self.json(&login, Some(&repository.origin), &endpoint, cancel.clone())?;
+            let after = self.json(login, Some(&repository.origin), &endpoint, cancel.clone())?;
             if Pins::read(&after, &selected, a)? != pins {
                 continue;
             }
-            if self.repository(&login, a, &selected.repo, cancel.clone())? != repository {
+            if self.repository(login, a, &selected.repo, cancel.clone())? != repository {
                 return Err("Entire repository identity or primary placement changed during capture; reopen the Trail".into());
             }
             if let Some(project) = &selected.project {
                 let current = self.json(
-                    &login,
+                    login,
                     Some(&project.origin),
                     &project.endpoint,
                     cancel.clone(),
@@ -733,6 +821,9 @@ impl EntireReader {
                 if current["id"] != project.id || current["projectId"] != project.project_id {
                     return Err("Entire project Trail identity changed during capture".into());
                 }
+                // Discovery choices must remain unambiguous at the final read,
+                // including duplicate opaque IDs under different display keys.
+                TrailChoices::read(a.clone(), account.clone(), project.clone(), &current)?;
                 let wanted = match &a.selection {
                     TrailSelection::Project { change, .. } => change.as_ref(),
                     _ => None,
