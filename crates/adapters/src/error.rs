@@ -3,6 +3,11 @@ use diffz_core::provider::ServiceError;
 pub enum AdapterError {
     #[error("{0}")]
     Message(String),
+    #[error("{message}")]
+    Choices {
+        message: String,
+        choices: std::sync::Arc<dyn diffz_core::provider::SourceChoices>,
+    },
     #[error("I/O operation failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("draft store operation failed: {0}")]
@@ -25,6 +30,12 @@ impl From<&str> for AdapterError {
 }
 impl From<AdapterError> for ServiceError {
     fn from(e: AdapterError) -> Self {
-        e.to_string().into()
+        match e {
+            AdapterError::Choices { message, choices } => Self {
+                message,
+                choices: Some(choices),
+            },
+            other => other.to_string().into(),
+        }
     }
 }

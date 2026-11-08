@@ -71,6 +71,11 @@ impl TrailChoices {
                 id: id.into(),
                 placement: placement.into(),
                 address: address.change_url(repository, number),
+                branch: match row.get("branch") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(branch)) => Some(branch.clone()),
+                    Some(_) => return Err("Entire Change has an invalid branch label".into()),
+                },
             });
         }
         Ok(Self {
@@ -96,10 +101,14 @@ pub struct ChangeChoice {
     pub(super) id: String,
     pub(super) placement: String,
     address: String,
+    branch: Option<String>,
 }
 impl ChangeChoice {
     pub fn repository(&self) -> &str {
         &self.repository
+    }
+    pub fn branch(&self) -> Option<&str> {
+        self.branch.as_deref()
     }
     pub fn number(&self) -> u64 {
         self.number

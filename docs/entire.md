@@ -84,8 +84,12 @@ A project Trail and its repository Changes have different numbers. A Trail can
 contain several Changes, even in different repositories. A URL such as
 `https://entire.com/et/acme/-/trails/42` opens directly only when the response
 identifies one accessible Change without reporting a partial result. Otherwise
-Diffz asks for a specific Change and lists available Change URLs. It does not
-silently choose the first repository or combine unrelated diffs.
+the desktop Open panel offers a paged list of readable repository Changes,
+with a notice when membership may be access-filtered. Choose a row with the
+mouse or Up/Down and Enter. Back returns to the Open form; Esc cancels. The
+current review remains unchanged until the selected Change finishes loading.
+The noninteractive CLI still asks for a specific Change URL and lists available
+URLs; it never silently chooses the first repository or combines unrelated diffs.
 
 An Entire Change in a GitHub mirror is still opened through Entire. Its number
 is not treated as a GitHub pull request number. This also matters for
@@ -130,8 +134,7 @@ branch to exist. An unindexed or incomplete snapshot reports a loading error
 rather than substituting the current branch tip.
 
 Standalone Entire commit and compare URLs, immutable source-line permalinks,
-a multi-Change picker, remote review threads and findings, full review/CI
-history, and checkpoint transcripts are not part of this initial workflow.
+remote review threads and findings, full review/CI history, and checkpoint transcripts are not part of this initial workflow.
 `--compare` continues to accept the GitHub and GitLab forms described in the
 main README. The absence of session or review details in Diffz is not evidence
 that Entire has none.
@@ -329,6 +332,9 @@ checks. Callers must pass the typed result, not reconstruct a choice solely from
 its display URL. An account change or replaced/removed choice requires fresh
 discovery. These APIs do not publish reviews or retain authentication tokens.
 
-This is the adapter foundation for #178. The desktop Open panel and CLI still
-use the existing opening behavior; a selectable multi-Change UI is not yet wired
-through the provider and service interfaces. Live qualification remains #182.
+The provider/service boundary carries these choices as an opaque in-memory
+handle. The desktop picker opens through that handle rather than rebuilding a
+URL; saved snapshots and later refreshes still refer to one selected Change.
+The picker renders at most 50 rows per page and bounds remote display labels.
+This advances the selection portion of #178, not its remaining discussion,
+finding and review-history work. Live qualification remains #182.

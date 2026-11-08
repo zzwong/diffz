@@ -121,14 +121,33 @@ pub struct RecentSession {
     pub id: SnapshotId,
     pub title: String,
 }
+/// An in-memory choice. The request is for later refresh only; opening must go
+/// through its owning SourceChoices handle to preserve provider identity pins.
+#[derive(Debug, Clone)]
+pub struct SourceChoice {
+    pub label: String,
+    pub request: OpenRequest,
+}
+/// Opaque, read-only discovery handle. No credentials or serialized selection
+/// tokens cross into the UI. Call `open` on a bounded background worker.
+pub trait SourceChoices: std::fmt::Debug + Send + Sync {
+    fn title(&self) -> &str;
+    fn possibly_partial(&self) -> bool;
+    fn entries(&self) -> &[SourceChoice];
+    fn open(&self, index: usize, cancel: Cancellation) -> Result<Opened, ServiceError>;
+}
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct ServiceError {
     pub message: String,
+    pub choices: Option<Arc<dyn SourceChoices>>,
 }
 impl From<String> for ServiceError {
     fn from(message: String) -> Self {
-        Self { message }
+        Self {
+            message,
+            choices: None,
+        }
     }
 }
 impl From<&str> for ServiceError {

@@ -754,3 +754,105 @@ fn entire_discovery_rejects_explicit_urls_without_running_cli() {
     );
     assert!(!dir.path().join("calls.jsonl").exists());
 }
+
+#[test]
+#[cfg(unix)]
+fn service_preserves_typed_choices_and_persists_only_the_selected_snapshot() {
+    use diffz_adapters::service::Services;
+    use diffz_core::provider::{OpenRequest, WorkbenchServices};
+    use std::sync::Arc;
+    for scenario in ["multiple", "partial"] {
+        let (dir, reader) = fixture(scenario);
+        let mut services = Services::new(&dir.path().join("state"), false).unwrap();
+        services.register(Arc::new(EntireProvider::new(Some(Arc::new(reader)))), false);
+        let error = services
+            .open(
+                OpenRequest::Remote {
+                    provider: ProviderId::ENTIRE,
+                    address: PROJECT.into(),
+                },
+                Cancellation::default(),
+            )
+            .unwrap_err();
+        let choices = error.choices.unwrap();
+        assert_eq!(choices.title(), "Project intent");
+        assert!(choices.entries()[0].label.contains("feature/work"));
+        assert_eq!(choices.possibly_partial(), scenario == "partial");
+        assert!(services.recent().unwrap().is_empty());
+        let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+        let cancel = Cancellation::default();
+        cancel.cancel();
+        assert!(choices.open(0, cancel).is_err());
+        assert!(choices.open(usize::MAX, Cancellation::default()).is_err());
+        assert_eq!(
+            calls,
+            std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap()
+        );
+        let opened = choices.open(0, Cancellation::default()).unwrap();
+        assert_eq!(
+            opened
+                .snapshot
+                .remote
+                .as_ref()
+                .unwrap()
+                .entire
+                .as_ref()
+                .unwrap()
+                .address,
+            CHANGE
+        );
+        assert_eq!(
+            choices.entries()[0].request,
+            OpenRequest::Remote {
+                provider: ProviderId::ENTIRE,
+                address: CHANGE.into()
+            }
+        );
+        assert_eq!(services.recent().unwrap().len(), 1);
+        let resumed = services
+            .open(
+                OpenRequest::Resume(opened.snapshot.id.clone()),
+                Cancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(resumed.snapshot.id, opened.snapshot.id);
+        assert!(!services.writes_enabled_for(&ProviderId::ENTIRE));
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn service_auto_opens_complete_single_change_and_rejects_stale_selection() {
+    use diffz_adapters::service::Services;
+    use diffz_core::provider::{OpenRequest, WorkbenchServices};
+    use std::sync::Arc;
+    let (dir, reader) = fixture("normal");
+    let mut services = Services::new(&dir.path().join("state"), false).unwrap();
+    services.register(Arc::new(EntireProvider::new(Some(Arc::new(reader)))), false);
+    assert!(
+        services
+            .open(
+                OpenRequest::Remote {
+                    provider: ProviderId::ENTIRE,
+                    address: PROJECT.into()
+                },
+                Cancellation::default()
+            )
+            .is_ok()
+    );
+    std::fs::write(dir.path().join("scenario"), "multiple").unwrap();
+    let choices = services
+        .open(
+            OpenRequest::Remote {
+                provider: ProviderId::ENTIRE,
+                address: PROJECT.into(),
+            },
+            Cancellation::default(),
+        )
+        .unwrap_err()
+        .choices
+        .unwrap();
+    std::fs::write(dir.path().join("scenario"), "account-switch").unwrap();
+    assert!(choices.open(0, Cancellation::default()).is_err());
+    assert_eq!(services.recent().unwrap().len(), 1);
+}

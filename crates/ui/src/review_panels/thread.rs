@@ -150,7 +150,7 @@ impl Workbench {
         self.thread_scroll
             .set_offset(gpui_kit::point(px(0.), px(0.)));
         self.return_focus = window.focused(cx);
-        self.panel = Panel::Line;
+        self.set_panel(Panel::Line);
         self.reset_comment_editor();
         self.composer
             .draft_input

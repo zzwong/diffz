@@ -40,6 +40,51 @@ impl Workbench {
             cx.stop_propagation();
             return;
         }
+        if self.panel == Panel::Open && self.source_choices.is_some() && !mods.modified() {
+            if self.loading && matches!(key, "up" | "down" | "home" | "end") {
+                cx.stop_propagation();
+                return;
+            }
+            let last = self
+                .source_choices
+                .as_ref()
+                .unwrap()
+                .entries()
+                .len()
+                .saturating_sub(1);
+            let enter_here = self.panel_focus.is_focused(window)
+                || self.open_input.read(cx).focus_handle(cx).is_focused(window);
+            let handled = match key {
+                "up" => {
+                    self.source_choice_index = self.source_choice_index.saturating_sub(1);
+                    true
+                }
+                "down" => {
+                    self.source_choice_index = self.source_choice_index.saturating_add(1).min(last);
+                    true
+                }
+                "home" => {
+                    self.source_choice_index = 0;
+                    true
+                }
+                "end" => {
+                    self.source_choice_index = last;
+                    true
+                }
+                "enter" if enter_here => {
+                    self.choose_source(self.source_choice_index, cx);
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                self.reveal_source_choice();
+                self.panel_focus.focus(window, cx);
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+        }
         if self.panel == Panel::Open
             && key == "enter"
             && [&self.open_input, &self.base_input, &self.head_input]
@@ -95,7 +140,7 @@ impl Workbench {
                             .take()
                             .unwrap_or_else(|| self.diff_focus.clone())
                             .focus(window, cx);
-                        self.panel = Panel::None;
+                        self.set_panel(Panel::None);
                         self.command(COMMANDS[i].0, window, cx);
                     }
                 }

@@ -5,12 +5,12 @@
 use crate::{
     AdapterError, Result,
     process::{ProcessRequest, Runner, resolve_program},
-    provider::{ReviewProvider, ReviewRemote},
+    provider::{ProviderOpen, ReviewChoices, ReviewProvider, ReviewRemote},
 };
 use diffz_core::{
     domain::*,
     patch::{ParseLimits, PatchReport, parse_patch},
-    provider::{Cancellation, ReviewRules},
+    provider::{Cancellation, OpenRequest, ReviewRules, SourceChoice},
     review::{PreparedReview, Verdict},
     source_link::encode,
 };
@@ -1404,10 +1404,77 @@ impl ReviewProvider for EntireProvider {
         self.reader()?
             .snapshot(&TrailAddress::parse(address)?, cancel)
     }
+    fn open_or_select(&self, address: &str, cancel: Cancellation) -> Result<ProviderOpen> {
+        let address = TrailAddress::parse(address)?;
+        if !matches!(
+            address.selection,
+            TrailSelection::Project { change: None, .. }
+        ) {
+            return self
+                .reader()?
+                .snapshot(&address, cancel)
+                .map(Box::new)
+                .map(ProviderOpen::Snapshot);
+        }
+        let reader = self.reader()?.clone();
+        let choices = reader.choices(&address, cancel.clone())?;
+        if choices.changes().len() == 1 && !choices.possibly_partial() {
+            return reader
+                .snapshot_choice(&choices, 0, cancel)
+                .map(Box::new)
+                .map(ProviderOpen::Snapshot);
+        }
+        let entries = choices
+            .changes()
+            .iter()
+            .map(|choice| SourceChoice {
+                label: format!(
+                    "{} · {} · Change #{}",
+                    choice.repository(),
+                    choice.branch().unwrap_or("branch unavailable"),
+                    choice.number()
+                ),
+                request: OpenRequest::Remote {
+                    provider: ProviderId::ENTIRE,
+                    address: choice.address().into(),
+                },
+            })
+            .collect();
+        Ok(ProviderOpen::Choices(Arc::new(EntireChoices {
+            reader,
+            choices,
+            entries,
+        })))
+    }
     fn source(&self, target: &RemoteTarget, path: &str, revision: &str) -> Result<Vec<u8>> {
         self.reader()?.source(target, path, revision)
     }
     fn remote(&self) -> Result<Arc<dyn ReviewRemote>> {
         Err(READ_ONLY.into())
+    }
+}
+
+struct EntireChoices {
+    reader: Arc<EntireReader>,
+    choices: TrailChoices,
+    entries: Vec<SourceChoice>,
+}
+impl std::fmt::Debug for EntireChoices {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("EntireChoices")
+    }
+}
+impl ReviewChoices for EntireChoices {
+    fn title(&self) -> &str {
+        self.choices.title()
+    }
+    fn possibly_partial(&self) -> bool {
+        self.choices.possibly_partial()
+    }
+    fn entries(&self) -> &[SourceChoice] {
+        &self.entries
+    }
+    fn open(&self, index: usize, cancel: Cancellation) -> Result<Snapshot> {
+        self.reader.snapshot_choice(&self.choices, index, cancel)
     }
 }

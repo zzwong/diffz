@@ -76,7 +76,7 @@ impl Workbench {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.panel = Panel::Open;
+        self.set_panel(Panel::Open);
         self.open_input
             .update(cx, |input, cx| input.set_value(text.clone(), window, cx));
         self.detect_source_mode(&text, window, cx);
@@ -99,6 +99,8 @@ impl Workbench {
         #[cfg(all(target_os = "linux", target_env = "gnu"))]
         self.cancel_allocator_trim();
         self.open_cancel.cancel();
+        self.source_choices = None;
+        self.source_choice_index = 0;
         let (cancel, pending) = match pending {
             Some((cancel, task)) => (cancel, Some(task)),
             None => (Cancellation::default(), None),
@@ -128,11 +130,65 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}
 // The release list is read again, so indexes into the old one no longer hold.
 app.release_filter=None;app.release_notes.clear();app.filter_files(cx);app.load_releases(cx);app.mark_releases();app.fetch_blame(cx);
 app.status="Source unchanged; comment list and review state refreshed without moving the view.".into();}
-                    else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>{app.status=e.message;
+                    else{app.last_request=Some(request);app.install(opened,cx);}},Err(e)=>{app.status=e.message;app.source_choices=e.choices;app.source_choice_index=0;if app.source_choices.is_some(){app.panel=Panel::Open;app.reveal_source_choice();}
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
             }cx.notify();});
         }).detach();
+        cx.notify();
+    }
+    /// Every user-facing panel transition invalidates an outstanding source
+    /// request. Successful install and the request's own choice response bypass
+    /// this helper because they are the completion being applied.
+    pub(crate) fn set_panel(&mut self, panel: Panel) {
+        if self.loading || self.source_choices.is_some() {
+            self.cancel_source_selection();
+        }
+        self.panel = panel;
+    }
+    pub(crate) fn reveal_source_choice(&self) {
+        if let Some(choices) = &self.source_choices {
+            // Panel children: header, title, keyboard help, optional access
+            // notice, then the current page's rows. Scroll after next prepaint.
+            let offset = 3 + usize::from(choices.possibly_partial());
+            self.source_choice_scroll
+                .scroll_to_item(offset + self.source_choice_index % 50);
+        }
+    }
+    /// Cancel discovery/selection and invalidate its completion before leaving
+    /// the picker. Closing a panel must never install a late source response.
+    pub(crate) fn cancel_source_selection(&mut self) {
+        self.open_cancel.cancel();
+        self.open_generation += 1;
+        self.loading = false;
+        self.source_choices = None;
+        self.source_choice_index = 0;
+    }
+    pub(crate) fn choose_source(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.loading {
+            return;
+        }
+        if self.unsaved() || self.busy {
+            self.status = "Save your outstanding changes before the source switches.".into();
+            cx.notify();
+            return;
+        }
+        let Some(choices) = self.source_choices.clone() else {
+            return;
+        };
+        let Some(entry) = choices.entries().get(index) else {
+            return;
+        };
+        let request = entry.request.clone();
+        let cancel = Cancellation::default();
+        let job_cancel = cancel.clone();
+        let job_choices = choices.clone();
+        let task = cx.background_spawn(async move { job_choices.open(index, job_cancel) });
+        self.open_pending(request, false, Some((cancel, task)), cx);
+        // Keep the choices visible but disabled during capture. Back/Esc can
+        // cancel without destroying the review that remains underneath.
+        self.source_choices = Some(choices);
+        self.source_choice_index = index;
         cx.notify();
     }
     pub fn install(&mut self, opened: Opened, cx: &mut Context<Self>) {
@@ -164,6 +220,8 @@ if app.active.is_some(){app.trim_allocator_after_switch(cx);}},
         self.prepared = None;
         self.offered = None;
         self.panel = Panel::None;
+        self.source_choices = None;
+        self.source_choice_index = 0;
         self.search_hits.clear();
         self.drag_start = None;
         self.annotations = Arc::default();

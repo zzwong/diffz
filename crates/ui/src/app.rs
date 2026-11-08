@@ -174,6 +174,9 @@ pub(crate) struct Workbench {
     pub discard_candidate: Option<DraftId>,
     pub open_generation: u64,
     pub open_cancel: Cancellation,
+    pub source_choices: Option<Arc<dyn SourceChoices>>,
+    pub source_choice_index: usize,
+    pub source_choice_scroll: ScrollHandle,
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     pub allocator_trim_cancel: Cancellation,
     highlight_cancel: Arc<std::sync::atomic::AtomicUsize>,
@@ -439,6 +442,9 @@ impl Workbench {
             discard_candidate: None,
             open_generation: 0,
             open_cancel: Cancellation::default(),
+            source_choices: None,
+            source_choice_index: 0,
+            source_choice_scroll: ScrollHandle::new(),
             #[cfg(all(target_os = "linux", target_env = "gnu"))]
             allocator_trim_cancel: Cancellation::default(),
             highlight_cancel: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -519,7 +525,7 @@ impl Workbench {
     }
     pub(crate) fn show_recents(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.return_focus = window.focused(cx);
-        self.panel = Panel::Recent;
+        self.set_panel(Panel::Recent);
         self.panel_focus.focus(window, cx);
         self.refresh_recent(cx);
         cx.notify();
@@ -596,7 +602,7 @@ impl Workbench {
         match ContextExport::selected(&a.snapshot, selection, notes) {
             Ok(c) => {
                 self.export_context = Some(c);
-                self.panel = Panel::Export;
+                self.set_panel(Panel::Export);
             }
             Err(e) => self.status = e,
         }
@@ -624,7 +630,7 @@ impl Workbench {
                         app.status =
                             "Context export finished locally, with no agent and no network request."
                                 .into();
-                        app.panel = Panel::None;
+                        app.set_panel(Panel::None);
                     }
                     Err(e) => app.status = e.message,
                 }

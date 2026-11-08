@@ -14,7 +14,7 @@ impl Workbench {
     /// Open the selected source from either Enter or the panel button.
     pub(crate) fn submit_open(&mut self, cx: &mut Context<Self>) {
         let text = self.open_input.read(cx).value().trim().to_string();
-        if self.loading || text.is_empty() {
+        if self.loading || self.source_choices.is_some() || text.is_empty() {
             return;
         }
         let request = match self.source_mode.clone() {
@@ -78,6 +78,10 @@ impl Workbench {
             .tab_group()
             .max_h_full()
             .overflow_y_scroll()
+            .when(
+                self.panel == Panel::Open && self.source_choices.is_some(),
+                |card| card.track_scroll(&self.source_choice_scroll),
+            )
             .p_4()
             .gap_2()
             .bg(skin.surface)
@@ -270,6 +274,95 @@ impl Workbench {
                         }));
                     card = card.child(row);
                 }
+            }
+            Panel::Open if self.source_choices.is_some() => {
+                let choices = self.source_choices.as_ref().unwrap();
+                card = card
+                    .child(
+                        div()
+                            .text_size(px(16.))
+                            .child(source_choice_text(choices.title())),
+                    )
+                    .child("Choose a repository Change. Up/Down and Enter select; Esc cancels.");
+                if choices.possibly_partial() {
+                    card = card.child(div().text_color(skin.muted).child(
+                        "Access may hide other Changes. These are readable choices, not the complete Trail membership."
+                    ));
+                }
+                let entries = choices.entries();
+                if entries.is_empty() {
+                    card = card.child("No readable Changes were returned. Check access or open an explicit Change URL.");
+                }
+                let page = self.source_choice_index / 50;
+                for (index, entry) in entries.iter().enumerate().skip(page * 50).take(50) {
+                    let label = source_choice_text(&entry.label);
+                    card = card.child(
+                        Button::new(("source-choice", index))
+                            .flex_shrink_0()
+                            .ghost()
+                            .small()
+                            .justify_start()
+                            .min_w_0()
+                            .w_full()
+                            .disabled(self.loading)
+                            .accessibility_label(label.clone())
+                            .when(index == self.source_choice_index, |b| {
+                                b.bg(skin.accent.opacity(0.15))
+                            })
+                            .child(div().min_w_0().text_ellipsis().child(label))
+                            .on_click(cx.listener(move |a, _, _, c| a.choose_source(index, c))),
+                    );
+                }
+                card = card.child(
+                    div()
+                        .h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("source-choice-prev")
+                                .ghost()
+                                .small()
+                                .label("Previous page")
+                                .disabled(self.loading || page == 0)
+                                .on_click(cx.listener(|a, _, _, c| {
+                                    a.source_choice_index =
+                                        (a.source_choice_index / 50).saturating_sub(1) * 50;
+                                    a.reveal_source_choice();
+                                    c.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("source-choice-next")
+                                .ghost()
+                                .small()
+                                .label("Next page")
+                                .disabled(self.loading || (page + 1) * 50 >= entries.len())
+                                .on_click(cx.listener(|a, _, _, c| {
+                                    if let Some(choices) = &a.source_choices {
+                                        a.source_choice_index = ((a.source_choice_index / 50 + 1)
+                                            * 50)
+                                            .min(choices.entries().len().saturating_sub(1));
+                                    }
+                                    a.reveal_source_choice();
+                                    c.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("source-choice-back")
+                                .ghost()
+                                .small()
+                                .label("Back")
+                                .on_click(cx.listener(|a, _, w, c| {
+                                    a.cancel_source_selection();
+                                    a.open_input.read(c).focus_handle(c).focus(w, c);
+                                    c.notify();
+                                })),
+                        ),
+                );
+                card = card.child(format!(
+                    "{} readable Changes · page {}",
+                    entries.len(),
+                    page + 1
+                ));
             }
             Panel::Open => {
                 let mut modes = div().h_flex().flex_wrap().gap_2();
@@ -467,7 +560,7 @@ impl Workbench {
                                     .take()
                                     .unwrap_or_else(|| a.diff_focus.clone())
                                     .focus(w, c);
-                                a.panel = Panel::None;
+                                a.set_panel(Panel::None);
                                 a.command(command, w, c);
                             })),
                     );
@@ -564,7 +657,7 @@ impl Workbench {
                                                 .take()
                                                 .unwrap_or_else(|| a.diff_focus.clone())
                                                 .focus(w, c);
-                                            a.panel = Panel::None;
+                                            a.set_panel(Panel::None);
                                             a.command(command, w, c);
                                         }))
                                         .into_any_element()
@@ -640,8 +733,22 @@ fn panel_status(status: &str) -> bool {
         || status.starts_with("End of the changed-file list")
         || status.starts_with("File "))
 }
+
+/// Remote labels are display-only plain text, never markup or command material.
+fn source_choice_text(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).take(240).collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn remote_choice_labels_are_bounded_plain_text() {
+        assert_eq!(super::source_choice_text("a\n\r\t\u{1b}b"), "ab");
+        assert_eq!(
+            super::source_choice_text(&"é".repeat(300)).chars().count(),
+            240
+        );
+    }
     #[test]
     fn navigation_statuses_stay_out_of_panels() {
         assert!(!super::panel_status(
