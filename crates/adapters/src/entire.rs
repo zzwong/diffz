@@ -18,6 +18,11 @@ use serde::Deserialize;
 use serde_json::{Value, value::RawValue};
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 
+mod discussions;
+pub use discussions::{
+    DiscussionDetail, DiscussionList, DiscussionMessage, DiscussionParticipant, DiscussionReply,
+    DiscussionSummary,
+};
 mod selection;
 pub use selection::{ChangeChoice, TrailChoices};
 
@@ -363,6 +368,18 @@ impl EntireReader {
         endpoint: &str,
         cancel: Cancellation,
     ) -> Result<Vec<u8>> {
+        self.request_limited(login, origin, endpoint, cancel, MAX_RESPONSE)
+    }
+    /// Bound CLI response bytes before JSON parsing, including whitespace and
+    /// escapes. Callers may supply a remaining aggregate traversal budget.
+    fn request_limited(
+        &self,
+        login: &Login,
+        origin: Option<&str>,
+        endpoint: &str,
+        cancel: Cancellation,
+        limit: usize,
+    ) -> Result<Vec<u8>> {
         if !endpoint.starts_with("/api/v1/")
             || endpoint.contains(['\r', '\n', '\\', '{', '}'])
             || url::Url::parse(endpoint).is_ok()
@@ -390,6 +407,7 @@ impl EntireReader {
                 .env
                 .insert("ENTIRE_API_BASE_URL".into(), origin.into());
         }
+        request.stdout_limit = limit.min(MAX_RESPONSE);
         let output = Runner::run(request, cancel)?;
         // Entire --include writes headers to stderr, unlike gh. Error bodies,
         // stderr and credentials are deliberately excluded from error strings.

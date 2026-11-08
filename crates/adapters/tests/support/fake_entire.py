@@ -179,9 +179,48 @@ if path == "/api/v1/" + FORGE + "/acme/trails/42":
         trail["isPossiblyPartial"] = "false"
     response(trail)
 
+def discussion_summary(i):
+    return {"id": "discussion_" + str(i), "trail_id": DECOY if SCENARIO == "discussion-cross" else CHANGE,
+            "title": "Discussion " + str(i), "kind": "general" if i == 1 else "review_comment",
+            "resolved": i == 2, "message_count": 1, "created_at": "2026-11-08T00:00:00Z",
+            "updated_at": "2026-11-08T00:01:00Z", "etag": "summary-etag",
+            "last_message_at": "2026-11-08T00:01:00Z", "last_message_author": "agent",
+            "participants": [{"login": "alice", "identity": {"kind": "user"}, "actor_account_id": "account_1"}], "created_by": "alice", "created_by_identity": {"kind": "user"},
+            "resolved_by": None, "resolved_by_identity": None, "resolved_at": None,
+            "review_comment_id": None if i == 1 else "finding_2", "review_comment": None if i == 1 else {"code_version_id": "version_old", "location": {"path": "old.txt", "line": 9}}}
+
+if path == "/api/v1/repos/" + REPO + "/trails/7/discussions":
+    if SCENARIO == "discussion-denied": response({"detail": "denied"}, 403)
+    assert query.get("per_page") == ["100"]
+    assert "include_messages" not in query
+    page = int(query.get("cursor", ["0"])[0])
+    if SCENARIO == "discussion-byte-padding": response(b" " * (8 * 1024 * 1024) + b'{"items":null,"event_cursor":"5"}')
+    if SCENARIO == "discussion-byte-cumulative":
+        response(b" " * (5 * 1024 * 1024) + json.dumps({"items": [discussion_summary(page + 1)], "event_cursor": "5", "next_cursor": str(page + 1)}).encode())
+    if SCENARIO == "discussion-byte-escapes":
+        response(b'{"items":null,"event_cursor":"5","unknown":"' + b'\\u0020' * 1400000 + b'"}')
+    if SCENARIO == "discussion-malformed": response({"items": "bad", "event_cursor": "5"})
+    if SCENARIO == "discussion-empty": response({"items": None, "event_cursor": "5"})
+    if SCENARIO == "discussion-overflow": response({"items": [discussion_summary(i) for i in range(101)], "event_cursor": "5"})
+    if SCENARIO == "discussion-bad-cursor": response({"items": [], "event_cursor": "5", "next_cursor": "bad\nvalue"})
+    if SCENARIO == "discussion-cap":
+        response({"items": [discussion_summary(page + 1)], "next_cursor": str(page + 1), "event_cursor": "5"})
+    i = 1 if page == 0 or SCENARIO == "discussion-duplicate" else 2
+    response({"items": [discussion_summary(i)], "next_cursor": "1" if page == 0 or SCENARIO == "discussion-loop" else "", "event_cursor": str(5 + page)})
+
+if path == "/api/v1/repos/" + REPO + "/trails/7/discussions/discussion_1":
+    if SCENARIO == "discussion-detail-byte-padding": response(b" " * (8 * 1024 * 1024) + b'{}')
+    reply = {"id": "reply_1", "author": "agent", "identity": {"kind": "agent", "run_id": "run_1"}, "body": "", "created_at": "2026-11-08T00:01:00Z"}
+    message = {"id": "message_1", "etag": "message-etag", "author": "alice", "identity": {"kind": "user"}, "body": "Original body", "created_at": "2026-11-08T00:00:00Z", "replies": [reply]}
+    if SCENARIO == "discussion-duplicate-message": reply["id"] = "message_1"
+    if SCENARIO == "discussion-missing-body": del message["body"]
+    if SCENARIO == "discussion-large-body": message["body"] = "x" * 65537
+    if SCENARIO == "discussion-too-many-messages": message["replies"] = [dict(reply, id="reply_" + str(i)) for i in range(1001)]
+    response({"discussion": discussion_summary(2 if SCENARIO == "discussion-wrong-id" else 1), "messages": [message], "event_cursor": "6"})
+
 if path == "/api/v1/repos/" + REPO + "/trails/7":
     count = nth("detail")
-    head = "d" * 40 if SCENARIO == "moving" and count % 2 == 0 else HEAD
+    head = "d" * 40 if (SCENARIO == "moving" or SCENARIO == "discussion-moving") and count % 2 == 0 else HEAD
     base = "e" * 40 if SCENARIO == "moving-base" and count % 2 == 0 else BASE
     parent = {"id": TRAIL, "project_id": PROJECT, "host": FORGE, "project": "acme", "number": 42,
               "path": "/api/v1/" + FORGE + "/acme/trails/" + TRAIL,
