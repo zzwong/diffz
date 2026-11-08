@@ -1,6 +1,7 @@
 use crate::{app::Workbench, commands::Command};
 use diffz_core::{
     annotation::Anchor,
+    domain::ProviderId,
     review_details::{ThreadLocation, short_timestamp, thread_location, visible_markdown},
 };
 use gpui_kit::component::{Disableable, Sizable, StyledExt, button::*, text::TextView};
@@ -119,6 +120,23 @@ impl Workbench {
                     } else {div().text_color(skin.muted).whitespace_normal().child(if active.snapshot.remote.is_some(){"The saved review did not capture the pull request description; reload it from the provider to bring it in."}else{"Local review; no pull request details."}).into_any_element()});
                 }
                 1 => {
+                    // Coverage is separate from saved counts and stays visible
+                    // even when this snapshot contains local drafts.
+                    if let Some(notice) = conversation_coverage_notice(
+                        active
+                            .snapshot
+                            .remote
+                            .as_ref()
+                            .map(|target| &target.provider),
+                    ) {
+                        body = body.child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(skin.warning)
+                                .whitespace_normal()
+                                .child(notice),
+                        );
+                    }
                     let mut roots = BTreeMap::new();
                     for c in &active.snapshot.comments {
                         if c.id == c.root_id || !roots.contains_key(&c.root_id) {
@@ -797,5 +815,37 @@ impl Workbench {
             timeline = timeline.child(card);
         }
         Some(timeline.into_any_element())
+    }
+}
+
+/// This is provider coverage, not an inference from an empty saved list or
+/// provider notice/error text. Replace it with typed capture state when Entire
+/// discussion reads are integrated into the service and saved snapshots.
+fn conversation_coverage_notice(provider: Option<&ProviderId>) -> Option<&'static str> {
+    (provider == Some(&ProviderId::ENTIRE)).then_some(
+        "Entire discussions and findings are not imported into this saved review. The counts below describe saved content only, not the complete remote conversation. Local drafts remain available.",
+    )
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::conversation_coverage_notice;
+    use diffz_core::domain::ProviderId;
+
+    #[test]
+    fn entire_conversation_coverage_is_explicit_independent_of_saved_counts() {
+        // Counts/drafts deliberately are not inputs: coverage must remain
+        // visible both for an empty snapshot and for one with local drafts.
+        let notice = conversation_coverage_notice(Some(&ProviderId::ENTIRE)).unwrap();
+        assert!(notice.contains("discussions and findings are not imported"));
+        assert!(notice.contains("saved content only"));
+        assert!(notice.contains("Local drafts remain available"));
+    }
+
+    #[test]
+    fn conversation_coverage_does_not_relabel_other_providers_or_local_reviews() {
+        for provider in [None, Some(&ProviderId::GITHUB), Some(&ProviderId::GITLAB)] {
+            assert_eq!(conversation_coverage_notice(provider), None);
+        }
     }
 }
