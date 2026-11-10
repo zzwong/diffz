@@ -7,9 +7,11 @@ covers successful installation and the real installed binary/payload.
 
 import hashlib
 from fnmatch import fnmatchcase
+import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -200,6 +202,132 @@ exit "${LDD_STATUS:-71}"
         result = self.smoke(LDD_STATUS="0", LDD_OUTPUT="libmissing.so => not found")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unresolved shared libraries", result.stderr)
+
+
+class RpmPackagePathTests(unittest.TestCase):
+    """Exercise shell paths and status handling, not native RPM expansion."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="diffz-rpm-paths-")
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        self.repo = self.root / "checkout with spaces"
+        (self.repo / "scripts").mkdir(parents=True)
+        self.script = self.repo / "scripts/package-linux-rpm.sh"
+        shutil.copyfile(REPO / "scripts/package-linux-rpm.sh", self.script)
+        (self.repo / "Cargo.toml").write_text('[workspace.package]\nversion = "0.0.0"\n')
+        self.stage = self.repo / "fixture stage"
+        (self.stage / "usr/bin").mkdir(parents=True)
+        (self.stage / "usr/bin/diffz").write_bytes(b"synthetic staged payload\n")
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.log = self.root / "rpmbuild.json"
+        shim = self.bin / "rpmbuild"
+        shim.write_text('''#!/usr/bin/env python3
+import json, os
+from pathlib import Path
+import sys
+args = sys.argv[1:]
+defines = dict(args[i + 1].split(" ", 1)
+               for i, arg in enumerate(args) if arg == "--define")
+source = Path(defines["_sourcedir"]) / "root/usr/bin/diffz"
+Path(os.environ["RPM_PATH_LOG"]).write_text(json.dumps({
+    "args": args, "defines": defines, "source_exists": source.is_file(),
+}))
+if not source.is_file():
+    sys.exit(42)
+status = int(os.environ["RPM_PATH_STATUS"])
+if status:
+    sys.exit(status)
+package = Path(defines["_topdir"]) / "RPMS/x86_64/fixture.rpm"
+package.parent.mkdir(parents=True, exist_ok=True)
+package.write_bytes(b"synthetic marker, not an RPM\\n")
+''')
+        shim.chmod(0o755)
+        self.env = {key: value for key, value in os.environ.items()
+                    if key not in ("BASH_ENV", "ENV")
+                    and not key.startswith(("DIFFZ_", "RPM_"))}
+        self.env.update(PATH=f"{self.bin}{os.pathsep}{self.env['PATH']}",
+                        DIFFZ_STAGE=str(self.stage), RPM_PATH_LOG=str(self.log),
+                        RPM_PATH_STATUS="0")
+
+    def package(self, **overrides):
+        return subprocess.run(
+            ["bash", str(self.script)], cwd=self.root,
+            env={**self.env, **overrides}, text=True, capture_output=True,
+        )
+
+    def assert_packaged(self, result, dist, top):
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        record = json.loads(self.log.read_text())
+        self.assertEqual(record["args"][0], "-bb")
+        self.assertEqual(record["args"][-1], "packaging/linux/rpm/diffz.spec")
+        self.assertEqual(record["defines"], {
+            "_topdir": str(top.resolve()),
+            "_sourcedir": str(top.resolve() / "SOURCES"),
+            "diffz_version": "0.0.0",
+        })
+        self.assertTrue(record["source_exists"])
+        self.assertEqual((dist / "fixture.rpm").read_bytes(),
+                         b"synthetic marker, not an RPM\n")
+        self.assertEqual((self.stage / "usr/bin/diffz").read_bytes(),
+                         b"synthetic staged payload\n")
+
+    def test_default_directories_and_version(self):
+        self.stage = self.repo / "dist/linux-root"
+        self.stage.parent.mkdir()
+        shutil.move(self.env.pop("DIFFZ_STAGE"), self.stage)
+        self.assert_packaged(self.package(), self.repo / "dist", self.repo / "dist/rpmbuild")
+
+    def test_relative_output_directory(self):
+        self.assert_packaged(self.package(DIFFZ_DIST="relative-output"),
+                             self.repo / "relative-output", self.repo / "relative-output/rpmbuild")
+
+    def test_absolute_output_directory(self):
+        dist = self.root / "absolute-output"
+        self.assert_packaged(self.package(DIFFZ_DIST=str(dist)), dist, dist / "rpmbuild")
+
+    def test_absolute_build_directory(self):
+        top = self.root / "absolute-build"
+        self.assert_packaged(self.package(RPM_TOPDIR=str(top)), self.repo / "dist", top)
+
+    def test_relative_build_directory_creates_output(self):
+        self.assert_packaged(self.package(RPM_TOPDIR="relative-build"),
+                             self.repo / "dist", self.repo / "relative-build")
+
+    def test_absolute_output_with_relative_build_directory(self):
+        dist = self.root / "absolute-output"
+        self.assert_packaged(self.package(DIFFZ_DIST=str(dist), RPM_TOPDIR="relative-build"),
+                             dist, self.repo / "relative-build")
+
+    def test_shell_keeps_paths_with_spaces_in_single_arguments(self):
+        dist = self.root / "output with spaces"
+        top = self.root / "build with spaces"
+        self.assert_packaged(self.package(DIFFZ_DIST=str(dist), RPM_TOPDIR=str(top)), dist, top)
+
+    def test_packager_failure_is_propagated_without_collecting_stale_output(self):
+        dist = self.repo / "dist"
+        stale = dist / "rpmbuild/RPMS/x86_64/stale.rpm"
+        stale.parent.mkdir(parents=True)
+        stale.write_bytes(b"stale marker\n")
+        result = self.package(RPM_PATH_STATUS="37")
+        self.assertEqual(result.returncode, 37, result.stdout + result.stderr)
+        self.assertTrue(self.log.is_file())
+        self.assertFalse((dist / "stale.rpm").exists())
+        self.assertNotIn("Created RPM", result.stdout)
+
+    def test_missing_stage_does_not_invoke_packager(self):
+        result = self.package(DIFFZ_STAGE=str(self.root / "missing-stage"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.log.exists())
+        self.assertNotIn("Created RPM", result.stdout)
+
+    def test_output_copy_failure_does_not_report_success(self):
+        (self.repo / "dist/fixture.rpm").mkdir(parents=True)
+        result = self.package()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.log.is_file())
+        self.assertNotIn("Created RPM", result.stdout)
 
 
 class ReleaseWiringTests(unittest.TestCase):
