@@ -34,13 +34,8 @@ impl EntireReader {
         }
         // Only absence enables discovery. An explicitly invalid inline origin
         // must fail instead of being replaced by a different credential target.
-        let raw = self.request_limited(
-            login,
-            None,
-            "/api/v1/clusters",
-            cancel,
-            MAX_CATALOG_BYTES,
-        )?;
+        let raw =
+            self.request_limited(login, None, "/api/v1/clusters", cancel, MAX_CATALOG_BYTES)?;
         let catalog: Catalog = serde_json::from_slice(&raw)
             .map_err(|_| "Entire cluster catalog has an unsupported shape")?;
         catalog_origin(placement, &catalog)
@@ -111,22 +106,25 @@ fn catalog_origin(placement: &Value, catalog: &Catalog) -> Result<String> {
 }
 
 fn cluster_matches_cell(cluster: &Cluster, cell: &str) -> bool {
-    [cluster.api_url.as_deref(), Some(cluster.public_url.as_str())]
-        .into_iter()
-        .flatten()
-        .any(|raw| {
-            let Ok(url) = strict_https_url(raw) else {
-                return false;
-            };
-            let host = url.host_str().unwrap_or_default();
-            (host.ends_with(".entire.io") || host.ends_with(".entire.com"))
-                && matches!(url.path(), "" | "/")
-                && url.query().is_none()
-                && url.fragment().is_none()
-                && host
-                    .split_once('.')
-                    .is_some_and(|(label, _)| label.eq_ignore_ascii_case(cell))
-        })
+    [
+        cluster.api_url.as_deref(),
+        Some(cluster.public_url.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|raw| {
+        let Ok(url) = strict_https_url(raw) else {
+            return false;
+        };
+        let host = url.host_str().unwrap_or_default();
+        (host.ends_with(".entire.io") || host.ends_with(".entire.com"))
+            && matches!(url.path(), "" | "/")
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && host
+                .split_once('.')
+                .is_some_and(|(label, _)| label.eq_ignore_ascii_case(cell))
+    })
 }
 
 #[cfg(test)]
@@ -206,7 +204,10 @@ mod tests {
             assert!(resolved(&placement(), value).is_err(), "{field}");
         }
         let mut value = clusters();
-        value["clusters"][1].as_object_mut().unwrap().remove("apiUrl");
+        value["clusters"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("apiUrl");
         assert!(resolved(&placement(), value).is_err());
     }
 
@@ -219,7 +220,10 @@ mod tests {
         value["clusters"].as_array_mut().unwrap().reverse();
         assert_eq!(resolved(&selected, value).unwrap(), EU);
         let mut value = clusters();
-        value["clusters"][1].as_object_mut().unwrap().remove("apiUrl");
+        value["clusters"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("apiUrl");
         assert!(resolved(&selected, value).is_err());
     }
 
@@ -254,7 +258,13 @@ mod tests {
             assert!(resolved(&placement(), value).is_err(), "{origin}");
         }
         let row = clusters()["clusters"][0].clone();
-        assert!(resolved(&placement(), json!({"clusters": vec![row; MAX_CLUSTERS + 1]})).is_err());
+        assert!(
+            resolved(
+                &placement(),
+                json!({"clusters": vec![row; MAX_CLUSTERS + 1]})
+            )
+            .is_err()
+        );
         assert!(resolved(&placement(), json!({"clusters": []})).is_err());
     }
 }

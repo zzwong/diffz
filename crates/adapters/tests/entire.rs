@@ -313,7 +313,10 @@ fn catalog_origin_changes_abort_capture_without_reading_the_replacement_region()
             CHANGE.into()
         };
         let err = capture(&reader, &address).unwrap_err().to_string();
-        assert!(err.contains("identity or primary placement changed"), "{err}");
+        assert!(
+            err.contains("identity or primary placement changed"),
+            "{err}"
+        );
         let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
         assert_eq!(calls.matches("/api/v1/clusters").count(), 2);
         assert!(!calls.contains("https://aws-us-east-2.api.entire.io"));
@@ -339,7 +342,10 @@ fn inline_catalog_transitions_preserve_identity_only_when_the_origin_is_unchange
                 let result = capture(&reader, &address);
                 if changed {
                     let err = result.unwrap_err().to_string();
-                    assert!(err.contains("identity or primary placement changed"), "{err}");
+                    assert!(
+                        err.contains("identity or primary placement changed"),
+                        "{err}"
+                    );
                 } else {
                     let snapshot = result.unwrap();
                     assert_eq!(snapshot.id, expected.id, "{scenario}");

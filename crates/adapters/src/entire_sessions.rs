@@ -20,12 +20,7 @@ pub(crate) fn unavailable(overview: &mut Overview) {
 
 /// Show only a few identifying fields. In particular, do not retain `prompt`,
 /// `displayName` (which may fall back to the prompt), or arbitrary session data.
-pub(crate) fn apply(
-    overview: &mut Overview,
-    response: &Value,
-    repository: &str,
-    placement: &str,
-) {
+pub(crate) fn apply(overview: &mut Overview, response: &Value, repository: &str, placement: &str) {
     let Some(envelope) = Envelope::read(response, repository, placement) else {
         unavailable(overview);
         return;
@@ -297,7 +292,11 @@ mod tests {
                 page["repo_full_name"] = json!(repository);
                 let got = mapped(page);
                 assert_eq!(got.notices, [UNAVAILABLE], "{repository}");
-                assert!(!serde_json::to_string(&got).unwrap().contains("must-not-show"));
+                assert!(
+                    !serde_json::to_string(&got)
+                        .unwrap()
+                        .contains("must-not-show")
+                );
             }
         }
     }
