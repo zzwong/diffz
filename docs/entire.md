@@ -161,7 +161,13 @@ repository Change need not share the same API region.
    enumerate the account or follow pages; an unexpected `nextPageToken` or
    `truncated: true` fails as incomplete instead of selecting a partial result.
 3. Match `repos[].primaries.processing` to exactly one `placements[].id`,
-   require that placement to be ready, and use its `apiBaseUrl`. Read the
+   require that placement to be ready, and use its `apiBaseUrl`. If that optional
+   field is absent, read the authenticated Core `GET /api/v1/clusters` catalog
+   (at most 1 MiB and 1,024 entries). Match the placement's cluster slug, or,
+   when that slug is absent from the catalog, its exact cell label in a trusted
+   catalog URL. Require one match and a trusted HTTPS `apiUrl`; never select
+   the default region or another ready placement. An explicitly malformed
+   inline origin still fails instead of enabling fallback. Read the
    repository Change at `/api/v1/repos/{placement}/trails/{number}`. Validate
    its identity and any selected parent Trail. A current Change URL must match
    the returned parent number and namespace. A legacy URL with a discoverable,
@@ -176,7 +182,7 @@ repository Change need not share the same API region.
 
 The primary can have `status: "ready"`. Selecting any ready mirror, or looking
 for `status: "processing"`, does not establish the processing primary. If the
-assigned host or identity is missing, fail with an actionable routing error;
+assigned host cannot be resolved or its identity is missing, fail with an actionable routing error;
 do not fall back to a guessed US or home-region endpoint.
 
 `entire api --to core` uses the selected login's Core. `--to cell` alone uses
