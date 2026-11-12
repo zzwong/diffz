@@ -38,6 +38,7 @@ jobs:
           name: diffz-font-source
           path: target/source-snapshot/
           if-no-files-found: error
+          retention-days: 1
 
   fonts:
     name: Font resolution (${{ matrix.image }})
