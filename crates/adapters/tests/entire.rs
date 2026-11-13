@@ -199,6 +199,222 @@ fn entire_capture_uses_processing_primary_and_frozen_refs_without_writes() {
 
 #[test]
 #[cfg(unix)]
+fn omitted_placement_origins_use_a_bounded_core_catalog_without_changing_identity() {
+    for forge in ["et", "gh"] {
+        let address = CHANGE.replace("/et/", &format!("/{forge}/"));
+        let normal = if forge == "gh" { "gh-normal" } else { "normal" };
+        let (inline_dir, inline_reader) = fixture(normal);
+        let inline = capture(&inline_reader, &address).unwrap();
+        let inline_calls = std::fs::read_to_string(inline_dir.path().join("calls.jsonl")).unwrap();
+        assert!(!inline_calls.contains("/api/v1/clusters"));
+        for scenario in [
+            "catalog",
+            "catalog-reordered",
+            "catalog-cell",
+            "catalog-empty-slug",
+            "catalog-empty-cell",
+            "catalog-slug-cell-conflict",
+        ] {
+            let scenario = if forge == "gh" {
+                format!("gh-{scenario}")
+            } else {
+                scenario.into()
+            };
+            let (dir, reader) = fixture(&scenario);
+            let snapshot = capture(&reader, &address).unwrap();
+            assert_eq!(snapshot.id, inline.id, "{scenario}");
+            assert!(snapshot.verify_identity());
+            let target = snapshot.remote.as_ref().unwrap();
+            let entire = target.entire.as_ref().unwrap();
+            assert_eq!(entire.placement_id, "01JBBBBBBBBBBBBBBBBBBBBBBB");
+            assert_eq!(entire.api_origin, "https://aws-eu-west-1.api.entire.io");
+            assert_eq!(
+                reader.source(target, "data.json", &target.head).unwrap(),
+                br#"{"value":2,"nested":{"x":3}}"#
+            );
+            let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+            let calls: Vec<serde_json::Value> = calls
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let catalogs: Vec<_> = calls
+                .iter()
+                .filter(|call| call["args"][6] == "/api/v1/clusters")
+                .collect();
+            assert_eq!(catalogs.len(), 2, "capture must revalidate the catalog");
+            assert!(catalogs.iter().all(|call| {
+                call["args"][2] == "core"
+                    && call["api_origin"].is_null()
+                    && call["has_token"] == true
+            }));
+            assert!(
+                calls
+                    .iter()
+                    .filter(|call| call["args"][0] == "api")
+                    .all(|call| call["args"][5] == "GET")
+            );
+            assert!(
+                calls
+                    .iter()
+                    .filter(|call| call["args"][2] == "cell")
+                    .all(|call| call["api_origin"] == "https://aws-eu-west-1.api.entire.io")
+            );
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn invalid_catalog_routing_fails_before_reading_change_or_diff() {
+    for forge in ["et", "gh"] {
+        for scenario in [
+            "catalog-missing",
+            "catalog-ambiguous",
+            "catalog-normalized-ambiguous",
+            "catalog-missing-api",
+            "catalog-invalid-origin",
+            "catalog-malformed",
+            "catalog-too-many",
+            "catalog-bytes",
+            "catalog-denied",
+            "catalog-invalid-inline",
+            "catalog-null-inline",
+        ] {
+            let scenario = if forge == "gh" {
+                format!("gh-{scenario}")
+            } else {
+                scenario.into()
+            };
+            let (dir, reader) = fixture(&scenario);
+            let address = CHANGE.replace("/et/", &format!("/{forge}/"));
+            let err = capture(&reader, &address).unwrap_err().to_string();
+            assert!(!err.contains("signature"));
+            assert!(!err.contains("evil.example"));
+            let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+            assert!(!calls.contains("/trails/7"), "{scenario}");
+            assert!(!calls.contains("/api/v1/git/"), "{scenario}");
+            if scenario.ends_with("inline") {
+                assert!(!calls.contains("/api/v1/clusters"), "{scenario}");
+            } else {
+                assert_eq!(calls.matches("/api/v1/clusters").count(), 1, "{scenario}");
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn catalog_origin_changes_abort_capture_without_reading_the_replacement_region() {
+    for scenario in ["catalog-switch", "gh-catalog-switch"] {
+        let (dir, reader) = fixture(scenario);
+        let address = if scenario.starts_with("gh-") {
+            CHANGE.replace("/et/", "/gh/")
+        } else {
+            CHANGE.into()
+        };
+        let err = capture(&reader, &address).unwrap_err().to_string();
+        assert!(
+            err.contains("identity or primary placement changed"),
+            "{err}"
+        );
+        let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+        assert_eq!(calls.matches("/api/v1/clusters").count(), 2);
+        assert!(!calls.contains("https://aws-us-east-2.api.entire.io"));
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn inline_catalog_transitions_preserve_identity_only_when_the_origin_is_unchanged() {
+    for forge in ["et", "gh"] {
+        let address = CHANGE.replace("/et/", &format!("/{forge}/"));
+        let normal = if forge == "gh" { "gh-normal" } else { "normal" };
+        let (_dir, reader) = fixture(normal);
+        let expected = capture(&reader, &address).unwrap();
+        for transition in ["catalog-inline-to-catalog", "catalog-to-inline"] {
+            for changed in [false, true] {
+                let scenario = format!(
+                    "{}{transition}{}",
+                    if forge == "gh" { "gh-" } else { "" },
+                    if changed { "-switch" } else { "" }
+                );
+                let (dir, reader) = fixture(&scenario);
+                let result = capture(&reader, &address);
+                if changed {
+                    let err = result.unwrap_err().to_string();
+                    assert!(
+                        err.contains("identity or primary placement changed"),
+                        "{err}"
+                    );
+                } else {
+                    let snapshot = result.unwrap();
+                    assert_eq!(snapshot.id, expected.id, "{scenario}");
+                    assert!(snapshot.verify_identity());
+                    let target = snapshot.remote.as_ref().unwrap();
+                    assert_eq!(
+                        target.entire.as_ref().unwrap().api_origin,
+                        "https://aws-eu-west-1.api.entire.io"
+                    );
+                    assert_eq!(
+                        reader.source(target, "data.json", &target.head).unwrap(),
+                        br#"{"value":2,"nested":{"x":3}}"#
+                    );
+                }
+                let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+                let calls: Vec<serde_json::Value> = calls
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                let catalogs: Vec<_> = calls
+                    .iter()
+                    .filter(|call| call["args"][6] == "/api/v1/clusters")
+                    .collect();
+                assert_eq!(catalogs.len(), 1, "{scenario}");
+                assert_eq!(catalogs[0]["args"][2], "core");
+                assert!(catalogs[0]["api_origin"].is_null());
+                assert_eq!(catalogs[0]["has_token"], true);
+                assert_eq!(
+                    std::fs::read_to_string(dir.path().join("directory.count")).unwrap(),
+                    "2",
+                    "{scenario}"
+                );
+                assert!(
+                    calls
+                        .iter()
+                        .filter(|call| call["args"][2] == "cell")
+                        .all(|call| call["api_origin"] == "https://aws-eu-west-1.api.entire.io"),
+                    "{scenario}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn cancellation_during_cluster_catalog_read_aborts_capture() {
+    let (dir, reader) = fixture("catalog-wait");
+    let cancel = Cancellation::default();
+    let worker_cancel = cancel.clone();
+    let worker = std::thread::spawn(move || {
+        reader.snapshot(&TrailAddress::parse(CHANGE).unwrap(), worker_cancel)
+    });
+    let started = std::time::Instant::now();
+    while !dir.path().join("catalog-waiting").exists()
+        && started.elapsed() < std::time::Duration::from_secs(10)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    cancel.cancel();
+    let result = worker.join().unwrap();
+    assert!(dir.path().join("catalog-waiting").exists());
+    assert!(result.unwrap_err().to_string().contains("cancelled"));
+    let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+    assert!(!calls.contains("/trails/7"));
+}
+
+#[test]
+#[cfg(unix)]
 fn project_with_exactly_one_complete_change_reopens_the_selected_change() {
     let (_dir, reader) = fixture("normal");
     let project = capture(&reader, PROJECT).unwrap();
@@ -502,6 +718,63 @@ fn session_context_is_bounded_optional_and_never_persists_prompt_content() {
         "{:?}",
         snapshot.overview.notices
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn session_context_must_match_the_captured_repository() {
+    for forge in ["et", "gh"] {
+        let address = CHANGE.replace("/et/", &format!("/{forge}/"));
+        for scenario in [
+            "sessions-wrong-owner",
+            "sessions-wrong-repository",
+            "sessions-wrong-empty",
+            "sessions-wrong-placement",
+            "sessions-lowercase-placement",
+        ] {
+            let scenario = if forge == "gh" {
+                format!("gh-{scenario}")
+            } else {
+                scenario.into()
+            };
+            let (dir, reader) = fixture(&scenario);
+            let snapshot = capture(&reader, &address).unwrap();
+            assert_eq!(snapshot.patch.files.len(), 5);
+            assert!(snapshot.verify_identity());
+            assert!(
+                snapshot
+                    .overview
+                    .notices
+                    .iter()
+                    .any(|n| n.contains("session metadata is unavailable")),
+                "{scenario}: {:?}",
+                snapshot.overview.notices
+            );
+            let serialized = serde_json::to_string(&snapshot).unwrap();
+            assert!(!serialized.contains("session-one"), "{scenario}");
+            assert!(!serialized.contains("no indexed sessions"), "{scenario}");
+            let calls = std::fs::read_to_string(dir.path().join("calls.jsonl")).unwrap();
+            assert!(!calls.contains("/transcript"));
+        }
+        for scenario in ["sessions-repository-case", "sessions-repository-placement"] {
+            let scenario = if forge == "gh" {
+                format!("gh-{scenario}")
+            } else {
+                scenario.into()
+            };
+            let (_dir, reader) = fixture(&scenario);
+            let snapshot = capture(&reader, &address).unwrap();
+            assert!(
+                snapshot
+                    .overview
+                    .notices
+                    .iter()
+                    .any(|n| n.contains("Entire session session-one")),
+                "{scenario}: {:?}",
+                snapshot.overview.notices
+            );
+        }
+    }
 }
 
 #[test]

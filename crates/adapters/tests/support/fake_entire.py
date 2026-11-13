@@ -26,6 +26,7 @@ API = "https://aws-eu-west-1.api.entire.io"
 PROJECT_API = "https://aws-us-east-2.api.entire.io"
 FORGE = "gh" if SCENARIO.startswith("gh-") else "et"
 PROVIDER = "github" if FORGE == "gh" else "entire"
+ROUTING_SCENARIO = SCENARIO[3:] if SCENARIO.startswith("gh-") else SCENARIO
 
 
 def token(audience="https://us.auth.entire.io", subject="account_1"):
@@ -129,6 +130,28 @@ if path == "/api/v1/repos":
         placements.pop()
     if SCENARIO == "primary-not-ready":
         placements[-1]["status"] = "processing"
+    if ROUTING_SCENARIO.startswith("catalog"):
+        placements[-1].update(clusterSlug="eu-slug", cell="aws-eu-west-1")
+        if ROUTING_SCENARIO == "catalog-invalid-inline":
+            placements[-1]["apiBaseUrl"] = "https://aws-eu-west-1.api.entire.io.evil.example"
+        elif ROUTING_SCENARIO == "catalog-null-inline":
+            placements[-1]["apiBaseUrl"] = None
+        else:
+            del placements[-1]["apiBaseUrl"]
+        if ROUTING_SCENARIO.startswith("catalog-inline-to-catalog") and count == 1:
+            placements[-1]["apiBaseUrl"] = API
+        if ROUTING_SCENARIO.startswith("catalog-to-inline") and count > 1:
+            placements[-1]["apiBaseUrl"] = PROJECT_API if ROUTING_SCENARIO.endswith("-switch") else API
+        if ROUTING_SCENARIO == "catalog-cell":
+            placements[-1]["clusterSlug"] = "not-in-catalog"
+        if ROUTING_SCENARIO == "catalog-empty-slug":
+            placements[-1]["clusterSlug"] = ""
+        if ROUTING_SCENARIO == "catalog-empty-cell":
+            placements[-1]["cell"] = ""
+        if ROUTING_SCENARIO == "catalog-slug-cell-conflict":
+            placements[-1]["cell"] = "aws-us-east-2"
+        if ROUTING_SCENARIO == "catalog-reordered":
+            placements.reverse()
     row = {"id": GROUP, "full_name": "acme/widget", "provider": PROVIDER,
            "primaries": {"processing": REPO}, "placements": placements}
     if SCENARIO in ("qualified-directory", "gh-qualified", "gh-conflict"):
@@ -146,6 +169,45 @@ if path == "/api/v1/repos":
         {"id": "repo_decoy", "full_name": "acme/widget", "provider": "entire" if FORGE == "gh" else "github",
          "primaries": {"processing": DECOY}, "placements": placements}, row,
     ], "truncated": False, "candidatesIncomplete": False})
+
+if path == "/api/v1/clusters":
+    if backend != "core" or query or not ROUTING_SCENARIO.startswith("catalog"):
+        die("unexpected cluster catalog request")
+    count = nth("catalog")
+    if ROUTING_SCENARIO == "catalog-denied":
+        response({"detail": "do not expose untrusted catalog errors"}, 403)
+    if ROUTING_SCENARIO == "catalog-wait":
+        (ROOT / "catalog-waiting").write_text("ready")
+        time.sleep(2)
+    if ROUTING_SCENARIO == "catalog-bytes":
+        response(b" " * (1024 * 1024) + b'{"clusters":[]}')
+    if ROUTING_SCENARIO == "catalog-malformed":
+        response({"clusters": "not an array"})
+    clusters = [
+        {"slug": "us-slug", "jurisdiction": "us", "isDefault": True,
+         "apiUrl": PROJECT_API, "publicUrl": "https://aws-us-east-2.entire.io"},
+        {"slug": "eu-slug", "jurisdiction": "eu", "isDefault": False,
+         "apiUrl": API, "publicUrl": "https://aws-eu-west-1.entire.io"},
+    ]
+    if ROUTING_SCENARIO == "catalog-missing":
+        clusters.pop()
+    elif ROUTING_SCENARIO == "catalog-ambiguous":
+        clusters.append(dict(clusters[-1]))
+    elif ROUTING_SCENARIO == "catalog-normalized-ambiguous":
+        clusters.append(dict(clusters[-1], slug=" EU-SLUG "))
+    elif ROUTING_SCENARIO == "catalog-missing-api":
+        del clusters[-1]["apiUrl"]
+    elif ROUTING_SCENARIO == "catalog-invalid-origin":
+        clusters[-1]["apiUrl"] = "https://aws-eu-west-1.api.entire.io.evil.example"
+    elif ROUTING_SCENARIO == "catalog-switch" and count > 1:
+        clusters[-1]["apiUrl"] = PROJECT_API
+    elif ROUTING_SCENARIO == "catalog-inline-to-catalog-switch":
+        clusters[-1]["apiUrl"] = PROJECT_API
+    elif ROUTING_SCENARIO == "catalog-too-many":
+        clusters.extend(dict(clusters[0], slug="extra-" + str(i)) for i in range(1023))
+    elif ROUTING_SCENARIO == "catalog-reordered":
+        clusters.reverse()
+    response({"clusters": clusters})
 
 if path == "/api/v1/projects/resolve/" + FORGE + "/acme":
     if SCENARIO == "repo-only":
@@ -258,13 +320,23 @@ if path == "/api/v1/repos/" + REPO + "/sessions":
     if SCENARIO == "sessions-wait":
         (ROOT / "sessions-waiting").write_text("ready")
         time.sleep(2)
-    response({"sessions": [{"sessionId": "session-one", "agent": "Claude Code",
+    session_scenario = SCENARIO[3:] if SCENARIO.startswith("gh-") else SCENARIO
+    session_repo = {
+        "sessions-wrong-owner": "other/widget",
+        "sessions-wrong-repository": "acme/other",
+        "sessions-wrong-empty": "acme/other",
+        "sessions-wrong-placement": DECOY,
+        "sessions-lowercase-placement": REPO.lower(),
+        "sessions-repository-case": "ACME/Widget",
+        "sessions-repository-placement": REPO,
+    }.get(session_scenario, "acme/widget")
+    response({"sessions": [] if session_scenario == "sessions-wrong-empty" else [{"sessionId": "session-one", "agent": "Claude Code",
                             "model": "claude-sonnet", "startedAt": "2026-10-26T12:00:00Z",
                             "lastActivityAt": "2026-10-26T12:30:00Z",
                             "prompt": "PRIVATE SESSION PROMPT MUST NOT PERSIST",
                             "displayName": "PRIVATE DISPLAY NAME MUST NOT PERSIST"}],
               "next_cursor": "opaque-next-page" if SCENARIO == "sessions-partial" else None,
-              "repo_full_name": "acme/widget", "app_has_access": True,
+              "repo_full_name": session_repo, "app_has_access": True,
               "session_branch_exists": True, "history_status": "complete",
               "history_complete": True, "source": "db"})
 
