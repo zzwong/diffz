@@ -86,6 +86,8 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
+          # Release jobs consume these in the same run; the GitHub release keeps the published copy.
+          retention-days: 3
 
   # Start from the base image again so build dependencies cannot hide missing
   # runtime requirements. Reuse exactly the RPM uploaded by the Linux build.
@@ -160,6 +162,7 @@ jobs:
             target/arch-package/diffz-[0-9]*.pkg.tar.zst
             target/arch-package/SHA256SUMS
           if-no-files-found: error
+          retention-days: 3
 
   debian:
     if: ${{ github.event_name != 'pull_request' }}
@@ -184,6 +187,7 @@ jobs:
             target/dist/**/*.dmg
             target/dist/**/SHA256SUMS
           if-no-files-found: error
+          retention-days: 3
 
   publish:
     if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
