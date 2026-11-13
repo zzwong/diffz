@@ -238,6 +238,7 @@ jobs:
           name: diffz-${{ matrix.target }}-native-build-environment
           path: ${{ steps.builder.outputs.state }}/native-environment.json
           if-no-files-found: error
+          retention-days: 14
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -246,3 +247,5 @@ jobs:
             dist/*.deb
             dist/SHA256SUMS
           if-no-files-found: error
+          # Published releases keep their own copy; this is a handoff and a short-lived download.
+          retention-days: 3
