@@ -179,6 +179,9 @@ def main():
             "KACHE_HOST_CONFIG": "",
             "KACHE_SOCKET_PATH": str(absolute_path(args.socket)),
             "RUSTC_WRAPPER": str(absolute_path(args.bin)),
+            # Cargo otherwise nests the workspace wrapper inside Kache. Empty
+            # also overrides a build.rustc-workspace-wrapper Cargo config entry.
+            "RUSTC_WORKSPACE_WRAPPER": "",
         }
         if not ignore_env and "KACHE_RUNTIME_DIR" in env:
             # Custom policies may allow this higher-priority override. Keep
