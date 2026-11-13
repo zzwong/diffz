@@ -54,6 +54,8 @@ operation = next(arg for arg in args if arg in ("fetch", "clean", "build", "test
 profile = next((arg.split("=", 1)[1] for arg in args if arg.startswith("--profile=")),
                "test" if operation == "test" else "dev")
 cwd = Path.cwd()
+if os.environ.get("FIXTURE_CHANGE_SOURCE") and operation == "build":
+    Path(os.environ["FIXTURE_CHANGE_SOURCE"]).write_text("# concurrent manifest edit\n")
 target = Path(os.environ["CARGO_TARGET_DIR"])
 sources = {str(path): (cwd / path).read_text() for path in (
     "crates/core/src/patch.rs", "crates/ui/src/magnify.rs", "crates/app/src/main.rs")}
@@ -227,6 +229,34 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(json.loads((self.evidence / "completion.json").read_text())["completed"])
         self.assertEqual(list(self.scratch.iterdir()), [])
         self.assert_original_checkout()
+
+    def test_changed_source_configuration_is_not_a_successful_measurement(self):
+        with mock.patch.dict(os.environ, {"FIXTURE_CHANGE_SOURCE": str(self.root / "Cargo.toml")}):
+            with self.assertRaisesRegex(RuntimeError, "Source configuration changed"):
+                self.invoke()
+        completion = json.loads((self.evidence / "completion.json").read_text())
+        self.assertFalse(completion["completed"])
+        self.assertFalse(completion["source_hashes_unchanged"])
+        self.assertEqual((self.root / "Cargo.toml").read_text(), "# concurrent manifest edit\n")
+        self.assertEqual(completion["cleanup_errors"], [])
+
+    def test_origin_configuration_change_during_worktree_trial_is_not_success(self):
+        with mock.patch.dict(os.environ, {"FIXTURE_CHANGE_SOURCE": str(self.root / "Cargo.toml")}):
+            with self.assertRaisesRegex(RuntimeError, "Source configuration changed"):
+                self.invoke("--cargo-scenario", "noop")
+        completion = json.loads((self.evidence / "completion.json").read_text())
+        self.assertFalse(completion["completed"])
+        self.assertFalse(completion["source_hashes_unchanged"])
+        self.assertEqual(completion["retained_worktrees"], [])
+
+    def test_source_change_does_not_mask_original_build_failure(self):
+        with mock.patch.dict(os.environ, {"FIXTURE_CHANGE_SOURCE": str(self.root / "Cargo.toml"),
+                                         "FIXTURE_FAIL_PROFILE": "dev"}):
+            with self.assertRaisesRegex(RuntimeError, "cargo-cold-1 failed"):
+                self.invoke()
+        completion = json.loads((self.evidence / "completion.json").read_text())
+        self.assertFalse(completion["completed"])
+        self.assertFalse(completion["source_hashes_unchanged"])
 
     def test_relative_native_compilers_remain_usable_in_worktrees(self):
         with current_directory(self.root):

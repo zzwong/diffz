@@ -415,6 +415,13 @@ removed with non-forced Git commands. A cleanup failure produces a failing exit
 and `completed: false`, while an earlier compilation failure remains the primary
 error.
 
+A changed source configuration hash also produces a failing exit and
+`completed: false`, even if every compiler command passed. The recorded
+`source_hashes_unchanged` field identifies this mismatch; the driver does not
+restore or overwrite the changed configuration. Earlier build failures retain
+their original error. This is the existing configuration-file hash check, not a
+claim that every source file is monitored throughout a run.
+
 `setup.json`, `measurements.jsonl`, and `completion.json` carry `schema_version`.
 Setup records the revision, workload, profiles, explicit incremental setting,
 toolchain versions, relevant build flags, source/configuration hashes and owned

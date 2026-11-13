@@ -484,9 +484,11 @@ def main(argv=None):
             except OSError as error:
                 cleanup_errors.append(f"scratch cleanup: {error}")
         try:
-            completion = dict(schema_version=SCHEMA_VERSION, completed=completed and not cleanup_errors,
+            source_hashes_unchanged = source_hashes(ROOT) == metadata["source_hashes"]
+            completion = dict(schema_version=SCHEMA_VERSION,
+                              completed=completed and not cleanup_errors and source_hashes_unchanged,
                               retained_worktrees=retained_worktrees, cleanup_errors=cleanup_errors,
-                              source_hashes_unchanged=source_hashes(ROOT) == metadata["source_hashes"])
+                              source_hashes_unchanged=source_hashes_unchanged)
             (evidence / "completion.json").write_text(json.dumps(completion, indent=2) + "\n")
         except OSError as error:
             if not primary_failure:
@@ -494,6 +496,8 @@ def main(argv=None):
             print(f"Could not record completion: {error}", file=sys.stderr)
     if cleanup_errors:
         raise RuntimeError(f"Cleanup failed; see {evidence / 'completion.json'}")
+    if not source_hashes_unchanged:
+        raise RuntimeError(f"Source configuration changed; measurements are not qualified; see {evidence / 'completion.json'}")
     print(f"Evidence: {evidence}; retained build/download artifacts: {artifacts}")
 
 
