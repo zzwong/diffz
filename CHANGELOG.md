@@ -21,6 +21,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Upgrade bundled SQLite via rusqlite 0.41.1 (libsqlite3-sys 0.39.1) for
+  RUSTSEC-2026-0459, uninitialized page-cache memory from a mismatched WAL file.
 - Upgrade the patched GPUI stack to 0.3.9 and GPUI Kit to 0.7.3, preserving
   the existing magnification and idle-frame behavior.
 
