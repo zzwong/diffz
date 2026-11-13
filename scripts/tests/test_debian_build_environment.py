@@ -284,5 +284,120 @@ elif args[0] == "cp":
         self.assertIn('"$RUNTIME_IMAGE"', smoke)
 
 
+class ReceiptComparisonTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.before = self.root / "before.json"
+        self.after = self.root / "after.json"
+        self.value = dict(schema_version=2, runner_image={"ImageOS": "ubuntu24", "ImageVersion": "old"},
+                          architecture="amd64", cc_target="x86_64-linux-gnu",
+                          packages=[dict(name="libc6", architecture="amd64", version="1")],
+                          tools={name: {"sha256": "a" * 64, "version": name + " 1"} for name in identity.TOOLS})
+        self.save(self.before, self.value)
+
+    def save(self, path, value):
+        path.write_text(json.dumps(dict(identity=value, sha256=identity.identity_digest(value))))
+
+    def test_identical_receipts_need_no_tools(self):
+        self.save(self.after, self.value)
+        result = subprocess.run([sys.executable, str(SCRIPT), "--compare", str(self.before), str(self.after)],
+                                capture_output=True, text=True, env={**os.environ, "PATH": ""})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertTrue(report["same_identity"])
+        self.assertEqual([report[k] for k in ("packages", "tools", "fields")], [[], [], []])
+
+    def test_native_package_and_image_changes_explain_new_identity(self):
+        self.value["packages"][0]["version"] = "2"
+        self.value["packages"].append(dict(name="clang", architecture="amd64", version="3"))
+        self.value["runner_image"]["ImageVersion"] = "new"
+        self.save(self.after, self.value)
+        report = identity.compare_receipts(self.before, self.after)
+        self.assertFalse(report["same_identity"])
+        self.assertEqual(report["tools"], [])
+        self.assertEqual(report["packages"], [dict(name="clang", architecture="amd64", before=None, after="3"),
+                                             dict(name="libc6", architecture="amd64", before="1", after="2")])
+        self.assertEqual(report["fields"][0]["name"], "runner_image")
+
+    def test_removed_package_and_changed_compiler_are_visible(self):
+        self.value["packages"] = [dict(name="clang", architecture="amd64", version="1")]
+        self.value["tools"]["cc"]["sha256"] = "b" * 64
+        self.save(self.after, self.value)
+        report = identity.compare_receipts(self.before, self.after)
+        self.assertIsNone(next(p for p in report["packages"] if p["name"] == "libc6")["after"])
+        self.assertEqual(report["tools"][0]["name"], "cc")
+
+    def test_tampered_receipt_is_rejected(self):
+        self.save(self.after, self.value)
+        receipt = json.loads(self.after.read_text())
+        receipt["identity"]["cc_target"] = "different"
+        self.after.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(ValueError, "digest does not match"):
+            identity.compare_receipts(self.before, self.after)
+
+    def test_duplicate_packages_are_not_silently_overwritten(self):
+        self.value["packages"] *= 2
+        self.save(self.after, self.value)
+        with self.assertRaisesRegex(ValueError, "duplicate receipt package"):
+            identity.compare_receipts(self.before, self.after)
+
+    def test_v1_container_receipts_compare_and_report_image_change(self):
+        self.value["schema_version"] = 1
+        del self.value["runner_image"]
+        self.value["base_image_id"] = "sha256:" + "1" * 64
+        self.save(self.before, self.value)
+        self.value["base_image_id"] = "sha256:" + "2" * 64
+        self.save(self.after, self.value)
+        report = identity.compare_receipts(self.before, self.after)
+        self.assertFalse(report["same_identity"])
+        self.assertEqual(report["fields"], [dict(name="base_image_id", before="sha256:" + "1" * 64,
+                                               after="sha256:" + "2" * 64)])
+
+    def test_structurally_incomplete_receipts_fail_even_with_matching_digest(self):
+        mutations = [
+            ("schema bool", lambda v: v.update(schema_version=True)),
+            ("missing target", lambda v: v.pop("cc_target")),
+            ("null target", lambda v: v.update(cc_target=None)),
+            ("missing architecture", lambda v: v.pop("architecture")),
+            ("null image", lambda v: v.update(runner_image=None)),
+            ("missing image version", lambda v: v["runner_image"].pop("ImageVersion")),
+            ("null tools", lambda v: v.update(tools=None)),
+            ("missing tool", lambda v: v["tools"].pop("cc")),
+            ("null tool", lambda v: v["tools"].update(cc=None)),
+            ("missing version", lambda v: v["tools"]["cc"].pop("version")),
+            ("invalid hash", lambda v: v["tools"]["cc"].update(sha256="invalid")),
+            ("empty packages", lambda v: v.update(packages=[])),
+            ("extra null field", lambda v: v.update(extra=None)),
+            ("extra package field", lambda v: v["packages"][0].update(extra=None)),
+        ]
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                value = json.loads(json.dumps(self.value))
+                mutate(value)
+                self.save(self.after, value)
+                with self.assertRaises(ValueError):
+                    identity.compare_receipts(self.before, self.after)
+
+    def test_package_reordering_explains_digest_difference(self):
+        self.value["packages"].append(dict(name="clang", architecture="amd64", version="1"))
+        self.save(self.before, self.value)
+        self.value["packages"].reverse()
+        self.save(self.after, self.value)
+        report = identity.compare_receipts(self.before, self.after)
+        self.assertFalse(report["same_identity"])
+        self.assertEqual(report["packages"], [])
+        self.assertTrue(report["package_order_changed"])
+
+    def test_invalid_json_returns_failure_without_traceback(self):
+        self.after.write_text("{")
+        result = subprocess.run([sys.executable, str(SCRIPT), "--compare", str(self.before), str(self.after)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("Traceback", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
