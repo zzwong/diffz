@@ -109,9 +109,14 @@ def preflight(args):
             raise RuntimeError("The Bazel trial requires x86_64 Linux unless BAZEL names a supported executable; use --tool cargo for native macOS")
         elif not (ROOT / "target/bazel-bootstrap/bazel-8.4.2-linux-x86_64").is_file():
             needed += ["curl", "sha256sum"]
-    missing = [tool for tool in needed if not shutil.which(tool)]
+    executables = {tool: shutil.which(tool) for tool in needed}
+    missing = [tool for tool in needed if not executables[tool]]
     if missing:
         raise RuntimeError("Missing required executable(s): " + ", ".join(missing) + ". Install them before running this trial.")
+    # Pin native compiler choices before running from ROOT or a worktree.
+    # Keep symlink/.. spelling: resolving it can change launcher behavior.
+    args.cc = str(Path(executables[args.cc]).absolute())
+    args.cxx = str(Path(executables[args.cxx]).absolute())
     if args.tool != "cargo" and not (ROOT / "scripts/bazel-trial.sh").is_file():
         raise RuntimeError("Missing scripts/bazel-trial.sh; run from a complete diffz checkout")
     revision = command_output(["git", "rev-parse", "HEAD"])
