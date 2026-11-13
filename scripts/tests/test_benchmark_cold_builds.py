@@ -3,7 +3,7 @@
 The integration fixture uses real disposable Git worktrees and deliberately fake
 compiler executables. Their timings must never be used as build measurements.
 """
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import importlib.util
 import io
 import json
@@ -26,6 +26,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 tool = Path(sys.argv[0]).name
@@ -56,11 +57,19 @@ cwd = Path.cwd()
 target = Path(os.environ["CARGO_TARGET_DIR"])
 sources = {str(path): (cwd / path).read_text() for path in (
     "crates/core/src/patch.rs", "crates/ui/src/magnify.rs", "crates/app/src/main.rs")}
+native_compilers = {}
+if tool == "cargo" and operation in ("build", "test"):
+    for variable in ("CC", "CXX"):
+        command = [os.environ[variable], "--version"]
+        output = subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT).stdout.strip()
+        native_compilers[variable] = dict(command=command, output=output)
 row = dict(tool=tool, operation=operation, args=args, selected_toolchain=selected,
            cwd=str(cwd), target=str(target), build_dir=os.environ["CARGO_BUILD_BUILD_DIR"],
            rustc=os.environ.get("RUSTC"), wrapper=os.environ.get("RUSTC_WRAPPER"),
            profile=profile, incremental=os.environ.get("CARGO_INCREMENTAL"),
            fingerprint=os.environ.get("CARGO_BUILD_FINGERPRINT"), sources=sources,
+           native_compilers=native_compilers,
            source_mtimes={path: (cwd / path).stat().st_mtime_ns for path in sources})
 marker = target / "fixture-seed"
 if marker.exists():
@@ -107,6 +116,16 @@ elif operation == "build":
         marker.write_text("seeded fixture artifact")
     (target / "fixture-last-sources").write_text(json.dumps(sources))
 '''
+
+
+@contextmanager
+def current_directory(path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 @unittest.skipUnless(shutil.which("git"), "Git is required for worktree safety regressions")
@@ -190,6 +209,106 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), expected)
         self.assertEqual((self.root / "target/ordinary/keep").read_text(), "ordinary target must survive")
         self.assertEqual((self.root / "target/ordinary-build/keep").read_text(), "ordinary build dir must survive")
+
+    def assert_native_compilers(self, cc, cxx):
+        setup = json.loads((self.evidence / "setup.json").read_text())
+        calls = [call for call in self.compiler_calls()
+                 if call["tool"] == "cargo" and call["operation"] in ("build", "test")]
+        self.assertTrue(calls)
+        self.assertTrue(all(call["cwd"] != str(self.root) for call in calls))
+        for variable, name, path in (("CC", "cc", cc), ("CXX", "cxx", cxx)):
+            expected = str(path)
+            self.assertTrue(Path(expected).is_absolute())
+            self.assertEqual(setup["native_compilers"][variable], expected)
+            checked = setup["tool_versions"][name]
+            self.assertEqual(checked["command"], [expected, "--version"])
+            for call in calls:
+                self.assertEqual(call["native_compilers"][variable], checked)
+        self.assertTrue(json.loads((self.evidence / "completion.json").read_text())["completed"])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def test_relative_native_compilers_remain_usable_in_worktrees(self):
+        with current_directory(self.root):
+            cc, cxx = Path("../bin/cc").absolute(), Path("../bin/cxx").absolute()
+            self.invoke("--preflight", "--cargo-scenario", "noop", "--cc", "../bin/cc", "--cxx", "../bin/cxx")
+            self.assertFalse(self.evidence.exists())
+            self.assertEqual(self.compiler_calls(), [])
+            self.invoke("--cargo-scenario", "noop", "--cc", "../bin/cc", "--cxx", "../bin/cxx")
+        self.assert_native_compilers(cc, cxx)
+
+    def test_relative_native_compilers_use_invocation_directory(self):
+        caller = self.base / "caller/nested"
+        caller.mkdir(parents=True)
+        with current_directory(caller):
+            cc, cxx = Path("../../bin/cc").absolute(), Path("../../bin/cxx").absolute()
+            self.invoke("--cargo-scenario", "noop", "--cc", "../../bin/cc", "--cxx", "../../bin/cxx")
+        self.assert_native_compilers(cc, cxx)
+
+    def test_native_compiler_names_use_pinned_relative_path_entries(self):
+        directory = self.base / "native-tools"
+        directory.mkdir()
+        for name, original in (("fixture-cc", "cc"), ("fixture-cxx", "cxx")):
+            shutil.copy2(self.bin / original, directory / name)
+        with current_directory(self.root), mock.patch.dict(os.environ, {
+                "PATH": "../native-tools" + os.pathsep + os.environ["PATH"]}):
+            cc = Path("../native-tools/fixture-cc").absolute()
+            cxx = Path("../native-tools/fixture-cxx").absolute()
+            self.invoke("--cargo-scenario", "noop", "--cc", "fixture-cc", "--cxx", "fixture-cxx")
+        self.assert_native_compilers(cc, cxx)
+
+    def test_native_compiler_symlink_names_and_spaces_are_preserved(self):
+        directory = self.base / "native wrappers"
+        directory.mkdir()
+        (directory / "cc alias").symlink_to(self.bin / "cc")
+        (directory / "cxx alias").symlink_to(self.bin / "cxx")
+        with current_directory(self.root):
+            cc = Path("../native wrappers/cc alias").absolute()
+            cxx = Path("../native wrappers/cxx alias").absolute()
+            self.invoke("--cargo-scenario", "noop", "--cc", "../native wrappers/cc alias",
+                        "--cxx", "../native wrappers/cxx alias")
+        self.assert_native_compilers(cc, cxx)
+        setup = json.loads((self.evidence / "setup.json").read_text())
+        self.assertTrue(setup["tool_versions"]["cc"]["output"].startswith("cc alias "))
+        self.assertTrue(setup["tool_versions"]["cxx"]["output"].startswith("cxx alias "))
+
+    def test_native_compiler_symlink_parent_segments_are_not_collapsed(self):
+        directory = self.base / "native-target"
+        (directory / "nested").mkdir(parents=True)
+        for name in ("cc", "cxx"):
+            shutil.copy2(self.bin / name, directory / name)
+        (self.base / "native-link").symlink_to(directory / "nested", target_is_directory=True)
+        with current_directory(self.root):
+            cc = Path("../native-link/../cc").absolute()
+            cxx = Path("../native-link/../cxx").absolute()
+            self.invoke("--cargo-scenario", "noop", "--cc", "../native-link/../cc",
+                        "--cxx", "../native-link/../cxx")
+        self.assert_native_compilers(cc, cxx)
+
+    def test_absolute_native_compiler_paths_are_unchanged(self):
+        self.invoke("--cargo-scenario", "noop")
+        self.assert_native_compilers(self.bin / "cc", self.bin / "cxx")
+
+    def test_missing_native_compiler_fails_before_evidence(self):
+        with current_directory(self.root):
+            with self.assertRaisesRegex(SystemExit, "Missing required executable.*missing-cc"):
+                self.invoke("--cargo-scenario", "noop", "--cc", "../bin/missing-cc")
+        self.assertFalse(self.evidence.exists())
+        self.assertEqual(self.compiler_calls(), [])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
+
+    def test_nonexecutable_native_compiler_fails_before_evidence(self):
+        compiler = self.bin / "nonexecutable-cxx"
+        compiler.write_text("must not run\n")
+        compiler.chmod(0o644)
+        with current_directory(self.root):
+            with self.assertRaisesRegex(SystemExit, "Missing required executable.*nonexecutable-cxx"):
+                self.invoke("--cargo-scenario", "noop", "--cxx", "../bin/nonexecutable-cxx")
+        self.assertFalse(self.evidence.exists())
+        self.assertEqual(self.compiler_calls(), [])
+        self.assertEqual(list(self.scratch.iterdir()), [])
+        self.assert_original_checkout()
 
     def test_error_repair_preserves_failure_receipt_and_restores_source(self):
         self.invoke("--cargo-workload", "desktop", "--cargo-scenario", "error-repair")
