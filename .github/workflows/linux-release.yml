@@ -86,8 +86,9 @@ jobs:
             dist/*.tar.gz
             dist/SHA256SUMS
           if-no-files-found: error
-          # Release jobs consume these in the same run; the GitHub release keeps the published copy.
-          retention-days: 3
+          # Only later jobs in this run read these, and the GitHub release keeps the
+          # published copy. Pull requests stay read-only, so expiry does the cleanup.
+          retention-days: 1
 
   # Start from the base image again so build dependencies cannot hide missing
   # runtime requirements. Reuse exactly the RPM uploaded by the Linux build.

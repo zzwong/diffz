@@ -283,6 +283,11 @@ elif args[0] == "cp":
         self.assertNotIn("docker exec", smoke)
         self.assertIn('"$RUNTIME_IMAGE"', smoke)
 
+    def test_packages_are_uploaded_only_for_releases_and_manual_runs(self):
+        upload = workflow_step("Upload release packages")
+        self.assertIn("if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}", upload)
+        self.assertIn("retention-days: 1", upload)
+
 
 class ReceiptComparisonTests(unittest.TestCase):
     def setUp(self):

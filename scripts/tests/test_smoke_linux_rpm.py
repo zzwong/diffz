@@ -351,6 +351,7 @@ class ReleaseWiringTests(unittest.TestCase):
         self.assertIn("    container: fedora:44\n", build)
         self.assertIn("cargo build --locked --release -p diffz\n", build)
         self.assertIn("name: diffz-linux-release\n", build)
+        self.assertIn("retention-days: 1\n", build)
         smoke = self.job("linux-smoke")
         self.assertIn("    needs: linux\n", smoke)
         self.assertIn("    container: fedora:44\n", smoke)
