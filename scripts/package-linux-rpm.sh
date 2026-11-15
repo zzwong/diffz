@@ -4,18 +4,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 version="${DIFFZ_VERSION:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)}"
-dist="${DIFFZ_DIST:-dist}"
-stage="${DIFFZ_STAGE:-$dist/linux-root}"
-top="${RPM_TOPDIR:-$dist/rpmbuild}"
+# Use the same absolute paths for staging, RPM macros, and output collection.
+dist="$(realpath -m -- "${DIFFZ_DIST:-dist}")"
+stage="$(realpath -m -- "${DIFFZ_STAGE:-$dist/linux-root}")"
+top="$(realpath -m -- "${RPM_TOPDIR:-$dist/rpmbuild}")"
 
-mkdir -p "$top"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-rm -rf "$top/SOURCES/root"
-cp -a "$stage" "$top/SOURCES/root"
+mkdir -p -- "$dist" "$top"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+rm -rf -- "$top/SOURCES/root"
+cp -a -- "$stage" "$top/SOURCES/root"
 rpmbuild -bb \
-  --define "_topdir $PWD/$top" \
-  --define "_sourcedir $PWD/$top/SOURCES" \
+  --define "_topdir $top" \
+  --define "_sourcedir $top/SOURCES" \
   --define "diffz_version $version" \
   packaging/linux/rpm/diffz.spec
 
-find "$top/RPMS" -type f -name '*.rpm' -exec cp {} "$dist/" \;
+find "$top/RPMS" -type f -name '*.rpm' -exec cp -t "$dist" -- {} +
 echo "Created RPM in $dist"

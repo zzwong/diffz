@@ -25,7 +25,7 @@ print(json.dumps({"argv":sys.argv[1:], "cwd":os.getcwd(),
  "config":str(config), "text":config.read_text(),
  "settings":tomllib.loads(config.read_text()),
  "env":{key:os.environ.get(key) for key in
- ("KACHE_HOST_CONFIG","KACHE_RUNTIME_DIR","KACHE_SOCKET_PATH","RUSTC_WRAPPER")}}, default=str))
+ ("KACHE_HOST_CONFIG","KACHE_RUNTIME_DIR","KACHE_SOCKET_PATH","RUSTC_WRAPPER","RUSTC_WORKSPACE_WRAPPER")}}, default=str))
 '''
 
 
@@ -43,7 +43,8 @@ class RuntimeTests(unittest.TestCase):
         self.env = {"PATH": os.environ["PATH"], "HOME": str(self.base / "home"),
                     "KACHE_CONFIG": "/unrelated/config", "KACHE_HOST_CONFIG": "/unrelated/host",
                     "KACHE_RUNTIME_DIR": str(self.base / "ignored-runtime"),
-                    "KACHE_SOCKET_PATH": "/unrelated/socket", "RUSTC_WRAPPER": "/unrelated/wrapper"}
+                    "KACHE_SOCKET_PATH": "/unrelated/socket", "RUSTC_WRAPPER": "/unrelated/wrapper",
+                    "RUSTC_WORKSPACE_WRAPPER": "/unrelated/workspace-wrapper"}
 
     def command(self, *command, config=None, socket="target/kache/runtime/daemon.sock", wrapper=None):
         return [sys.executable, str(SCRIPT), "--bin", str(wrapper or self.wrapper),
@@ -72,6 +73,18 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(result["settings"]["cache"]["ignore_env"])
         self.assertTrue(result["settings"]["cache"]["local_only"])
         self.assertFalse((self.base / "ignored-runtime").exists())
+
+    def test_workspace_wrapper_is_disabled_without_changing_caller_environment(self):
+        for inherited in ("/unrelated/workspace-wrapper", "", None):
+            with self.subTest(inherited=inherited):
+                if inherited is None:
+                    self.env.pop("RUSTC_WORKSPACE_WRAPPER", None)
+                else:
+                    self.env["RUSTC_WORKSPACE_WRAPPER"] = inherited
+                result = self.captured()
+                self.assertEqual(result["env"]["RUSTC_WORKSPACE_WRAPPER"], "")
+                self.assertEqual(result["env"]["RUSTC_WRAPPER"], str(self.wrapper))
+                self.assertEqual(self.env.get("RUSTC_WORKSPACE_WRAPPER"), inherited)
 
     def test_custom_config_comments_other_tables_and_source_are_preserved(self):
         original = ('# Keep this policy comment.\n[cache]\nignore_env = true\n'
@@ -337,6 +350,7 @@ class MakeRuntimeTests(unittest.TestCase):
             capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         captured = json.loads(result.stdout.splitlines()[-1])
+        self.assertEqual(captured["env"]["RUSTC_WORKSPACE_WRAPPER"], "")
         self.assertEqual(captured["argv"], ["build", "--locked", "-p", "diffz"])
         self.assertEqual(captured["settings"]["cache"]["runtime_dir"], str(self.checkout / "target/kache/runtime"))
         self.assertEqual(captured["env"]["KACHE_SOCKET_PATH"], str(self.checkout / "custom socket"))

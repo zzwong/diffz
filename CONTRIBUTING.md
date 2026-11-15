@@ -30,7 +30,10 @@ removes compiled app outputs; it does not empty Kache's artifact store.
 By default, each checkout keeps its own target directory, Kache runtime state
 and daemon socket. Make resolves the policy's relative runtime path before Cargo
 enters individual crate directories, so their wrapper events use the same
-checkout runtime.
+checkout runtime. Kache commands clear `RUSTC_WORKSPACE_WRAPPER` in their
+child environment so an inherited workspace wrapper is not nested inside Kache.
+The selected `KACHE_BIN` is the sole compiler wrapper; direct Cargo commands
+remain available for custom wrapper combinations.
 See [Kache bootstrap](docs/kache-bootstrap.md) for installation locking,
 explicit tool overrides, first-install behavior, and bounded removal.
 

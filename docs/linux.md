@@ -126,6 +126,23 @@ must include the native packages and Rust toolchain, rather than installing
 unversioned packages after its digest has been selected. Cache transfer cost,
 cross-host reuse and desktop rendering still need their own measurements.
 
+Compare two saved receipts without probing the current host or touching caches:
+
+```sh
+python3 scripts/debian-build-environment.py --compare before.json after.json
+```
+
+The JSON report validates complete schema-v1 container or schema-v2 hosted
+receipts, verifies both digests, and lists changed package versions,
+added/removed packages, compiler identities and environment fields separately.
+A package-list reorder is reported explicitly even when versions are unchanged.
+`same_identity` reports digest equality, not whether two environments are safely
+interchangeable. A valid comparison exits zero even when identities differ;
+missing, malformed or tampered receipts fail. Do not remove cache-key inputs just
+because the compiler section is unchanged: native headers and libraries can
+change independently. Receipt authenticity is not established by a matching
+self-contained digest.
+
 The identity and container lifecycle regression fixtures run without Rust,
 Docker or package installation:
 

@@ -335,7 +335,11 @@ artifacts for inspection, including both profile targets and any fresh-worktree
 copies, so provision enough disk for that state. The script does not modify
 profile defaults. Native compilers default to `/usr/bin/gcc` and `/usr/bin/g++` on
 Linux, and Apple's `/usr/bin/clang` and `/usr/bin/clang++` on macOS; `--cc` and
-`--cxx` select explicit alternatives.
+`--cxx` select explicit alternatives. Relative paths are interpreted from the
+directory where you invoke the runner. Bare executable names are looked up on
+the invoking environment's `PATH`. Preflight records an absolute path for each
+choice and uses that same path for builds in disposable worktrees, preserving
+symlinked compiler-launcher names.
 
 `--cargo-incremental on` remains the runner's default. It explicitly sets
 `CARGO_INCREMENTAL=1`, including when the calling shell set a different value.

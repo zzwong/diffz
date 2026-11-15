@@ -124,13 +124,99 @@ def identity_digest(identity):
     return hashlib.sha256(encoded).hexdigest()
 
 
+def read_receipt(path):
+    receipt = json.loads(path.read_text())
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("identity"), dict):
+        raise ValueError("receipt must contain an identity object")
+    identity = receipt["identity"]
+    if type(identity.get("schema_version")) is not int or identity["schema_version"] not in (1, 2):
+        raise ValueError("unsupported native identity schema")
+    if receipt.get("sha256") != identity_digest(identity):
+        raise ValueError("receipt digest does not match its identity")
+    if not isinstance(identity.get("packages"), list) or not isinstance(identity.get("tools"), dict):
+        raise ValueError("receipt must contain packages and tools")
+    required = {"schema_version", "architecture", "cc_target", "packages", "tools"}
+    required.add("base_image_id" if identity["schema_version"] == 1 else "runner_image")
+    if set(identity) != required:
+        raise ValueError("incomplete or unexpected native identity fields")
+    if not isinstance(identity["architecture"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", identity["architecture"]):
+        raise ValueError("invalid receipt architecture")
+    if not isinstance(identity["cc_target"], str) or not identity["cc_target"].strip():
+        raise ValueError("invalid receipt C compiler target")
+    if identity["schema_version"] == 1:
+        image = identity["base_image_id"]
+        if not isinstance(image, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+            raise ValueError("invalid receipt base image")
+    else:
+        image = identity["runner_image"]
+        if not isinstance(image, dict) or set(image) != {"ImageOS", "ImageVersion"}:
+            raise ValueError("invalid receipt runner image")
+        if any(not isinstance(v, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", v)
+               for v in image.values()) or not image["ImageOS"].startswith("ubuntu"):
+            raise ValueError("invalid receipt runner image")
+    if set(identity["tools"]) != set(TOOLS):
+        raise ValueError("incomplete or unexpected receipt tools")
+    for tool in identity["tools"].values():
+        if not isinstance(tool, dict) or set(tool) != {"sha256", "version"}:
+            raise ValueError("invalid receipt tool identity")
+        if (not isinstance(tool["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", tool["sha256"])
+                or not isinstance(tool["version"], str) or not tool["version"].strip()):
+            raise ValueError("invalid receipt tool identity")
+    if not identity["packages"]:
+        raise ValueError("receipt must contain installed packages")
+    packages = {}
+    for package in identity["packages"]:
+        if not isinstance(package, dict) or set(package) != {"name", "architecture", "version"} or not all(isinstance(package.get(k), str) and package[k]
+                                                     for k in ("name", "architecture", "version")):
+            raise ValueError("invalid receipt package")
+        key = (package["name"], package["architecture"])
+        if key in packages:
+            raise ValueError("duplicate receipt package")
+        packages[key] = package["version"]
+    return receipt, packages
+
+
+def compare_receipts(before_path, after_path):
+    before, old_packages = read_receipt(before_path)
+    after, new_packages = read_receipt(after_path)
+    old, new = before["identity"], after["identity"]
+    packages = [dict(name=name, architecture=arch,
+                     before=old_packages.get((name, arch)), after=new_packages.get((name, arch)))
+                for name, arch in sorted(old_packages.keys() | new_packages.keys())
+                if old_packages.get((name, arch)) != new_packages.get((name, arch))]
+    tools = [dict(name=name, before=old["tools"].get(name), after=new["tools"].get(name))
+             for name in sorted(old["tools"].keys() | new["tools"].keys())
+             if old["tools"].get(name) != new["tools"].get(name)]
+    fields = [dict(name=name, before=old.get(name), after=new.get(name))
+              for name in sorted(old.keys() | new.keys()) if name not in ("packages", "tools")
+              and old.get(name) != new.get(name)]
+    return dict(schema_version=1, before_sha256=before["sha256"], after_sha256=after["sha256"],
+                same_identity=before["sha256"] == after["sha256"],
+                packages=packages, tools=tools, fields=fields,
+                package_order_changed=(old_packages.keys() == new_packages.keys()
+                                       and list(old_packages) != list(new_packages)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--image-id", help="resolved ID of the base image used by this container")
     source.add_argument("--hosted-ubuntu", action="store_true", help="use the hosted runner's ImageOS and ImageVersion")
-    parser.add_argument("--output", type=Path, required=True, help="receipt outside the Cargo target/cache directories")
+    source.add_argument("--compare", nargs=2, type=Path, metavar=("BEFORE", "AFTER"),
+                        help="compare saved identity receipts without probing tools or changing caches")
+    parser.add_argument("--output", type=Path, help="receipt outside the Cargo target/cache directories")
     args = parser.parse_args()
+    if args.compare:
+        if args.output:
+            parser.error("--compare writes JSON to stdout; do not use --output")
+        try:
+            print(json.dumps(compare_receipts(*args.compare), indent=2, sort_keys=True))
+            return 0
+        except (OSError, ValueError) as error:
+            print(f"native identity comparison unavailable: {error}", file=sys.stderr)
+            return 1
+    if not args.output:
+        parser.error("--output is required when collecting a native identity")
     try:
         identity = hosted_identity(os.environ) if args.hosted_ubuntu else native_identity(args.image_id)
         digest = identity_digest(identity)

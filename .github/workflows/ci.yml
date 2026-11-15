@@ -177,8 +177,10 @@ jobs:
   # Release packaging is tag/manual-only, so it cannot guard dependency PRs.
   macos:
     runs-on: macos-15
-    # The cold feature-matrix tests plus debug/release builds exceed 30 minutes.
-    timeout-minutes: 45
+    # A cold cache (any Cargo.lock change) means the feature-matrix tests plus
+    # debug/release builds take over 45 minutes. rust-cache saves only after a job
+    # succeeds, so a timeout leaves the cache cold and every later run times out too.
+    timeout-minutes: 90
     env:
       CARGO_INCREMENTAL: 0
     steps:
