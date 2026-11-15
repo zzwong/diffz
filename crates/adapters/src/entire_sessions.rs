@@ -20,8 +20,8 @@ pub(crate) fn unavailable(overview: &mut Overview) {
 
 /// Show only a few identifying fields. In particular, do not retain `prompt`,
 /// `displayName` (which may fall back to the prompt), or arbitrary session data.
-pub(crate) fn apply(overview: &mut Overview, response: &Value) {
-    let Some(envelope) = Envelope::read(response) else {
+pub(crate) fn apply(overview: &mut Overview, response: &Value, repository: &str, placement: &str) {
+    let Some(envelope) = Envelope::read(response, repository, placement) else {
         unavailable(overview);
         return;
     };
@@ -77,7 +77,7 @@ struct Envelope<'a> {
     more: bool,
 }
 impl<'a> Envelope<'a> {
-    fn read(value: &'a Value) -> Option<Self> {
+    fn read(value: &'a Value, repository: &str, placement: &str) -> Option<Self> {
         let sessions = match value.get("sessions")? {
             Value::Array(rows) => rows.as_slice(),
             Value::Null => &[],
@@ -93,17 +93,19 @@ impl<'a> Envelope<'a> {
         let complete = value.get("history_complete")?.as_bool()?;
         let status = value.get("history_status")?.as_str()?;
         let repo = value.get("repo_full_name")?.as_str()?;
+        // Cell responses identify either the bare owner/repository pair or,
+        // before its display metadata resolves, the canonical placement ULID.
+        // Match before rendering any rows or claiming that a range is empty.
+        if repo.is_empty() || (!repo.eq_ignore_ascii_case(repository) && repo != placement) {
+            return None;
+        }
         let source = value.get("source")?.as_str()?;
         Some(Self {
             sessions,
             access,
             // Unknown history states and missing storage must never become an
             // exhaustive empty result, even if another flag claims completeness.
-            complete: complete
-                && status == "complete"
-                && branch
-                && !repo.is_empty()
-                && !source.is_empty(),
+            complete: complete && status == "complete" && branch && !source.is_empty(),
             more,
         })
     }
@@ -228,9 +230,12 @@ mod tests {
         })
     }
 
+    const REPOSITORY: &str = "acme/widget";
+    const PLACEMENT: &str = "01JBBBBBBBBBBBBBBBBBBBBBBB";
+
     fn mapped(value: Value) -> Overview {
         let mut overview = Overview::default();
-        apply(&mut overview, &value);
+        apply(&mut overview, &value, REPOSITORY, PLACEMENT);
         overview
     }
 
@@ -240,12 +245,60 @@ mod tests {
             notices: vec!["Local drafts stay local.".into()],
             ..Default::default()
         };
-        apply(&mut overview, &response(json!([session("session-1")])));
+        apply(
+            &mut overview,
+            &response(json!([session("session-1")])),
+            REPOSITORY,
+            PLACEMENT,
+        );
         assert_eq!(overview.notices[0], "Local drafts stay local.");
         assert!(overview.notices.iter().any(|n| n == "Entire session session-1 · Claude Code · example-model · active 2026-11-05T11:00:00Z"));
         let persisted = serde_json::to_string(&overview).unwrap();
         assert!(!persisted.contains("SENSITIVE"));
         assert!(!persisted.contains("incomplete"));
+    }
+
+    #[test]
+    fn repository_identity_accepts_canonical_name_or_exact_placement() {
+        for repository in [REPOSITORY, "ACME/Widget", PLACEMENT] {
+            let mut page = response(json!([session("session-1")]));
+            page["repo_full_name"] = json!(repository);
+            let got = mapped(page);
+            assert!(
+                got.notices
+                    .iter()
+                    .any(|n| n.starts_with("Entire session session-1")),
+                "{repository}"
+            );
+            assert!(!got.notices.iter().any(|n| n == UNAVAILABLE));
+        }
+    }
+
+    #[test]
+    fn contradictory_repository_identity_is_unavailable_before_rows_or_empty_claims() {
+        for repository in [
+            "other/widget",
+            "acme/other",
+            "",
+            "acme/widget/extra",
+            "et/acme/widget",
+            " acme/widget",
+            "acme/widget ",
+            "01JFFFFFFFFFFFFFFFFFFFFFFF",
+            "01jbbbbbbbbbbbbbbbbbbbbbbb",
+        ] {
+            for sessions in [json!([session("must-not-show")]), json!([])] {
+                let mut page = response(sessions);
+                page["repo_full_name"] = json!(repository);
+                let got = mapped(page);
+                assert_eq!(got.notices, [UNAVAILABLE], "{repository}");
+                assert!(
+                    !serde_json::to_string(&got)
+                        .unwrap()
+                        .contains("must-not-show")
+                );
+            }
+        }
     }
 
     #[test]

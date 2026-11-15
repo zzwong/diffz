@@ -23,6 +23,7 @@ pub use discussions::{
     DiscussionDetail, DiscussionList, DiscussionMessage, DiscussionParticipant, DiscussionReply,
     DiscussionSummary,
 };
+mod routing;
 mod selection;
 pub use selection::{ChangeChoice, TrailChoices};
 
@@ -509,7 +510,7 @@ impl EntireReader {
             login,
             None,
             &query("/api/v1/repos", &[("filter", &qualified)]),
-            cancel,
+            cancel.clone(),
         )?;
         let rows = directory["repos"]
             .as_array()
@@ -561,7 +562,7 @@ impl EntireReader {
                     .into(),
             );
         }
-        let origin = api_origin(text(placement, "/apiBaseUrl")?)?;
+        let origin = self.placement_origin(login, placement, cancel)?;
         let canonical = directory_name(row, &a.forge, &a.project, repo, expected_provider)
             .ok_or("invalid Entire repository name")?;
         if !repo_name(canonical) {
@@ -945,7 +946,12 @@ impl EntireReader {
                 &pins.head,
             );
             match sessions {
-                Ok(response) => crate::entire_sessions::apply(&mut snapshot.overview, &response),
+                Ok(response) => crate::entire_sessions::apply(
+                    &mut snapshot.overview,
+                    &response,
+                    &format!("{}/{}", a.project, repository.name),
+                    &repository.placement,
+                ),
                 Err(_) => crate::entire_sessions::unavailable(&mut snapshot.overview),
             }
             snapshot.overview.notices.push(READ_ONLY.into());
