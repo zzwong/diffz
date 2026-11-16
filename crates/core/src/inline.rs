@@ -2,6 +2,12 @@
 use std::ops::Range;
 const MAX_BYTES: usize = 4096;
 const MAX_TOKENS: usize = 512;
+// Bound each allocated u32 table to 16,000,000 bytes, including its sentinel row/column.
+const MAX_LCS_CELLS: usize = 4_000_000;
+fn lcs_cells(a: usize, b: usize) -> Option<usize> {
+    let cells = a.checked_add(1)?.checked_mul(b.checked_add(1)?)?;
+    (cells <= MAX_LCS_CELLS).then_some(cells)
+}
 fn tokens(s: &str, max_tokens: usize) -> Option<Vec<Range<usize>>> {
     let mut out: Vec<Range<usize>> = vec![];
     let mut chars = s.char_indices().peekable();
@@ -52,9 +58,9 @@ pub fn word_diff(old: &str, new: &str) -> (Ranges, Ranges) {
     fine(old, new, &a, &b).unwrap_or_default()
 }
 /// Prose word marks with caller-selected bounds. As opposed to [`word_diff`], this never returns
-/// empty marks for differing texts. It strips the shared prefix and suffix, then pairs tokens
-/// one by one while `max_tokens` holds, or falls back to sentences first and then
-/// refines the words within each sentence pair that changed.
+/// empty marks for differing texts within `max_bytes`, except trailing-whitespace-only edits.
+/// It strips the shared prefix and suffix, then pairs tokens while `max_tokens` and the
+/// matrix budget hold, or falls back to sentences and refines each changed sentence pair.
 pub fn word_diff_with(
     old: &str,
     new: &str,
@@ -87,7 +93,10 @@ pub fn word_diff_with(
     if a.is_empty() && b.is_empty() {
         return (vec![], vec![]);
     }
-    if a.len() <= max_tokens && b.len() <= max_tokens {
+    if a.len() <= max_tokens
+        && b.len() <= max_tokens
+        && (a.is_empty() || b.is_empty() || lcs_cells(a.len(), b.len()).is_some())
+    {
         return fine(old, new, a, b).unwrap_or_else(|| (span(a), span(b)));
     }
     coarse(old, new, a, b, max_tokens)
@@ -98,11 +107,12 @@ fn span(t: &[Range<usize>]) -> Ranges {
         .into_iter()
         .collect()
 }
-/// LCS at token level. `None` once either side has more than 70% changed.
+/// LCS at token level. `None` when the table exceeds its budget or either side has
+/// more than 70% changed.
 fn fine(old: &str, new: &str, a: &[Range<usize>], b: &[Range<usize>]) -> Option<(Ranges, Ranges)> {
     let ta: Vec<&str> = a.iter().map(|r| &old[r.clone()]).collect();
     let tb: Vec<&str> = b.iter().map(|r| &new[r.clone()]).collect();
-    let matches = lcs(&ta, &tb);
+    let matches = lcs(&ta, &tb)?;
     let (mut ra, mut rb) = (vec![], vec![]);
     let (mut i, mut j) = (0, 0);
     for (mi, mj) in matches.iter().copied().chain([(a.len(), b.len())]) {
@@ -131,12 +141,11 @@ fn coarse(
 ) -> (Ranges, Ranges) {
     let ca = sentences(old, a);
     let cb = sentences(new, b);
-    if ca.len() * cb.len() > 4_000_000 {
-        return (span(a), span(b));
-    }
     let ta: Vec<&str> = ca.iter().map(|c| old[c.bytes.clone()].trim()).collect();
     let tb: Vec<&str> = cb.iter().map(|c| new[c.bytes.clone()].trim()).collect();
-    let matches = lcs(&ta, &tb);
+    let Some(matches) = lcs(&ta, &tb) else {
+        return (span(a), span(b));
+    };
     let (mut ra, mut rb) = (vec![], vec![]);
     let (mut i, mut j) = (0, 0);
     for (mi, mj) in matches.iter().copied().chain([(ca.len(), cb.len())]) {
@@ -191,12 +200,13 @@ fn sentences(text: &str, toks: &[Range<usize>]) -> Vec<Sentence> {
     out
 }
 /// The matched index pairs, in order, from the longest common subsequence.
-fn lcs(a: &[&str], b: &[&str]) -> Vec<(usize, usize)> {
+fn lcs(a: &[&str], b: &[&str]) -> Option<Vec<(usize, usize)>> {
     if a.is_empty() || b.is_empty() {
-        return vec![];
+        return Some(vec![]);
     }
+    let cells = lcs_cells(a.len(), b.len())?;
     let cols = b.len() + 1;
-    let mut dp = vec![0u32; (a.len() + 1) * cols];
+    let mut dp = vec![0u32; cells];
     for i in (0..a.len()).rev() {
         for j in (0..b.len()).rev() {
             dp[i * cols + j] = if a[i] == b[j] {
@@ -219,12 +229,120 @@ fn lcs(a: &[&str], b: &[&str]) -> Vec<(usize, usize)> {
             j += 1;
         }
     }
-    out
+    Some(out)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::ops::Range;
+    #[test]
+    fn matrix_budget_counts_sentinel_cells_and_checks_overflow() {
+        assert_eq!(lcs_cells(1998, 1999), Some(3_998_000));
+        assert_eq!(lcs_cells(1999, 1999), Some(MAX_LCS_CELLS));
+        assert_eq!(lcs_cells(1999, 2000), None);
+        assert_eq!(lcs_cells(1, 1_999_999), Some(MAX_LCS_CELLS));
+        assert_eq!(lcs_cells(1, 2_000_000), None);
+        assert_eq!(lcs_cells(usize::MAX, 1), None);
+        assert_eq!(lcs_cells(1, usize::MAX), None);
+        assert_eq!(lcs_cells(usize::MAX / 2, 2), None);
+    }
+
+    #[test]
+    fn lcs_refuses_over_budget_but_empty_sides_need_no_matrix() {
+        let a = vec!["a"; 2000];
+        let b = vec!["b"; 2000];
+        assert_eq!(lcs(&a, &b), None);
+        assert_eq!(lcs(&[], &a), Some(vec![]));
+        assert_eq!(lcs(&b, &[]), Some(vec![]));
+        assert_eq!(lcs(&["a", "b"], &["b", "a"]), Some(vec![(1, 0)]));
+    }
+
+    #[test]
+    fn prose_matrix_regression_falls_back_to_visible_sentence_spans() {
+        let old = "a ".repeat(1500);
+        let new = "b ".repeat(1500);
+        let a = tokens(old.trim_end(), usize::MAX).unwrap();
+        let b = tokens(new.trim_end(), usize::MAX).unwrap();
+        assert_eq!((a.len(), b.len()), (2999, 2999));
+        assert_eq!(lcs_cells(a.len(), b.len()), None);
+        assert_eq!(fine(&old, &new, &a, &b), None);
+        assert_eq!(
+            word_diff_with(&old, &new, 64 * 1024, 3000),
+            (
+                std::iter::once(0..old.trim_end().len()).collect(),
+                std::iter::once(0..new.trim_end().len()).collect()
+            )
+        );
+    }
+
+    #[test]
+    fn over_budget_prose_preserves_common_middle_sentences() {
+        let middle = "Same words. ".repeat(600);
+        let old = format!("Before. {middle}Old ending.");
+        let new = format!("After. {middle}New ending.");
+        // The first tokens differ; only the common trailing " ending." is stripped.
+        let old_tokens = tokens(&old, usize::MAX).unwrap();
+        let new_tokens = tokens(&new, usize::MAX).unwrap();
+        assert_eq!(lcs_cells(old_tokens.len() - 3, new_tokens.len() - 3), None);
+        let (a, b) = word_diff_with(&old, &new, 64 * 1024, usize::MAX);
+        assert!(!a.is_empty() && !b.is_empty());
+        // A whole-paragraph fallback would cross these untouched middle sentences.
+        for (text, ranges) in [(&old, a), (&new, b)] {
+            for r in ranges {
+                assert!(!text[r].contains("Same words."));
+            }
+        }
+    }
+
+    #[test]
+    fn oversized_sentence_matrix_falls_back_without_losing_marks() {
+        let old = "a. ".repeat(2100);
+        let new = "b. ".repeat(2100);
+        let a = tokens(old.trim_end(), usize::MAX).unwrap();
+        let b = tokens(new.trim_end(), usize::MAX).unwrap();
+        assert_eq!(
+            lcs_cells(sentences(&old, &a).len(), sentences(&new, &b).len()),
+            None
+        );
+        assert_eq!(
+            word_diff_with(&old, &new, 64 * 1024, 3000),
+            // The shared final period is stripped before the coarse fallback.
+            (span(&a[..a.len() - 1]), span(&b[..b.len() - 1]))
+        );
+    }
+
+    #[test]
+    fn prose_insertions_and_deletions_keep_the_present_side() {
+        assert_eq!(
+            word_diff_with("", "日本語", 100, 0),
+            (vec![], std::iter::once(0..9).collect())
+        );
+        assert_eq!(
+            word_diff_with("naïve", "", 100, 0),
+            (std::iter::once(0..6).collect(), vec![])
+        );
+    }
+
+    #[test]
+    fn local_unicode_edit_stays_precise_after_shared_context_is_stripped() {
+        let prefix = "shared ".repeat(2000);
+        let suffix = " tail".repeat(2000);
+        let old = format!("{prefix}naïve{suffix}  ");
+        let new = format!("{prefix}日本語{suffix}\n");
+        let (a, b) = word_diff_with(&old, &new, 64 * 1024, 3000);
+        assert_eq!(a, vec![prefix.len()..prefix.len() + "naïve".len()]);
+        assert_eq!(b, vec![prefix.len()..prefix.len() + "日本語".len()]);
+        assert_eq!(&old[a[0].clone()], "naïve");
+        assert_eq!(&new[b[0].clone()], "日本語");
+    }
+
+    #[test]
+    fn prose_byte_limit_and_row_noise_suppression_are_unchanged() {
+        assert_eq!(word_diff_with("old", "new", 2, 3000), (vec![], vec![]));
+        assert_eq!(word_diff("old", "new"), (vec![], vec![]));
+        assert_eq!(word_diff_with("a  ", "a", 10, 3000), (vec![], vec![]));
+    }
+
     #[test]
     fn tokens_cover_without_gaps() {
         let s = "let naïve = 1;";
