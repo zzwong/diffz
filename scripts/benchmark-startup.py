@@ -4,7 +4,8 @@
 Run in an unlocked graphical session, without other builds or test launches:
   scripts/benchmark-startup.py --binary target/release/diffz --output target/perf -- --fixture F01
 
-Each run uses fresh SQLite state. Filesystem/driver caches are not cleared. Reports
+Each run keeps the desktop in the measured process with --foreground and uses
+fresh SQLite state. Filesystem/driver caches are not cleared. Reports
 include startup marks, settled process RSS/PSS and the kernel's peak RSS, not GPU
 memory or time until the compositor presents the frame on the physical display.
 Compare release binaries on the same host, viewport and input, alternating runs.
@@ -38,7 +39,7 @@ def main():
     results = []
     for run in range(options.runs):
         log_path = output / f"run-{run}.log"
-        command = [str(options.binary.resolve()), "--state-dir", str(output / f"state-{run}"), *args]
+        command = [str(options.binary.resolve()), "--foreground", "--state-dir", str(output / f"state-{run}"), *args]
         env = dict(os.environ, DIFFZ_TIMING="1")
         with log_path.open("w") as log:
             start_ms = time.time_ns() / 1_000_000
