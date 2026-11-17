@@ -279,7 +279,7 @@ pub fn mark_words(old: &str, new: &str, removed: [&str; 2], added: [&str; 2]) ->
     if old.trim_start().starts_with("```") || old.trim_start().starts_with("~~~") {
         return (old.to_owned(), new.to_owned());
     }
-    // A paragraph spans many source rows; 3,000 tokens holds the LCS table below 20 MB.
+    // A paragraph spans many source rows. Inline LCS separately caps each table at 16 MB.
     let (a, b) = crate::inline::word_diff_with(old, new, 64 * 1024, 3_000);
     (wrap(old, &a, removed), wrap(new, &b, added))
 }
