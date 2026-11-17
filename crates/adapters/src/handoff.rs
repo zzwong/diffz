@@ -246,6 +246,12 @@ fn exchange(
     };
     let ack: Ack =
         serde_json::from_str(&line).map_err(|_| "could not read handoff acknowledgement")?;
+    if ack.version != VERSION {
+        // A request was already written. This is terminal, not Unanswered:
+        // recovery could otherwise launch a replacement and replay the request.
+        // Do not surface an unrecognized peer's error payload.
+        return Err("unsupported handoff acknowledgement version".into());
+    }
     Ok(match ack.error {
         None => Outcome::Accepted,
         Some(error) => Outcome::Refused(error),
@@ -696,6 +702,47 @@ mod tests {
         assert!(accepted_at <= before_completion);
         assert!(read_line(&stream).is_ok());
         assert_eq!(server.join().unwrap(), accepted_at);
+    }
+
+    #[test]
+    fn acknowledgement_versions_are_terminal_and_consume_token() {
+        for version in [0, VERSION, VERSION + 1, u32::MAX] {
+            for error in [None, Some(TOKEN)] {
+                let ack = serde_json::to_string(&Ack {
+                    version,
+                    error: error.map(str::to_owned),
+                })
+                .unwrap();
+                let mut token = Some(TOKEN.into());
+                let mut written = Vec::new();
+                let result = exchange(
+                    &mut written,
+                    || Ok(ack),
+                    Some(&OpenRequest::Fixture("F01".into())),
+                    Writes::default(),
+                    &mut token,
+                );
+                assert!(token.is_none());
+                let decoded: Message = serde_json::from_slice(&written).unwrap();
+                assert_eq!(decoded.version, VERSION);
+                assert!(decoded.activation_token.as_deref() == Some(TOKEN));
+                assert_eq!(written.iter().filter(|&&b| b == b'\n').count(), 1);
+                if version == VERSION {
+                    assert_eq!(
+                        result.unwrap(),
+                        match error {
+                            None => Outcome::Accepted,
+                            Some(error) => Outcome::Refused(error.into()),
+                        }
+                    );
+                } else {
+                    // Returning Err prevents deliver's '?' from entering settle/relaunch.
+                    let diagnostic = result.unwrap_err().to_string();
+                    assert_eq!(diagnostic, "unsupported handoff acknowledgement version");
+                    assert!(!diagnostic.contains(TOKEN));
+                }
+            }
+        }
     }
 
     #[test]
