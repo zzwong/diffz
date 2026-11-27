@@ -29,7 +29,7 @@ SOURCE_BLOBS = {
     version: {
         "cranelift-assembler-x64": "7309fe57e0eae2b42f08877df0ff41c09f89f5ca",
         "cranelift-isle": "ceb30591af97166b2a897b6bc72ecb097df075ad",
-    } for version in ("0.135.8", "0.137.1")
+    } for version in ("0.135.10", "0.137.3")
 }
 GROUPS = (("pass", "run_pass"), ("fail", "run_fail"),
           ("link", "run_link"), ("run", "run_run"),
