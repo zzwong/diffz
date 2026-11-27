@@ -23,7 +23,7 @@ class GuardTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.name = "cranelift-isle"
-        self.version = "0.135.8"
+        self.version = "0.135.10"
         self.prefix = f"{self.name}-{self.version}"
 
     def archive(self, entries):
@@ -87,7 +87,7 @@ class GuardTests(unittest.TestCase):
         (self.root / "MODULE.bazel").write_text("ignored")
         (self.root / "rust-toolchain.toml").write_text('[toolchain]\nchannel = "1.99.0"\n')
         versions = m.locked_crates(self.lock())
-        for failing in (None, "0.137.1"):
+        for failing in (None, "0.137.3"):
             with self.subTest(failing=failing):
                 out = self.root / ("output-" + str(failing)); out.mkdir()
                 work = self.root / ("work-" + str(failing)); work.mkdir()
@@ -108,9 +108,9 @@ class GuardTests(unittest.TestCase):
                             experiment.verify(self.root, work)
                     else:
                         experiment.verify(self.root, work)
-                self.assertEqual(visited, ["0.135.8", "0.137.1"])
-                self.assertTrue(experiment.report["versions"]["0.135.8"]["completed"])
-                self.assertEqual(experiment.report["versions"]["0.137.1"]["completed"], failing is None)
+                self.assertEqual(visited, ["0.135.10", "0.137.3"])
+                self.assertTrue(experiment.report["versions"]["0.135.10"]["completed"])
+                self.assertEqual(experiment.report["versions"]["0.137.3"]["completed"], failing is None)
                 self.assertFalse(experiment.report["completed"])
 
     def test_unpack_verified_regular_source(self):

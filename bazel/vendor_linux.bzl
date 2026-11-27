@@ -38,7 +38,7 @@ def vendor_linux():
             '@@rules_rust++crate+crates__smallvec-1.15.2//:smallvec',
             '@@rules_rust++crate+crates__smol-2.0.2//:smol',
             '@@rules_rust++crate+crates__strum-0.28.0//:strum',
-            '@@rules_rust++crate+crates__url-2.5.8//:url',
+            '@@rules_rust++crate+crates__url-2.5.9//:url',
             '@@rules_rust++crate+crates__uuid-1.26.0//:uuid',
             '@@rules_rust++crate+crates__wayland-backend-0.3.17//:wayland_backend',
             '@@rules_rust++crate+crates__wayland-client-0.31.15//:wayland_client',
