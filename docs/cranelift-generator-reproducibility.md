@@ -1,8 +1,8 @@
 # Cranelift generator reproducibility
 
 The opt-in Bazel graph carries two narrow patches for both locked Cranelift
-0.135.8 and 0.137.1 releases. Tree-sitter uses Wasmtime 48.0.8 for Wasm
-grammars; component annotators use Wasmtime 50.0.1. Both releases have identical
+0.135.10 and 0.137.3 releases. Tree-sitter uses Wasmtime 48.0.10 for Wasm
+grammars; component annotators use Wasmtime 50.0.3. Both releases have identical
 upstream assembler and ISLE build scripts, and share the patches. Features,
 optimization and debug policy are unchanged. The verifier checks each resolved
 generator version and fails on unknown versions, incomplete sets, source drift,
@@ -76,8 +76,8 @@ Do not interpret Bazel's local `DIFFERENT_FILES` counter as remote-cache misses.
 When upgrading Cranelift, recheck the upstream fixes and remove these patches when
 unneeded. Until then, the explicit version and source checks require requalification.
 
-Upstream 48.0.8 source: [assembler](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/assembler-x64/build.rs),
-[helper](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/assembler-x64/src/main.rs),
-[ISLE](https://github.com/bytecodealliance/wasmtime/blob/v48.0.8/cranelift/isle/isle/build.rs).
-The identical 50.0.1 sources are [assembler](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/cranelift/assembler-x64/build.rs)
-and [ISLE](https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/cranelift/isle/isle/build.rs).
+Upstream 48.0.10 source: [assembler](https://github.com/bytecodealliance/wasmtime/blob/v48.0.10/cranelift/assembler-x64/build.rs),
+[helper](https://github.com/bytecodealliance/wasmtime/blob/v48.0.10/cranelift/assembler-x64/src/main.rs),
+[ISLE](https://github.com/bytecodealliance/wasmtime/blob/v48.0.10/cranelift/isle/isle/build.rs).
+The identical 50.0.3 sources are [assembler](https://github.com/bytecodealliance/wasmtime/blob/v50.0.3/cranelift/assembler-x64/build.rs)
+and [ISLE](https://github.com/bytecodealliance/wasmtime/blob/v50.0.3/cranelift/isle/isle/build.rs).
